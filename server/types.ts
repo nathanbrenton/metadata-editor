@@ -222,6 +222,21 @@ export type MetadataFieldDefinition = {
     };
   };
 
+  playerCompatibility?: Array<{
+    player:
+      | "vlc"
+      | "appleMusic"
+      | "windowsMediaPlayer"
+      | "windowsMediaPlayerLegacy";
+    containers: string[];
+    status:
+      | "verified"
+      | "partial"
+      | "not-visible";
+    displayLabel?: string;
+    note: string;
+  }>;
+
   displayPolicy:
     | "auto"
     | "always"

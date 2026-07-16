@@ -1660,3 +1660,46 @@ button,
   background: #9a713d;
   color: #fff6e9;
 }
+
+
+.metadata-compatibility-notes {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.metadata-compatibility-notes li {
+  border-left: 2px solid #4c5662;
+  padding-left: 0.5rem;
+  color: #98a4af;
+  font-size: 0.66rem;
+  line-height: 1.4;
+}
+
+.metadata-compatibility-notes li strong {
+  margin-right: 0.35rem;
+  color: #c4ccd4;
+}
+
+.metadata-compatibility-notes li > span {
+  color: #7f8b97;
+  text-transform: capitalize;
+}
+
+.metadata-compatibility-notes li p {
+  margin: 0.18rem 0 0;
+}
+
+.metadata-compatibility-notes .compatibility-verified {
+  border-left-color: #527a60;
+}
+
+.metadata-compatibility-notes .compatibility-partial {
+  border-left-color: #9a713d;
+}
+
+.metadata-compatibility-notes .compatibility-not-visible {
+  border-left-color: #6f6262;
+}

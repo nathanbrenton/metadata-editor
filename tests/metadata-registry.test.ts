@@ -49,29 +49,59 @@ test(
 );
 
 test(
-  "reserves player aliases for verified mappings",
+  "stores verified VLC and Apple Music aliases",
   () => {
-    const fieldsWithPlayerAliases =
-      metadataFieldRegistry.filter(
-        (field) =>
-          field.aliases?.players,
-      );
-
-    assert.ok(
-      fieldsWithPlayerAliases.length > 0,
+    const title = findMetadataField(
+      "track.title",
+    );
+    const releaseTitle = findMetadataField(
+      "release.title",
+    );
+    const releaseDate = findMetadataField(
+      "release.dates.release",
     );
 
-    for (const field of fieldsWithPlayerAliases) {
-      assert.deepEqual(
-        field.aliases?.players?.vlc,
-        [],
-      );
+    assert.ok(title);
+    assert.ok(releaseTitle);
+    assert.ok(releaseDate);
 
-      assert.deepEqual(
-        field.aliases?.players?.appleMusic,
-        [],
-      );
+    assert.deepEqual(
+      title.aliases?.players?.vlc,
+      ["Title"],
+    );
 
+    assert.deepEqual(
+      title.aliases?.players?.appleMusic,
+      ["title"],
+    );
+
+    assert.deepEqual(
+      releaseTitle.aliases?.players
+        ?.appleMusic,
+      ["album"],
+    );
+
+    assert.deepEqual(
+      releaseDate.aliases?.players?.vlc,
+      ["Date"],
+    );
+
+    assert.equal(
+      releaseDate.playerCompatibility
+        ?.some(
+          (result) =>
+            result.player === "vlc" &&
+            result.status === "partial",
+        ),
+      true,
+    );
+  },
+);
+
+test(
+  "keeps Windows player aliases unverified",
+  () => {
+    for (const field of metadataFieldRegistry) {
       assert.deepEqual(
         field.aliases?.players
           ?.windowsMediaPlayer ?? [],
@@ -84,5 +114,52 @@ test(
         [],
       );
     }
+  },
+);
+
+test(
+  "registers remaining verified player-facing fields",
+  () => {
+    const expectedPaths = [
+      "release.language",
+      "track.language",
+      "track.numbering.track_total",
+      "track.numbering.disc_number",
+      "track.numbering.disc_total",
+      "track.composers[].name",
+      "track.text.description",
+      "track.text.comment",
+      "release.rights.copyright",
+      "release.rights.publisher",
+      "track.audio.bpm",
+    ];
+
+    for (const metadataPath of expectedPaths) {
+      assert.ok(
+        findMetadataField(metadataPath),
+        `Missing registry field: ${metadataPath}`,
+      );
+    }
+
+    assert.deepEqual(
+      findMetadataField(
+        "track.composers[].name",
+      )?.aliases?.players?.appleMusic,
+      ["composer"],
+    );
+
+    assert.deepEqual(
+      findMetadataField(
+        "track.text.comment",
+      )?.aliases?.players?.vlc,
+      ["Description"],
+    );
+
+    assert.deepEqual(
+      findMetadataField(
+        "release.rights.publisher",
+      )?.aliases?.players?.vlc,
+      ["Publisher"],
+    );
   },
 );

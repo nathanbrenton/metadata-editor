@@ -163,6 +163,20 @@ type MetadataFieldDefinition = {
       windowsMediaPlayerLegacy?: string[];
     };
   };
+  playerCompatibility?: Array<{
+    player:
+      | "vlc"
+      | "appleMusic"
+      | "windowsMediaPlayer"
+      | "windowsMediaPlayerLegacy";
+    containers: string[];
+    status:
+      | "verified"
+      | "partial"
+      | "not-visible";
+    displayLabel?: string;
+    note: string;
+  }>;
   displayPolicy: string;
 };
 
@@ -1961,6 +1975,61 @@ function MetadataDocumentSection({
   );
 }
 
+const playerCompatibilityLabels = {
+  vlc: "VLC",
+  appleMusic: "Apple Music",
+  windowsMediaPlayer:
+    "Windows Media Player",
+  windowsMediaPlayerLegacy:
+    "Windows Media Player Legacy",
+} as const;
+
+function MetadataCompatibilityNotes({
+  field,
+}: {
+  field: MetadataFieldDefinition;
+}) {
+  if (
+    !field.playerCompatibility ||
+    field.playerCompatibility.length === 0
+  ) {
+    return null;
+  }
+
+  return (
+    <ul className="metadata-compatibility-notes">
+      {field.playerCompatibility.map(
+        (result) => (
+          <li
+            key={[
+              result.player,
+              result.containers.join("-"),
+              result.status,
+            ].join(":")}
+            className={`compatibility-${result.status}`}
+          >
+            <strong>
+              {
+                playerCompatibilityLabels[
+                  result.player
+                ]
+              }
+            </strong>
+
+            <span>
+              {result.status.replace("-", " ")}
+              {" · "}
+              {result.containers.join(", ")}
+            </span>
+
+            <p>{result.note}</p>
+          </li>
+        ),
+      )}
+    </ul>
+  );
+}
+
 function MetadataAliasList({
   field,
 }: {
@@ -1970,23 +2039,29 @@ function MetadataAliasList({
     buildMetadataAliasGroups(field);
 
   return (
-    <dl className="metadata-aliases">
-      {groups.map((group) => (
-        <div key={group.label}>
-          <dt>{group.label}</dt>
+    <>
+      <dl className="metadata-aliases">
+        {groups.map((group) => (
+          <div key={group.label}>
+            <dt>{group.label}</dt>
 
-          <dd
-            className={
-              group.verified === false
-                ? "alias-unverified"
-                : undefined
-            }
-          >
-            {group.values.join(", ")}
-          </dd>
-        </div>
-      ))}
-    </dl>
+            <dd
+              className={
+                group.verified === false
+                  ? "alias-unverified"
+                  : undefined
+              }
+            >
+              {group.values.join(", ")}
+            </dd>
+          </div>
+        ))}
+      </dl>
+
+      <MetadataCompatibilityNotes
+        field={field}
+      />
+    </>
   );
 }
 
