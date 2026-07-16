@@ -184,6 +184,18 @@ type MetadataRegistryResponse = {
   fields: MetadataFieldDefinition[];
 };
 
+
+type ApplicationView =
+  | "library"
+  | "compatibility";
+
+type CompatibilityStatusFilter =
+  | "all"
+  | "verified"
+  | "partial"
+  | "not-visible"
+  | "unverified";
+
 function formatMetadataValue(
   value: unknown,
 ): string {
@@ -231,6 +243,8 @@ export function App() {
     useState<string | null>(null);
   const [metadataRegistry, setMetadataRegistry] =
     useState<MetadataFieldDefinition[]>([]);
+  const [applicationView, setApplicationView] =
+    useState<ApplicationView>("library");
 
   const openReleaseDetail = useCallback(
     async (releaseId: string) => {
@@ -395,114 +409,645 @@ export function App() {
         />
       ) : (
         <>
-      <header className="page-header">
-        <div>
-          <p className="eyebrow">
-            Local administration
-          </p>
-          <h1>Metadata Editor</h1>
-          <p className="subtitle">
-            Read-only library discovery
-          </p>
-        </div>
+          <header className="page-header">
+            <div>
+              <p className="eyebrow">
+                Local administration
+              </p>
+              <h1>Metadata Editor</h1>
+              <p className="subtitle">
+                {applicationView === "library"
+                  ? "Library discovery and metadata editing"
+                  : "Verified player and container mappings"}
+              </p>
+            </div>
 
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => void refreshLibrary()}
-        >
-          {loading
-            ? "Scanning…"
-            : "Refresh library"}
-        </button>
-      </header>
-
-      {error && (
-        <p className="message error">
-          {error}
-        </p>
-      )}
-
-      {scan && summary && (
-        <>
-          <section className="summary-grid">
-            <SummaryCard
-              label="Releases"
-              value={summary.releaseCount}
-            />
-            <SummaryCard
-              label="Tracks"
-              value={summary.trackCount}
-            />
-            <SummaryCard
-              label="Missing TOMLs"
-              value={summary.missingMetadataCount}
-              warning={
-                summary.missingMetadataCount > 0
-              }
-            />
-            <SummaryCard
-              label="Audio masters"
-              value={summary.audioMasterCount}
-            />
-            <SummaryCard
-              label="Artwork masters"
-              value={summary.artworkMasterCount}
-            />
-          </section>
-
-          <p className="scan-time">
-            Last scan:{" "}
-            {new Date(
-              scan.scannedAt,
-            ).toLocaleString()}
-          </p>
-
-          {scan.warnings.length > 0 && (
-            <section className="warning-panel">
-              <h2>Scanner warnings</h2>
-
-              <ul>
-                {scan.warnings.map((warning) => (
-                  <li key={warning}>
-                    {warning}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          <section className="release-list">
-            {scan.releases.map((release) => (
-              <ReleaseCard
-                key={release.relativePath}
-                release={release}
-                onLibraryChanged={refreshLibrary}
-                onOpenMetadata={() =>
-                  void openReleaseDetail(
-                    release.id,
-                  )
+            {applicationView === "library" && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={() =>
+                  void refreshLibrary()
                 }
-              />
-            ))}
-          </section>
-        </>
-      )}
+              >
+                {loading
+                  ? "Scanning…"
+                  : "Refresh library"}
+              </button>
+            )}
+          </header>
 
-      {detailError && (
-        <p className="message error">
-          {detailError}
-        </p>
-      )}
+          <nav
+            className="application-tabs"
+            aria-label="Metadata editor sections"
+          >
+            <button
+              type="button"
+              className={
+                applicationView === "library"
+                  ? "active"
+                  : undefined
+              }
+              aria-pressed={
+                applicationView === "library"
+              }
+              onClick={() =>
+                setApplicationView("library")
+              }
+            >
+              Library
+            </button>
 
-      {detailLoading && (
-        <p className="message">
-          Loading metadata detail…
-        </p>
-      )}
+            <button
+              type="button"
+              className={
+                applicationView ===
+                "compatibility"
+                  ? "active"
+                  : undefined
+              }
+              aria-pressed={
+                applicationView ===
+                "compatibility"
+              }
+              onClick={() =>
+                setApplicationView(
+                  "compatibility",
+                )
+              }
+            >
+              Compatibility
+            </button>
+          </nav>
+
+          {applicationView ===
+          "compatibility" ? (
+            <MetadataCompatibilityView
+              fields={metadataRegistry}
+            />
+          ) : (
+            <>
+              {error && (
+                <p className="message error">
+                  {error}
+                </p>
+              )}
+
+              {scan && summary && (
+                <>
+                  <section className="summary-grid">
+                    <SummaryCard
+                      label="Releases"
+                      value={summary.releaseCount}
+                    />
+                    <SummaryCard
+                      label="Tracks"
+                      value={summary.trackCount}
+                    />
+                    <SummaryCard
+                      label="Missing TOMLs"
+                      value={
+                        summary.missingMetadataCount
+                      }
+                      warning={
+                        summary.missingMetadataCount >
+                        0
+                      }
+                    />
+                    <SummaryCard
+                      label="Audio masters"
+                      value={
+                        summary.audioMasterCount
+                      }
+                    />
+                    <SummaryCard
+                      label="Artwork masters"
+                      value={
+                        summary.artworkMasterCount
+                      }
+                    />
+                  </section>
+
+                  <p className="scan-time">
+                    Last scan:{" "}
+                    {new Date(
+                      scan.scannedAt,
+                    ).toLocaleString()}
+                  </p>
+
+                  {scan.warnings.length > 0 && (
+                    <section className="warning-panel">
+                      <h2>Scanner warnings</h2>
+
+                      <ul>
+                        {scan.warnings.map(
+                          (warning) => (
+                            <li key={warning}>
+                              {warning}
+                            </li>
+                          ),
+                        )}
+                      </ul>
+                    </section>
+                  )}
+
+                  <section className="release-list">
+                    {scan.releases.map(
+                      (release) => (
+                        <ReleaseCard
+                          key={
+                            release.relativePath
+                          }
+                          release={release}
+                          onLibraryChanged={
+                            refreshLibrary
+                          }
+                          onOpenMetadata={() =>
+                            void openReleaseDetail(
+                              release.id,
+                            )
+                          }
+                        />
+                      ),
+                    )}
+                  </section>
+                </>
+              )}
+
+              {detailError && (
+                <p className="message error">
+                  {detailError}
+                </p>
+              )}
+
+              {detailLoading && (
+                <p className="message">
+                  Loading metadata detail…
+                </p>
+              )}
+            </>
+          )}
         </>
       )}
     </main>
+  );
+}
+
+function getCompatibilityStatus(
+  field: MetadataFieldDefinition,
+): CompatibilityStatusFilter {
+  const results =
+    field.playerCompatibility ?? [];
+
+  if (
+    results.some(
+      (result) =>
+        result.status === "verified",
+    )
+  ) {
+    return "verified";
+  }
+
+  if (
+    results.some(
+      (result) =>
+        result.status === "partial",
+    )
+  ) {
+    return "partial";
+  }
+
+  if (
+    results.some(
+      (result) =>
+        result.status === "not-visible",
+    )
+  ) {
+    return "not-visible";
+  }
+
+  return "unverified";
+}
+
+function formatAliasValues(
+  values: string[] | undefined,
+): string {
+  return values && values.length > 0
+    ? values.join(", ")
+    : "—";
+}
+
+function MetadataCompatibilityView({
+  fields,
+}: {
+  fields: MetadataFieldDefinition[];
+}) {
+  const [searchText, setSearchText] =
+    useState("");
+  const [scopeFilter, setScopeFilter] =
+    useState("all");
+  const [playerFilter, setPlayerFilter] =
+    useState("all");
+  const [statusFilter, setStatusFilter] =
+    useState<CompatibilityStatusFilter>(
+      "all",
+    );
+
+  const scopes = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          fields.map((field) => field.scope),
+        ),
+      ).sort(),
+    [fields],
+  );
+
+  const visibleFields = useMemo(() => {
+    const normalizedSearch =
+      searchText.trim().toLowerCase();
+
+    return fields.filter((field) => {
+      if (
+        scopeFilter !== "all" &&
+        field.scope !== scopeFilter
+      ) {
+        return false;
+      }
+
+      const status =
+        getCompatibilityStatus(field);
+
+      if (
+        statusFilter !== "all" &&
+        status !== statusFilter
+      ) {
+        return false;
+      }
+
+      if (playerFilter !== "all") {
+        const playerAliases =
+          field.aliases?.players?.[
+            playerFilter as
+              | "vlc"
+              | "appleMusic"
+              | "windowsMediaPlayer"
+              | "windowsMediaPlayerLegacy"
+          ] ?? [];
+
+        const playerResults =
+          field.playerCompatibility?.filter(
+            (result) =>
+              result.player === playerFilter,
+          ) ?? [];
+
+        if (
+          playerAliases.length === 0 &&
+          playerResults.length === 0
+        ) {
+          return false;
+        }
+      }
+
+      if (!normalizedSearch) {
+        return true;
+      }
+
+      const searchable = [
+        field.label,
+        field.tomlPath,
+        field.description,
+        field.scope,
+        field.storageFileRole,
+        ...(field.aliases?.ffmpeg ?? []),
+        ...(field.aliases?.id3 ?? []),
+        ...(field.aliases?.vorbis ?? []),
+        ...(field.aliases?.mp4 ?? []),
+        ...(field.aliases?.riff ?? []),
+        ...(field.aliases?.players?.vlc ??
+          []),
+        ...(field.aliases?.players
+          ?.appleMusic ?? []),
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return searchable.includes(
+        normalizedSearch,
+      );
+    });
+  }, [
+    fields,
+    playerFilter,
+    scopeFilter,
+    searchText,
+    statusFilter,
+  ]);
+
+  return (
+    <section className="compatibility-view">
+      <header className="compatibility-header">
+        <div>
+          <p className="eyebrow">
+            Registry evidence
+          </p>
+          <h2>Metadata compatibility</h2>
+          <p>
+            Canonical TOML fields, container
+            tags, and player-visible mappings.
+            Windows mappings remain unverified.
+          </p>
+        </div>
+
+        <strong>
+          {visibleFields.length} of{" "}
+          {fields.length} fields
+        </strong>
+      </header>
+
+      <section
+        className="compatibility-filters"
+        aria-label="Compatibility filters"
+      >
+        <label>
+          <span>Search</span>
+          <input
+            type="search"
+            value={searchText}
+            placeholder="Field, path, tag, player label…"
+            onChange={(event) =>
+              setSearchText(
+                event.currentTarget.value,
+              )
+            }
+          />
+        </label>
+
+        <label>
+          <span>Scope</span>
+          <select
+            value={scopeFilter}
+            onChange={(event) =>
+              setScopeFilter(
+                event.currentTarget.value,
+              )
+            }
+          >
+            <option value="all">
+              All scopes
+            </option>
+            {scopes.map((scope) => (
+              <option
+                key={scope}
+                value={scope}
+              >
+                {scope}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          <span>Player</span>
+          <select
+            value={playerFilter}
+            onChange={(event) =>
+              setPlayerFilter(
+                event.currentTarget.value,
+              )
+            }
+          >
+            <option value="all">
+              All players
+            </option>
+            <option value="vlc">VLC</option>
+            <option value="appleMusic">
+              Apple Music
+            </option>
+            <option value="windowsMediaPlayer">
+              Windows Media Player
+            </option>
+            <option value="windowsMediaPlayerLegacy">
+              Windows Media Player Legacy
+            </option>
+          </select>
+        </label>
+
+        <label>
+          <span>Status</span>
+          <select
+            value={statusFilter}
+            onChange={(event) =>
+              setStatusFilter(
+                event.currentTarget
+                  .value as
+                  CompatibilityStatusFilter,
+              )
+            }
+          >
+            <option value="all">
+              All statuses
+            </option>
+            <option value="verified">
+              Verified
+            </option>
+            <option value="partial">
+              Partial
+            </option>
+            <option value="not-visible">
+              Not visible
+            </option>
+            <option value="unverified">
+              Unverified
+            </option>
+          </select>
+        </label>
+      </section>
+
+      {visibleFields.length === 0 ? (
+        <p className="empty-state">
+          No registry fields match these
+          filters.
+        </p>
+      ) : (
+        <div className="compatibility-table-wrap">
+          <table className="compatibility-table">
+            <thead>
+              <tr>
+                <th>Canonical field</th>
+                <th>FFmpeg</th>
+                <th>ID3</th>
+                <th>Vorbis</th>
+                <th>MP4</th>
+                <th>RIFF</th>
+                <th>VLC</th>
+                <th>Apple Music</th>
+                <th>
+                  Windows Media Player
+                </th>
+                <th>
+                  Windows Media Player Legacy
+                </th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {visibleFields.map((field) => {
+                const status =
+                  getCompatibilityStatus(
+                    field,
+                  );
+
+                return (
+                  <tr key={field.id}>
+                    <th scope="row">
+                      <div className="compatibility-field">
+                        <strong>
+                          {field.label}
+                        </strong>
+                        <code>
+                          {field.tomlPath}
+                        </code>
+                        <span>
+                          {field.scope}
+                          {" · "}
+                          {field.valueType}
+                        </span>
+                        <small>
+                          {field.description}
+                        </small>
+                        <span
+                          className={`compatibility-status status-${status}`}
+                        >
+                          {status.replace(
+                            "-",
+                            " ",
+                          )}
+                        </span>
+                      </div>
+                    </th>
+                    <td>
+                      {formatAliasValues(
+                        field.aliases?.ffmpeg,
+                      )}
+                    </td>
+                    <td>
+                      {formatAliasValues(
+                        field.aliases?.id3,
+                      )}
+                    </td>
+                    <td>
+                      {formatAliasValues(
+                        field.aliases?.vorbis,
+                      )}
+                    </td>
+                    <td>
+                      {formatAliasValues(
+                        field.aliases?.mp4,
+                      )}
+                    </td>
+                    <td>
+                      {formatAliasValues(
+                        field.aliases?.riff,
+                      )}
+                    </td>
+                    <td>
+                      <CompatibilityPlayerCell
+                        field={field}
+                        player="vlc"
+                      />
+                    </td>
+                    <td>
+                      <CompatibilityPlayerCell
+                        field={field}
+                        player="appleMusic"
+                      />
+                    </td>
+                    <td>
+                      <CompatibilityPlayerCell
+                        field={field}
+                        player="windowsMediaPlayer"
+                      />
+                    </td>
+                    <td>
+                      <CompatibilityPlayerCell
+                        field={field}
+                        player="windowsMediaPlayerLegacy"
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CompatibilityPlayerCell({
+  field,
+  player,
+}: {
+  field: MetadataFieldDefinition;
+  player:
+    | "vlc"
+    | "appleMusic"
+    | "windowsMediaPlayer"
+    | "windowsMediaPlayerLegacy";
+}) {
+  const aliases =
+    field.aliases?.players?.[player] ?? [];
+
+  const results =
+    field.playerCompatibility?.filter(
+      (result) =>
+        result.player === player,
+    ) ?? [];
+
+  if (
+    aliases.length === 0 &&
+    results.length === 0
+  ) {
+    return (
+      <span className="compatibility-unverified">
+        Not verified
+      </span>
+    );
+  }
+
+  return (
+    <div className="compatibility-player-cell">
+      <strong>
+        {aliases.length > 0
+          ? aliases.join(", ")
+          : "No visible label"}
+      </strong>
+
+      {results.map((result) => (
+        <details
+          key={[
+            result.player,
+            result.status,
+            result.containers.join("-"),
+          ].join(":")}
+        >
+          <summary>
+            <span
+              className={`compatibility-status status-${result.status}`}
+            >
+              {result.status.replace(
+                "-",
+                " ",
+              )}
+            </span>
+            {result.containers.join(", ")}
+          </summary>
+          <p>{result.note}</p>
+        </details>
+      ))}
+    </div>
   );
 }
 

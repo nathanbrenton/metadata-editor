@@ -1703,3 +1703,219 @@ button,
 .metadata-compatibility-notes .compatibility-not-visible {
   border-left-color: #6f6262;
 }
+
+
+.application-tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0 0 1rem;
+  border-bottom: 1px solid #343b43;
+}
+
+.application-tabs button {
+  margin: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0.3rem 0.3rem 0 0;
+  padding: 0.65rem 0.9rem;
+  background: transparent;
+  color: #8f9aa6;
+}
+
+.application-tabs button:hover {
+  background: #242a31;
+  color: #d7dde4;
+}
+
+.application-tabs button.active {
+  border-bottom-color: #8797a8;
+  background: #292f36;
+  color: #f0f2f4;
+}
+
+.compatibility-view {
+  display: grid;
+  gap: 1rem;
+}
+
+.compatibility-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.compatibility-header h2,
+.compatibility-header p {
+  margin: 0;
+}
+
+.compatibility-header > strong {
+  flex: 0 0 auto;
+  color: #aeb8c2;
+  font-size: 0.8rem;
+}
+
+.compatibility-filters {
+  display: grid;
+  grid-template-columns:
+    minmax(14rem, 2fr)
+    repeat(3, minmax(9rem, 1fr));
+  gap: 0.75rem;
+  border: 1px solid #343b43;
+  border-radius: 0.45rem;
+  padding: 0.8rem;
+  background: #252b31;
+}
+
+.compatibility-filters label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.compatibility-filters label > span {
+  color: #8f9aa6;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.compatibility-filters input,
+.compatibility-filters select {
+  width: 100%;
+  min-width: 0;
+}
+
+.compatibility-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #343b43;
+  border-radius: 0.45rem;
+}
+
+.compatibility-table {
+  width: 100%;
+  min-width: 96rem;
+  border-collapse: collapse;
+  background: #20252a;
+}
+
+.compatibility-table th,
+.compatibility-table td {
+  border-right: 1px solid #303840;
+  border-bottom: 1px solid #303840;
+  padding: 0.65rem;
+  vertical-align: top;
+  text-align: left;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.compatibility-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #292f36;
+  color: #cbd2d9;
+  white-space: nowrap;
+}
+
+.compatibility-table tbody > tr > th {
+  min-width: 18rem;
+  background: #252b31;
+}
+
+.compatibility-field {
+  display: grid;
+  gap: 0.22rem;
+}
+
+.compatibility-field strong {
+  color: #e2e6ea;
+}
+
+.compatibility-field code {
+  color: #9ba7b3;
+  overflow-wrap: anywhere;
+}
+
+.compatibility-field > span:not(.compatibility-status),
+.compatibility-field small {
+  color: #7f8b97;
+}
+
+.compatibility-player-cell {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 12rem;
+}
+
+.compatibility-player-cell > strong {
+  color: #d7dde4;
+}
+
+.compatibility-player-cell details {
+  border-left: 2px solid #48525d;
+  padding-left: 0.45rem;
+}
+
+.compatibility-player-cell summary {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: pointer;
+  color: #8996a3;
+}
+
+.compatibility-player-cell details p {
+  margin: 0.35rem 0 0;
+  color: #939faa;
+}
+
+.compatibility-status {
+  display: inline-flex;
+  width: max-content;
+  border-radius: 999px;
+  padding: 0.15rem 0.42rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.compatibility-status.status-verified {
+  background: #294334;
+  color: #a9d7b8;
+}
+
+.compatibility-status.status-partial {
+  background: #4a3924;
+  color: #e4c48e;
+}
+
+.compatibility-status.status-not-visible {
+  background: #433031;
+  color: #d3a4a6;
+}
+
+.compatibility-status.status-unverified,
+.compatibility-unverified {
+  color: #786f68;
+  font-style: italic;
+}
+
+@media (max-width: 64rem) {
+  .compatibility-filters {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
+
+  .compatibility-header {
+    align-items: start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 40rem) {
+  .compatibility-filters {
+    grid-template-columns: 1fr;
+  }
+}
