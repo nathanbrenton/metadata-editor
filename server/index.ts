@@ -3,6 +3,7 @@ import {
   type ServerResponse,
 } from "node:http";
 
+import { buildMetadataExportPlan } from "./export-plan.js";
 import { buildMetadataGenerationPlan } from "./generation-plan.js";
 import { readJsonBody } from "./http.js";
 import { buildMetadataPreview } from "./inference.js";
@@ -69,6 +70,115 @@ const server = createServer(
       request.url ?? "/",
       `http://${host}:${port}`,
     );
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/export/plan"
+    ) {
+      try {
+        const releaseId =
+          requestUrl.searchParams.get(
+            "release",
+          );
+        const container =
+          requestUrl.searchParams.get(
+            "container",
+          );
+        const trackId =
+          requestUrl.searchParams.get(
+            "track",
+          ) ?? undefined;
+        const outputDirectory =
+          requestUrl.searchParams.get(
+            "output",
+          ) ?? undefined;
+
+        if (!releaseId) {
+          sendJson(response, 400, {
+            error:
+              "Missing release query parameter",
+          });
+          return;
+        }
+
+        const allowedContainers =
+          new Set([
+            "mp3",
+            "flac",
+            "m4a",
+            "ogg-vorbis",
+            "opus",
+            "wav",
+          ]);
+
+        if (
+          !container ||
+          !allowedContainers.has(container)
+        ) {
+          sendJson(response, 400, {
+            error:
+              "container must be mp3, flac, m4a, ogg-vorbis, opus, or wav",
+          });
+          return;
+        }
+
+        const mediaRoot =
+          await resolveMediaRoot();
+        const release =
+          await scanReleaseById(
+            mediaRoot,
+            releaseId,
+          );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        const detail =
+          await readReleaseMetadataDetail(
+            mediaRoot,
+            release,
+          );
+
+        sendJson(
+          response,
+          200,
+          buildMetadataExportPlan(
+            release,
+            detail,
+            metadataFieldRegistry,
+            {
+              container:
+                container as
+                  | "mp3"
+                  | "flac"
+                  | "m4a"
+                  | "ogg-vorbis"
+                  | "opus"
+                  | "wav",
+              scope: trackId
+                ? "track"
+                : "all",
+              trackId,
+              outputDirectory,
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown export-plan error",
+        });
+      }
+
+      return;
+    }
 
     if (
       request.method === "GET" &&

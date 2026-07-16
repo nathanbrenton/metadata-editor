@@ -174,6 +174,65 @@ export type ScalarMetadataSaveReceipt = {
   savedAt: string;
 };
 
+export type ExportContainer =
+  | "mp3"
+  | "flac"
+  | "m4a"
+  | "ogg-vorbis"
+  | "opus"
+  | "wav";
+
+export type ExportPlanScope =
+  | "all"
+  | "track";
+
+export type ExportPlanFieldStatus =
+  | "write"
+  | "normalized"
+  | "omitted"
+  | "unverified";
+
+export type ExportPlanField = {
+  canonicalPath: string;
+  label: string;
+  targetTags: string[];
+  value:
+    | string
+    | number
+    | boolean
+    | string[];
+  status: ExportPlanFieldStatus;
+  note: string;
+  sourceDocument: string;
+};
+
+export type ExportPlanItem = {
+  trackId: string;
+  sourceAudioRelativePath?: string;
+  destinationRelativePath?: string;
+  action: "ready" | "blocked";
+  fields: ExportPlanField[];
+  warnings: string[];
+};
+
+export type MetadataExportPlan = {
+  releaseId: string;
+  container: ExportContainer;
+  scope: ExportPlanScope;
+  trackId?: string;
+  outputDirectory: string;
+  items: ExportPlanItem[];
+  summary: {
+    readyCount: number;
+    blockedCount: number;
+    writeCount: number;
+    normalizedCount: number;
+    omittedCount: number;
+    unverifiedCount: number;
+  };
+  warnings: string[];
+};
+
 export type MetadataValueType =
   | "string"
   | "integer"

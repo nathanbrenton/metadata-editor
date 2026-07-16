@@ -2002,3 +2002,171 @@ button,
     justify-content: flex-start;
   }
 }
+
+
+.export-plan-preview {
+  display: grid;
+  gap: 1rem;
+  margin: 1rem 0;
+  border: 1px solid #343c45;
+  border-radius: 0.45rem;
+  padding: 1rem;
+  background: #20262c;
+}
+
+.export-plan-preview > header h3 {
+  margin: 0.15rem 0 0;
+}
+
+.export-plan-preview > header p {
+  max-width: 56rem;
+  margin: 0.35rem 0 0;
+  color: #98a4af;
+}
+
+.export-plan-controls {
+  display: grid;
+  grid-template-columns:
+    repeat(3, minmax(0, 1fr))
+    max-content;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.export-plan-controls label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.export-plan-controls label span {
+  color: #9da8b3;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.export-plan-controls input,
+.export-plan-controls select {
+  min-width: 0;
+}
+
+.export-plan-results {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.export-plan-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.export-plan-summary span {
+  border-radius: 999px;
+  padding: 0.3rem 0.55rem;
+  background: #303841;
+  color: #c2cbd4;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.export-plan-item {
+  display: grid;
+  gap: 0.65rem;
+  border: 1px solid #37404a;
+  border-left: 3px solid #527a60;
+  border-radius: 0.35rem;
+  padding: 0.8rem;
+  background: #242a30;
+}
+
+.export-plan-item.action-blocked {
+  border-left-color: #956b3c;
+}
+
+.export-plan-item > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.export-plan-item > header div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.export-plan-item > header > span {
+  color: #9ca8b3;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.export-plan-field-table-wrap {
+  overflow-x: auto;
+}
+
+.export-plan-field-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+
+.export-plan-field-table th,
+.export-plan-field-table td {
+  border-top: 1px solid #343d46;
+  padding: 0.55rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.export-plan-field-table th[scope="row"] {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 13rem;
+}
+
+.export-plan-field-status {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.export-plan-field-status.status-write {
+  background: #304c3a;
+  color: #bde0c5;
+}
+
+.export-plan-field-status.status-normalized {
+  background: #5b472d;
+  color: #f0d1a2;
+}
+
+.export-plan-field-status.status-omitted {
+  background: #513536;
+  color: #e6b6b8;
+}
+
+.export-plan-field-status.status-unverified {
+  background: #3a4149;
+  color: #b6c0ca;
+}
+
+@media (max-width: 64rem) {
+  .export-plan-controls {
+    grid-template-columns:
+      repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 40rem) {
+  .export-plan-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .export-plan-item > header {
+    display: grid;
+  }
+}

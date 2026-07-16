@@ -217,6 +217,52 @@ type ExportGuidance = {
   note: string;
 };
 
+
+type ExportPlanField = {
+  canonicalPath: string;
+  label: string;
+  targetTags: string[];
+  value:
+    | string
+    | number
+    | boolean
+    | string[];
+  status:
+    | "write"
+    | "normalized"
+    | "omitted"
+    | "unverified";
+  note: string;
+  sourceDocument: string;
+};
+
+type ExportPlanItem = {
+  trackId: string;
+  sourceAudioRelativePath?: string;
+  destinationRelativePath?: string;
+  action: "ready" | "blocked";
+  fields: ExportPlanField[];
+  warnings: string[];
+};
+
+type MetadataExportPlan = {
+  releaseId: string;
+  container: ExportContainer;
+  scope: "all" | "track";
+  trackId?: string;
+  outputDirectory: string;
+  items: ExportPlanItem[];
+  summary: {
+    readyCount: number;
+    blockedCount: number;
+    writeCount: number;
+    normalizedCount: number;
+    omittedCount: number;
+    unverifiedCount: number;
+  };
+  warnings: string[];
+};
+
 const exportContainerLabels:
   Record<ExportContainer, string> = {
     mp3: "MP3 / ID3",
@@ -525,6 +571,9 @@ export function App() {
           "compatibility" ? (
             <MetadataCompatibilityView
               fields={metadataRegistry}
+              releases={
+                scan?.releases ?? []
+              }
             />
           ) : (
             <>
@@ -799,8 +848,10 @@ function getExportGuidance(
 
 function MetadataCompatibilityView({
   fields,
+  releases,
 }: {
   fields: MetadataFieldDefinition[];
+  releases: ReleaseScanResult[];
 }) {
   const [searchText, setSearchText] =
     useState("");
@@ -816,6 +867,123 @@ function MetadataCompatibilityView({
     exportContainer,
     setExportContainer,
   ] = useState<ExportContainer>("mp3");
+
+
+  const [
+    selectedExportReleaseId,
+    setSelectedExportReleaseId,
+  ] = useState("");
+  const [
+    selectedExportTrackId,
+    setSelectedExportTrackId,
+  ] = useState("all");
+  const [
+    exportOutputDirectory,
+    setExportOutputDirectory,
+  ] = useState(
+    "deployment-output/metadata-export",
+  );
+  const [exportPlan, setExportPlan] =
+    useState<MetadataExportPlan | null>(
+      null,
+    );
+  const [
+    exportPlanLoading,
+    setExportPlanLoading,
+  ] = useState(false);
+  const [
+    exportPlanError,
+    setExportPlanError,
+  ] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (
+      selectedExportReleaseId &&
+      releases.some(
+        (release) =>
+          release.id ===
+          selectedExportReleaseId,
+      )
+    ) {
+      return;
+    }
+
+    setSelectedExportReleaseId(
+      releases[0]?.id ?? "",
+    );
+    setSelectedExportTrackId("all");
+    setExportPlan(null);
+  }, [
+    releases,
+    selectedExportReleaseId,
+  ]);
+
+  const selectedExportRelease =
+    releases.find(
+      (release) =>
+        release.id ===
+        selectedExportReleaseId,
+    );
+
+  const requestExportPlan = async () => {
+    if (!selectedExportReleaseId) {
+      setExportPlanError(
+        "Select a release before previewing an export plan.",
+      );
+      return;
+    }
+
+    setExportPlanLoading(true);
+    setExportPlanError(null);
+
+    try {
+      const query = new URLSearchParams({
+        release: selectedExportReleaseId,
+        container: exportContainer,
+        output: exportOutputDirectory,
+      });
+
+      if (
+        selectedExportTrackId !== "all"
+      ) {
+        query.set(
+          "track",
+          selectedExportTrackId,
+        );
+      }
+
+      const response = await fetch(
+        `/api/export/plan?${query.toString()}`,
+      );
+
+      const result =
+        (await response.json()) as
+          | MetadataExportPlan
+          | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error ??
+                `Export-plan request failed: HTTP ${response.status}`
+            : `Export-plan request failed: HTTP ${response.status}`,
+        );
+      }
+
+      setExportPlan(
+        result as MetadataExportPlan,
+      );
+    } catch (error) {
+      setExportPlan(null);
+      setExportPlanError(
+        error instanceof Error
+          ? error.message
+          : "Unknown export-plan error",
+      );
+    } finally {
+      setExportPlanLoading(false);
+    }
+  };
 
   const scopes = useMemo(
     () =>
@@ -1139,6 +1307,281 @@ function MetadataCompatibilityView({
               )
             : "No verified core fields for this target."}
         </p>
+      </section>
+
+      <section className="export-plan-preview">
+        <header>
+          <div>
+            <p className="eyebrow">
+              Read-only preview
+            </p>
+            <h3>Metadata export plan</h3>
+            <p>
+              Preview source files,
+              destination names, and
+              canonical-field-to-tag mappings.
+              This endpoint performs no
+              filesystem writes.
+            </p>
+          </div>
+        </header>
+
+        <div className="export-plan-controls">
+          <label>
+            <span>Release</span>
+            <select
+              value={
+                selectedExportReleaseId
+              }
+              onChange={(event) => {
+                setSelectedExportReleaseId(
+                  event.currentTarget.value,
+                );
+                setSelectedExportTrackId(
+                  "all",
+                );
+                setExportPlan(null);
+              }}
+            >
+              {releases.length === 0 && (
+                <option value="">
+                  No releases available
+                </option>
+              )}
+
+              {releases.map((release) => (
+                <option
+                  key={release.id}
+                  value={release.id}
+                >
+                  {release.id}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Track scope</span>
+            <select
+              value={selectedExportTrackId}
+              disabled={
+                !selectedExportRelease
+              }
+              onChange={(event) => {
+                setSelectedExportTrackId(
+                  event.currentTarget.value,
+                );
+                setExportPlan(null);
+              }}
+            >
+              <option value="all">
+                All tracks
+              </option>
+
+              {selectedExportRelease
+                ?.tracks.map((track) => (
+                  <option
+                    key={track.id}
+                    value={track.id}
+                  >
+                    {track.id}
+                  </option>
+                ))}
+            </select>
+          </label>
+
+          <label>
+            <span>
+              Relative output directory
+            </span>
+            <input
+              type="text"
+              value={
+                exportOutputDirectory
+              }
+              onChange={(event) => {
+                setExportOutputDirectory(
+                  event.currentTarget.value,
+                );
+                setExportPlan(null);
+              }}
+            />
+          </label>
+
+          <button
+            type="button"
+            disabled={
+              exportPlanLoading ||
+              !selectedExportReleaseId
+            }
+            onClick={() =>
+              void requestExportPlan()
+            }
+          >
+            {exportPlanLoading
+              ? "Building preview…"
+              : "Preview export plan"}
+          </button>
+        </div>
+
+        {exportPlanError && (
+          <p className="message error">
+            {exportPlanError}
+          </p>
+        )}
+
+        {exportPlan && (
+          <div className="export-plan-results">
+            <div className="export-plan-summary">
+              <span>
+                {exportPlan.summary.readyCount}
+                {" ready"}
+              </span>
+              <span>
+                {
+                  exportPlan.summary
+                    .blockedCount
+                }
+                {" blocked"}
+              </span>
+              <span>
+                {
+                  exportPlan.summary
+                    .writeCount
+                }
+                {" direct writes"}
+              </span>
+              <span>
+                {
+                  exportPlan.summary
+                    .normalizedCount
+                }
+                {" normalized"}
+              </span>
+              <span>
+                {
+                  exportPlan.summary
+                    .omittedCount
+                }
+                {" omitted"}
+              </span>
+            </div>
+
+            {exportPlan.items.map(
+              (item) => (
+                <article
+                  key={item.trackId}
+                  className={`export-plan-item action-${item.action}`}
+                >
+                  <header>
+                    <div>
+                      <strong>
+                        {item.trackId}
+                      </strong>
+                      <code>
+                        {item.sourceAudioRelativePath ??
+                          "No source audio"}
+                      </code>
+                    </div>
+
+                    <span>
+                      {item.action}
+                    </span>
+                  </header>
+
+                  {item.destinationRelativePath && (
+                    <p>
+                      <strong>
+                        Destination:
+                      </strong>{" "}
+                      <code>
+                        {
+                          item.destinationRelativePath
+                        }
+                      </code>
+                    </p>
+                  )}
+
+                  {item.warnings.map(
+                    (warning) => (
+                      <p
+                        key={warning}
+                        className="message warning"
+                      >
+                        {warning}
+                      </p>
+                    ),
+                  )}
+
+                  <div className="export-plan-field-table-wrap">
+                    <table className="export-plan-field-table">
+                      <thead>
+                        <tr>
+                          <th>
+                            Canonical field
+                          </th>
+                          <th>Target tag</th>
+                          <th>Value</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {item.fields.map(
+                          (field) => (
+                            <tr
+                              key={[
+                                field.canonicalPath,
+                                field.sourceDocument,
+                              ].join(":")}
+                            >
+                              <th scope="row">
+                                <strong>
+                                  {field.label}
+                                </strong>
+                                <code>
+                                  {
+                                    field.canonicalPath
+                                  }
+                                </code>
+                              </th>
+                              <td>
+                                <code>
+                                  {field.targetTags
+                                    .length > 0
+                                    ? field.targetTags.join(
+                                        ", ",
+                                      )
+                                    : "—"}
+                                </code>
+                              </td>
+                              <td>
+                                {formatMetadataValue(
+                                  field.value,
+                                )}
+                              </td>
+                              <td>
+                                <span
+                                  className={`export-plan-field-status status-${field.status}`}
+                                  title={
+                                    field.note
+                                  }
+                                >
+                                  {
+                                    field.status
+                                  }
+                                </span>
+                              </td>
+                            </tr>
+                          ),
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </article>
+              ),
+            )}
+          </div>
+        )}
       </section>
 
       {visibleFields.length === 0 ? (
@@ -1651,7 +2094,12 @@ function ReleaseCard({
           <p className="card-type">
             Release
           </p>
-          <h2>{release.id}</h2>
+          <h2>
+            {formatReleaseDisplayName(
+              release.id,
+            )}
+          </h2>
+
           <code>{release.relativePath}</code>
         </div>
 
@@ -2326,7 +2774,12 @@ function ReleaseMetadataDetailView({
           <p className="eyebrow">
             Release metadata
           </p>
-          <h1>{detail.releaseId}</h1>
+          <h1>
+            {formatReleaseDisplayName(
+              detail.releaseId,
+            )}
+          </h1>
+
           <code>
             {detail.releaseRelativePath}
           </code>
@@ -2654,6 +3107,72 @@ function ReleaseMetadataDetailView({
       )}
     </section>
   );
+}
+
+function formatReleaseDisplayName(
+  releaseId: string,
+): string {
+  const match = releaseId.match(
+    /^(\d{4})-(\d{2})-(\d{2})_(.+)$/,
+  );
+
+  if (!match) {
+    return releaseId;
+  }
+
+  const [
+    ,
+    year,
+    month,
+    day,
+    slug,
+  ] = match;
+
+  const date = new Date(
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+    ),
+  );
+
+  /*
+   * Reject invalid calendar dates rather than allowing JavaScript
+   * to roll them into a different month.
+   */
+  if (
+    date.getUTCFullYear() !== Number(year) ||
+    date.getUTCMonth() !==
+      Number(month) - 1 ||
+    date.getUTCDate() !== Number(day)
+  ) {
+    return releaseId;
+  }
+
+  const title = slug
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(
+      /\b\w/g,
+      (character) =>
+        character.toUpperCase(),
+    );
+
+  const formattedDate =
+    new Intl.DateTimeFormat(
+      "en-US",
+      {
+        month: "long",
+        day: "2-digit",
+        year: "numeric",
+        timeZone: "UTC",
+      },
+    )
+      .format(date)
+      .replace(",", "");
+
+  return `${title} (${formattedDate})`;
 }
 
 function formatMetadataDocumentLabel(
