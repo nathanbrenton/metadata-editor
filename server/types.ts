@@ -1,0 +1,147 @@
+export type MetadataFileStatus = {
+  filename: string;
+  relativePath: string;
+  exists: boolean;
+};
+
+export type DiscoveredAsset = {
+  filename: string;
+  relativePath: string;
+  extension: string;
+};
+
+export type TrackScanResult = {
+  id: string;
+  relativePath: string;
+  metadataFiles: MetadataFileStatus[];
+  audioMasters: DiscoveredAsset[];
+  artworkMasters: DiscoveredAsset[];
+};
+
+export type ReleaseScanResult = {
+  id: string;
+  relativePath: string;
+  metadataFiles: MetadataFileStatus[];
+  artworkMasters: DiscoveredAsset[];
+  tracks: TrackScanResult[];
+};
+
+export type LibraryScanResult = {
+  mediaRoot: string;
+  releasesRoot: string;
+  scannedAt: string;
+  releases: ReleaseScanResult[];
+  warnings: string[];
+};
+
+export type InferredValue<T> = {
+  value: T;
+  source: string;
+};
+
+export type ReleaseMetadataPreview = {
+  releaseId: InferredValue<string>;
+  releaseDate?: InferredValue<string>;
+  releaseTitle?: InferredValue<string>;
+  artworkMasterPath?: InferredValue<string>;
+};
+
+export type TrackMetadataPreview = {
+  trackId: InferredValue<string>;
+  artistName?: InferredValue<string>;
+  trackNumber?: InferredValue<number>;
+  trackTitle?: InferredValue<string>;
+  audioMasterPath?: InferredValue<string>;
+  artworkMasterPath?: InferredValue<string>;
+};
+
+export type LibraryMetadataPreview = {
+  release: ReleaseMetadataPreview;
+  tracks: TrackMetadataPreview[];
+  warnings: string[];
+};
+
+export type MetadataStorageRole =
+  | "release"
+  | "release-settings"
+  | "release-production-notes"
+  | "track"
+  | "track-credits"
+  | "track-production-notes";
+
+export type GeneratedMetadataDocument = {
+  storageRole: MetadataStorageRole;
+  filename: string;
+  relativePath: string;
+  content: string;
+  validated: boolean;
+};
+
+export type GeneratedMetadataPreview = {
+  releaseId: string;
+  documents: GeneratedMetadataDocument[];
+  warnings: string[];
+};
+
+export type GenerationPlanAction =
+  | "create"
+  | "blocked";
+
+export type MetadataGenerationScope =
+  | "all"
+  | "release"
+  | "track";
+
+export type GenerationPlanItem = {
+  storageRole: MetadataStorageRole;
+  filename: string;
+  relativePath: string;
+  action: GenerationPlanAction;
+  reason: string;
+  content: string;
+  validated: boolean;
+};
+
+export type MetadataGenerationPlan = {
+  releaseId: string;
+  scope: MetadataGenerationScope;
+  trackId?: string;
+  items: GenerationPlanItem[];
+  summary: {
+    createCount: number;
+    blockedCount: number;
+  };
+  warnings: string[];
+};
+
+export type MetadataCreationReceipt = {
+  relativePath: string;
+  bytes: number;
+  sha256: string;
+  verifiedAt: string;
+};
+
+export type MetadataCreationResult = {
+  releaseId: string;
+  created: string[];
+  blocked: string[];
+  receipts: MetadataCreationReceipt[];
+  warnings: string[];
+};
+
+export type ParsedMetadataDocument = {
+  filename: string;
+  relativePath: string;
+  scope: "release" | "track";
+  trackId?: string;
+  content: string;
+  parsed: Record<string, unknown>;
+};
+
+export type ReleaseMetadataDetail = {
+  releaseId: string;
+  releaseRelativePath: string;
+  documents: ParsedMetadataDocument[];
+  missingFiles: MetadataFileStatus[];
+  warnings: string[];
+};
