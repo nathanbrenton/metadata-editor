@@ -8,7 +8,9 @@
     "dev:server": "tsx watch server/index.ts",
     "test": "node --import tsx --test tests/*.test.ts",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "tags:generate": "scripts/player-tag-tests/generate-fixtures.sh",
+    "tags:summarize": "scripts/player-tag-tests/summarize-probes.py"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.4",

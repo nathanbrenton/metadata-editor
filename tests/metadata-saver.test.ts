@@ -558,3 +558,138 @@ test(
     );
   },
 );
+
+test(
+  "updates indexed array-of-table fields and preserves sibling records",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const releaseDirectory =
+          path.join(
+            mediaRoot,
+            "releases",
+            "test-release",
+          );
+
+        await mkdir(releaseDirectory, {
+          recursive: true,
+        });
+
+        const relativePath =
+          "releases/test-release/track-credits.toml";
+
+        const originalContent = [
+          "[[track.performers]]",
+          'name = "First Artist"',
+          'role = "guitar"',
+          'sort_name = "Artist, First"',
+          "",
+          "[[track.performers]]",
+          'name = "Second Artist"',
+          'role = "vocals"',
+          'sort_name = "Artist, Second"',
+          "",
+        ].join("\n");
+
+        await writeFile(
+          path.join(
+            mediaRoot,
+            relativePath,
+          ),
+          originalContent,
+        );
+
+        const receipt =
+          await saveScalarMetadataChanges(
+            mediaRoot,
+            buildRelease(relativePath),
+            relativePath,
+            sha256(originalContent),
+            [
+              {
+                path:
+                  "track.performers[0].role",
+                value: "electric guitar",
+              },
+              {
+                path:
+                  "track.performers[1].name",
+                value: "Updated Artist",
+              },
+            ],
+          );
+
+        const savedContent =
+          await readFile(
+            path.join(
+              mediaRoot,
+              relativePath,
+            ),
+            "utf8",
+          );
+
+        const parsed = parse(
+          savedContent,
+        ) as {
+          track: {
+            performers: Array<{
+              name: string;
+              role: string;
+              sort_name: string;
+            }>;
+          };
+        };
+
+        assert.equal(
+          parsed.track.performers[0].role,
+          "electric guitar",
+        );
+
+        assert.equal(
+          parsed.track.performers[1].name,
+          "Updated Artist",
+        );
+
+        /*
+         * Unchanged fields and sibling records must survive the
+         * parse/update/stringify cycle.
+         */
+        assert.equal(
+          parsed.track.performers[0].name,
+          "First Artist",
+        );
+
+        assert.equal(
+          parsed.track.performers[0].sort_name,
+          "Artist, First",
+        );
+
+        assert.equal(
+          parsed.track.performers[1].role,
+          "vocals",
+        );
+
+        assert.equal(
+          parsed.track.performers[1].sort_name,
+          "Artist, Second",
+        );
+
+        assert.match(
+          receipt.backupRelativePath,
+          /\.metadata-backups\/track-credits\.toml\..+\.bak$/,
+        );
+
+        assert.equal(
+          await readFile(
+            path.join(
+              mediaRoot,
+              receipt.backupRelativePath,
+            ),
+            "utf8",
+          ),
+          originalContent,
+        );
+      },
+    );
+  },
+);

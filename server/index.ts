@@ -6,6 +6,7 @@ import {
 import { buildMetadataGenerationPlan } from "./generation-plan.js";
 import { readJsonBody } from "./http.js";
 import { buildMetadataPreview } from "./inference.js";
+import { metadataFieldRegistry } from "./metadata-registry.js";
 import { resolveMediaRoot } from "./media-root.js";
 import { readReleaseMetadataDetail } from "./metadata-reader.js";
 import { saveScalarMetadataChanges } from "./metadata-saver.js";
@@ -68,6 +69,17 @@ const server = createServer(
       request.url ?? "/",
       `http://${host}:${port}`,
     );
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/metadata/registry"
+    ) {
+      sendJson(response, 200, {
+        fields: metadataFieldRegistry,
+      });
+      return;
+    }
 
     if (
       request.method === "GET" &&
@@ -281,7 +293,7 @@ const server = createServer(
               )
             ) {
               throw new Error(
-                "Each change requires a scalar path and value",
+                "Each change requires an editable metadata path and value",
               );
             }
 
@@ -322,7 +334,7 @@ const server = createServer(
           error:
             error instanceof Error
               ? error.message
-              : "Unknown scalar metadata save error",
+              : "Unknown metadata save error",
         });
       }
 

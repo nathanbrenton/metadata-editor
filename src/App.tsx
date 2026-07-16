@@ -5,6 +5,11 @@ import {
   useState,
 } from "react";
 
+import {
+  flattenMetadata,
+  type FlattenedMetadataRow,
+} from "./metadata-flattener.js";
+
 type MetadataFileStatus = {
   filename: string;
   relativePath: string;
@@ -130,68 +135,40 @@ type ReleaseMetadataDetail = {
   warnings: string[];
 };
 
-type FlattenedMetadataRow = {
-  path: string;
-  value: unknown;
+
+
+
+type MetadataFieldDefinition = {
+  id: string;
+  canonicalName: string;
+  label: string;
+  description: string;
+  scope: string;
+  storageFileRole: string;
+  tomlPath: string;
   valueType: string;
+  required: boolean;
+  repeatable: boolean;
+  inherited: boolean;
+  aliases?: {
+    ffmpeg?: string[];
+    id3?: string[];
+    vorbis?: string[];
+    mp4?: string[];
+    riff?: string[];
+    players?: {
+      vlc?: string[];
+      appleMusic?: string[];
+      windowsMediaPlayer?: string[];
+      windowsMediaPlayerLegacy?: string[];
+    };
+  };
+  displayPolicy: string;
 };
 
-function describeValueType(
-  value: unknown,
-): string {
-  if (Array.isArray(value)) {
-    return "array";
-  }
-
-  if (value === null) {
-    return "null";
-  }
-
-  return typeof value;
-}
-
-function flattenMetadata(
-  value: unknown,
-  parentPath = "",
-): FlattenedMetadataRow[] {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value)
-  ) {
-    const entries = Object.entries(
-      value as Record<string, unknown>,
-    );
-
-    if (entries.length === 0) {
-      return [
-        {
-          path: parentPath,
-          value: {},
-          valueType: "object",
-        },
-      ];
-    }
-
-    return entries.flatMap(
-      ([key, childValue]) =>
-        flattenMetadata(
-          childValue,
-          parentPath
-            ? `${parentPath}.${key}`
-            : key,
-        ),
-    );
-  }
-
-  return [
-    {
-      path: parentPath,
-      value,
-      valueType: describeValueType(value),
-    },
-  ];
-}
+type MetadataRegistryResponse = {
+  fields: MetadataFieldDefinition[];
+};
 
 function formatMetadataValue(
   value: unknown,
@@ -238,6 +215,8 @@ export function App() {
   ] = useState(false);
   const [detailError, setDetailError] =
     useState<string | null>(null);
+  const [metadataRegistry, setMetadataRegistry] =
+    useState<MetadataFieldDefinition[]>([]);
 
   const openReleaseDetail = useCallback(
     async (releaseId: string) => {
@@ -318,6 +297,31 @@ export function App() {
     void refreshLibrary();
   }, [refreshLibrary]);
 
+
+  useEffect(() => {
+    const loadRegistry = async () => {
+      try {
+        const response = await fetch(
+          "/api/metadata/registry",
+        );
+
+        if (!response.ok) {
+          return;
+        }
+
+        const result =
+          (await response.json()) as
+            MetadataRegistryResponse;
+
+        setMetadataRegistry(result.fields);
+      } catch {
+        // The metadata table remains usable without registry annotations.
+      }
+    };
+
+    void loadRegistry();
+  }, []);
+
   const summary = useMemo(() => {
     if (!scan) {
       return null;
@@ -365,6 +369,7 @@ export function App() {
       {selectedReleaseDetail ? (
         <ReleaseMetadataDetailView
           detail={selectedReleaseDetail}
+          metadataRegistry={metadataRegistry}
           onBack={() =>
             setSelectedReleaseDetail(null)
           }
@@ -1094,12 +1099,129 @@ function parseDraftNumber(
     : null;
 }
 
+function normalizeMetadataRegistryPath(
+  metadataPath: string,
+): string {
+  return metadataPath.replace(
+    /\[\d+\]/g,
+    "[]",
+  );
+}
+
+function findRegisteredMetadataField(
+  metadataRegistry: MetadataFieldDefinition[],
+  metadataPath: string,
+): MetadataFieldDefinition | undefined {
+  const normalizedPath =
+    normalizeMetadataRegistryPath(
+      metadataPath,
+    );
+
+  return metadataRegistry.find(
+    (field) =>
+      field.tomlPath === metadataPath ||
+      field.tomlPath === normalizedPath,
+  );
+}
+
+type MetadataAliasGroup = {
+  label: string;
+  values: string[];
+  verified?: boolean;
+};
+
+function buildMetadataAliasGroups(
+  field: MetadataFieldDefinition,
+): MetadataAliasGroup[] {
+  const groups: MetadataAliasGroup[] = [];
+
+  const addGroup = (
+    label: string,
+    values: string[] | undefined,
+    verified = true,
+  ) => {
+    if (values && values.length > 0) {
+      groups.push({
+        label,
+        values,
+        verified,
+      });
+    }
+  };
+
+  addGroup("FFmpeg", field.aliases?.ffmpeg);
+  addGroup("ID3", field.aliases?.id3);
+  addGroup("Vorbis", field.aliases?.vorbis);
+  addGroup("MP4", field.aliases?.mp4);
+  addGroup("RIFF", field.aliases?.riff);
+
+  groups.push({
+    label: "VLC",
+    values:
+      field.aliases?.players?.vlc?.length
+        ? field.aliases.players.vlc
+        : ["Not yet verified"],
+    verified:
+      Boolean(
+        field.aliases?.players?.vlc?.length,
+      ),
+  });
+
+  groups.push({
+    label: "Apple Music",
+    values:
+      field.aliases?.players?.appleMusic
+        ?.length
+        ? field.aliases.players.appleMusic
+        : ["Not yet verified"],
+    verified:
+      Boolean(
+        field.aliases?.players?.appleMusic
+          ?.length,
+      ),
+  });
+
+  groups.push({
+    label: "Windows Media Player",
+    values:
+      field.aliases?.players
+        ?.windowsMediaPlayer?.length
+        ? field.aliases.players
+            .windowsMediaPlayer
+        : ["Not yet verified"],
+    verified:
+      Boolean(
+        field.aliases?.players
+          ?.windowsMediaPlayer?.length,
+      ),
+  });
+
+  groups.push({
+    label: "Windows Media Player Legacy",
+    values:
+      field.aliases?.players
+        ?.windowsMediaPlayerLegacy?.length
+        ? field.aliases.players
+            .windowsMediaPlayerLegacy
+        : ["Not yet verified"],
+    verified:
+      Boolean(
+        field.aliases?.players
+          ?.windowsMediaPlayerLegacy?.length,
+      ),
+  });
+
+  return groups;
+}
+
 function ReleaseMetadataDetailView({
   detail,
+  metadataRegistry,
   onBack,
   onRefresh,
 }: {
   detail: ReleaseMetadataDetail;
+  metadataRegistry: MetadataFieldDefinition[];
   onBack: () => void;
   onRefresh: () => void;
 }) {
@@ -1117,10 +1239,49 @@ function ReleaseMetadataDetailView({
     useState<ScalarMetadataSaveReceipt | null>(
       null,
     );
+  const [
+    activeDocumentGroup,
+    setActiveDocumentGroup,
+  ] = useState("release");
+
+  useEffect(() => {
+    setActiveDocumentGroup("release");
+  }, [detail.releaseId]);
 
   const dirtyCount = Object.keys(
     draft,
   ).length;
+
+
+  useEffect(() => {
+    if (dirtyCount === 0) {
+      return;
+    }
+
+    const handleBeforeUnload = (
+      event: BeforeUnloadEvent,
+    ) => {
+      event.preventDefault();
+
+      /*
+       * Browsers ignore custom text but require returnValue for
+       * compatibility with the native unsaved-changes prompt.
+       */
+      event.returnValue = "";
+    };
+
+    window.addEventListener(
+      "beforeunload",
+      handleBeforeUnload,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "beforeunload",
+        handleBeforeUnload,
+      );
+    };
+  }, [dirtyCount]);
 
   const updateDraftValue = (
     document: ParsedMetadataDocument,
@@ -1163,7 +1324,7 @@ function ReleaseMetadataDetailView({
 
     if (changes.length === 0) {
       setSaveError(
-        "This document has no scalar changes to save.",
+        "This document has no metadata changes to save.",
       );
       return;
     }
@@ -1228,7 +1389,7 @@ function ReleaseMetadataDetailView({
       setSaveError(
         error instanceof Error
           ? error.message
-          : "Unknown scalar metadata save error",
+          : "Unknown metadata save error",
       );
     } finally {
       setSavingDocumentPath(null);
@@ -1257,6 +1418,29 @@ function ReleaseMetadataDetailView({
     ),
   );
 
+  const countDraftChangesForDocuments = (
+    documents: ParsedMetadataDocument[],
+  ): number => {
+    const documentPrefixes =
+      documents.map(
+        (document) =>
+          `${document.relativePath}::`,
+      );
+
+    return Object.keys(draft).filter(
+      (draftKey) =>
+        documentPrefixes.some(
+          (prefix) =>
+            draftKey.startsWith(prefix),
+        ),
+    ).length;
+  };
+
+  const releaseDraftCount =
+    countDraftChangesForDocuments(
+      releaseDocuments,
+    );
+
   return (
     <section className="metadata-detail">
       <header className="metadata-detail-header">
@@ -1273,7 +1457,18 @@ function ReleaseMetadataDetailView({
         <div className="detail-actions">
           <button
             type="button"
-            onClick={onBack}
+            onClick={() => {
+              if (
+                dirtyCount > 0 &&
+                !window.confirm(
+                  "Discard all unsaved metadata changes and return to the library?",
+                )
+              ) {
+                return;
+              }
+
+              onBack();
+            }}
           >
             Back to library
           </button>
@@ -1293,7 +1488,7 @@ function ReleaseMetadataDetailView({
           >
             {editMode
               ? "Stop editing"
-              : "Edit scalar values"}
+              : "Edit metadata values"}
           </button>
 
           <button
@@ -1306,7 +1501,18 @@ function ReleaseMetadataDetailView({
         </div>
       </header>
 
-      <section className="draft-status">
+      <section
+        className={[
+          "draft-status",
+          dirtyCount > 0
+            ? "has-unsaved-changes"
+            : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+        role="status"
+        aria-live="polite"
+      >
         <span>
           Mode:{" "}
           <strong>
@@ -1321,8 +1527,19 @@ function ReleaseMetadataDetailView({
           <strong>{dirtyCount}</strong>
         </span>
 
-        <span className="badge preview">
-          No filesystem writes
+        <span
+          className={[
+            "badge",
+            dirtyCount > 0
+              ? "unsaved"
+              : "preview",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {dirtyCount > 0
+            ? "Unsaved browser changes"
+            : "No filesystem writes"}
         </span>
       </section>
 
@@ -1375,31 +1592,115 @@ function ReleaseMetadataDetailView({
         </section>
       )}
 
-      <MetadataDocumentSection
-        title="Release documents"
-        documents={releaseDocuments}
-        editMode={editMode}
-        draft={draft}
-        onDraftValueChange={updateDraftValue}
-        savingDocumentPath={
-          savingDocumentPath
-        }
-        onSaveDocument={(document) =>
-          void saveDocumentDraft(document)
-        }
-      />
+      <nav
+        className="metadata-document-tabs"
+        aria-label="Metadata document groups"
+      >
+        <button
+          type="button"
+          className={
+            activeDocumentGroup === "release"
+              ? "active"
+              : undefined
+          }
+          aria-pressed={
+            activeDocumentGroup === "release"
+          }
+          onClick={() =>
+            setActiveDocumentGroup("release")
+          }
+        >
+          <span>Release</span>
 
-      {trackIds.map((trackId) => (
-        <MetadataDocumentSection
-          key={trackId}
-          title={`Track: ${trackId}`}
-          documents={detail.documents.filter(
-            (document) =>
-              document.trackId === trackId,
+          <small
+            className="document-count"
+            title={`${releaseDocuments.length} metadata documents`}
+          >
+            {releaseDocuments.length}
+          </small>
+
+          {releaseDraftCount > 0 && (
+            <small
+              className="unsaved-count"
+              title={`${releaseDraftCount} unsaved changes`}
+            >
+              {releaseDraftCount}
+            </small>
           )}
+        </button>
+
+        {trackIds.map((trackId, index) => {
+          const trackDocuments =
+            detail.documents.filter(
+              (document) =>
+                document.trackId === trackId,
+            );
+
+          const trackDocumentCount =
+            trackDocuments.length;
+
+          const trackDraftCount =
+            countDraftChangesForDocuments(
+              trackDocuments,
+            );
+
+          return (
+            <button
+              key={trackId}
+              type="button"
+              className={
+                activeDocumentGroup ===
+                trackId
+                  ? "active"
+                  : undefined
+              }
+              aria-pressed={
+                activeDocumentGroup ===
+                trackId
+              }
+              title={trackId}
+              onClick={() =>
+                setActiveDocumentGroup(
+                  trackId,
+                )
+              }
+            >
+              <span>
+                Track {index + 1}
+              </span>
+              <small
+                className="document-count"
+                title={`${trackDocumentCount} metadata documents`}
+              >
+                {trackDocumentCount}
+              </small>
+
+              {trackDraftCount > 0 && (
+                <small
+                  className="unsaved-count"
+                  title={`${trackDraftCount} unsaved changes`}
+                >
+                  {trackDraftCount}
+                </small>
+              )}
+            </button>
+          );
+        })}
+      </nav>
+
+      {activeDocumentGroup ===
+        "release" && (
+        <MetadataDocumentSection
+          title="Release documents"
+          documents={releaseDocuments}
           editMode={editMode}
           draft={draft}
-          onDraftValueChange={updateDraftValue}
+          onDraftValueChange={
+            updateDraftValue
+          }
+          metadataRegistry={
+            metadataRegistry
+          }
           savingDocumentPath={
             savingDocumentPath
           }
@@ -1407,7 +1708,34 @@ function ReleaseMetadataDetailView({
             void saveDocumentDraft(document)
           }
         />
-      ))}
+      )}
+
+      {trackIds.map((trackId) =>
+        activeDocumentGroup === trackId ? (
+          <MetadataDocumentSection
+            key={trackId}
+            title={`Track: ${trackId}`}
+            documents={detail.documents.filter(
+              (document) =>
+                document.trackId === trackId,
+            )}
+            editMode={editMode}
+            draft={draft}
+            onDraftValueChange={
+              updateDraftValue
+            }
+            metadataRegistry={
+              metadataRegistry
+            }
+            savingDocumentPath={
+              savingDocumentPath
+            }
+            onSaveDocument={(document) =>
+              void saveDocumentDraft(document)
+            }
+          />
+        ) : null,
+      )}
 
       {detail.missingFiles.length > 0 && (
         <section className="metadata-detail-section">
@@ -1450,12 +1778,33 @@ function ReleaseMetadataDetailView({
   );
 }
 
+function formatMetadataDocumentLabel(
+  filename: string,
+): string {
+  const labels: Record<string, string> = {
+    "release.toml": "Release",
+    "release-settings.toml": "Settings",
+    "release-production-notes.toml":
+      "Production Notes",
+    "track.toml": "Track",
+    "track-credits.toml": "Credits",
+    "track-production-notes.toml":
+      "Production Notes",
+  };
+
+  return (
+    labels[filename] ??
+    filename.replace(/\.toml$/i, "")
+  );
+}
+
 function MetadataDocumentSection({
   title,
   documents,
   editMode,
   draft,
   onDraftValueChange,
+  metadataRegistry,
   savingDocumentPath,
   onSaveDocument,
 }: {
@@ -1469,11 +1818,44 @@ function MetadataDocumentSection({
     originalValue: EditableMetadataValue,
     nextValue: EditableMetadataValue,
   ) => void;
+  metadataRegistry: MetadataFieldDefinition[];
   savingDocumentPath: string | null;
   onSaveDocument: (
     document: ParsedMetadataDocument,
   ) => void;
 }) {
+  const [
+    activeDocumentPath,
+    setActiveDocumentPath,
+  ] = useState(
+    documents[0]?.relativePath ?? "",
+  );
+
+  useEffect(() => {
+    const selectedStillExists =
+      documents.some(
+        (document) =>
+          document.relativePath ===
+          activeDocumentPath,
+      );
+
+    if (!selectedStillExists) {
+      setActiveDocumentPath(
+        documents[0]?.relativePath ?? "",
+      );
+    }
+  }, [
+    activeDocumentPath,
+    documents,
+  ]);
+
+  const activeDocument =
+    documents.find(
+      (document) =>
+        document.relativePath ===
+        activeDocumentPath,
+    ) ?? documents[0];
+
   return (
     <section className="metadata-detail-section">
       <header>
@@ -1488,26 +1870,123 @@ function MetadataDocumentSection({
           No metadata documents available.
         </p>
       ) : (
-        documents.map((document) => (
-          <MetadataDocumentTable
-            key={document.relativePath}
-            document={document}
-            editMode={editMode}
-            draft={draft}
-            onDraftValueChange={
-              onDraftValueChange
-            }
-            saving={
-              savingDocumentPath ===
-              document.relativePath
-            }
-            onSave={() =>
-              onSaveDocument(document)
-            }
-          />
-        ))
+        <>
+          <nav
+            className="metadata-file-tabs"
+            aria-label={`${title} metadata files`}
+          >
+            {documents.map((document) => {
+              const documentDraftPrefix =
+                `${document.relativePath}::`;
+
+              const modifiedCount =
+                Object.keys(draft).filter(
+                  (key) =>
+                    key.startsWith(
+                      documentDraftPrefix,
+                    ),
+                ).length;
+
+              return (
+                <button
+                  key={document.relativePath}
+                  type="button"
+                  className={
+                    activeDocument
+                      ?.relativePath ===
+                    document.relativePath
+                      ? "active"
+                      : undefined
+                  }
+                  aria-pressed={
+                    activeDocument
+                      ?.relativePath ===
+                    document.relativePath
+                  }
+                  title={document.filename}
+                  onClick={() =>
+                    setActiveDocumentPath(
+                      document.relativePath,
+                    )
+                  }
+                >
+                  <span>
+                    {
+                      formatMetadataDocumentLabel(
+                        document.filename,
+                      )
+                    }
+                  </span>
+
+                  {modifiedCount > 0 && (
+                    <small
+                      title={`${modifiedCount} unsaved changes`}
+                    >
+                      {modifiedCount}
+                    </small>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+
+          {activeDocument && (
+            <MetadataDocumentTable
+              key={
+                activeDocument.relativePath
+              }
+              document={activeDocument}
+              editMode={editMode}
+              draft={draft}
+              onDraftValueChange={
+                onDraftValueChange
+              }
+              metadataRegistry={
+                metadataRegistry
+              }
+              saving={
+                savingDocumentPath ===
+                activeDocument.relativePath
+              }
+              onSave={() =>
+                onSaveDocument(
+                  activeDocument,
+                )
+              }
+            />
+          )}
+        </>
       )}
     </section>
+  );
+}
+
+function MetadataAliasList({
+  field,
+}: {
+  field: MetadataFieldDefinition;
+}) {
+  const groups =
+    buildMetadataAliasGroups(field);
+
+  return (
+    <dl className="metadata-aliases">
+      {groups.map((group) => (
+        <div key={group.label}>
+          <dt>{group.label}</dt>
+
+          <dd
+            className={
+              group.verified === false
+                ? "alias-unverified"
+                : undefined
+            }
+          >
+            {group.values.join(", ")}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -1702,6 +2181,7 @@ function MetadataDocumentTable({
   editMode,
   draft,
   onDraftValueChange,
+  metadataRegistry,
   saving,
   onSave,
 }: {
@@ -1714,6 +2194,7 @@ function MetadataDocumentTable({
     originalValue: EditableMetadataValue,
     nextValue: EditableMetadataValue,
   ) => void;
+  metadataRegistry: MetadataFieldDefinition[];
   saving: boolean;
   onSave: () => void;
 }) {
@@ -1770,14 +2251,49 @@ function MetadataDocumentTable({
       </div>
 
       <div className="metadata-table-body">
-        {rows.map((row) => (
-          <div
-            key={row.path}
-            className="metadata-table-row"
-          >
-            <code>{row.path}</code>
+        {rows.map((row) => {
+          const fieldDefinition =
+            findRegisteredMetadataField(
+              metadataRegistry,
+              row.path,
+            );
 
-            <MetadataValueCell
+          return (
+            <div
+              key={row.path}
+              className={[
+                "metadata-table-row",
+                /\[\d+\]/.test(row.path)
+                  ? "indexed-metadata-row"
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              <div className="metadata-key">
+                <strong>
+                  {fieldDefinition?.label ??
+                    row.path}
+                </strong>
+
+                <code>{row.path}</code>
+
+                {fieldDefinition && (
+                  <>
+                    <small>
+                      {
+                        fieldDefinition.description
+                      }
+                    </small>
+
+                    <MetadataAliasList
+                      field={fieldDefinition}
+                    />
+                  </>
+                )}
+              </div>
+
+              <MetadataValueCell
               document={document}
               row={row}
               editMode={editMode}
@@ -1787,11 +2303,12 @@ function MetadataDocumentTable({
               }
             />
 
-            <span className="metadata-type">
-              {row.valueType}
-            </span>
-          </div>
-        ))}
+              <span className="metadata-type">
+                {row.valueType}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
       <details className="raw-toml">

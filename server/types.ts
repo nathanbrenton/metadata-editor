@@ -173,3 +173,58 @@ export type ScalarMetadataSaveReceipt = {
   bytes: number;
   savedAt: string;
 };
+
+export type MetadataValueType =
+  | "string"
+  | "integer"
+  | "number"
+  | "boolean"
+  | "date"
+  | "string-array"
+  | "object"
+  | "object-array";
+
+export type MetadataFieldDefinition = {
+  id: string;
+  canonicalName: string;
+  label: string;
+  description: string;
+
+  scope:
+    | "release"
+    | "track"
+    | "credit"
+    | "production"
+    | "technical"
+    | "video"
+    | "common";
+
+  storageFileRole: string;
+  tomlPath: string;
+  valueType: MetadataValueType;
+
+  required: boolean;
+  repeatable: boolean;
+  inherited: boolean;
+
+  aliases?: {
+    ffmpeg?: string[];
+    id3?: string[];
+    vorbis?: string[];
+    mp4?: string[];
+    riff?: string[];
+
+    players?: {
+      vlc?: string[];
+      appleMusic?: string[];
+      windowsMediaPlayer?: string[];
+      windowsMediaPlayerLegacy?: string[];
+    };
+  };
+
+  displayPolicy:
+    | "auto"
+    | "always"
+    | "never"
+    | "developer";
+};

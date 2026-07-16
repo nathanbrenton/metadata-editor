@@ -1419,3 +1419,244 @@ button,
     grid-column: 1;
   }
 }
+
+.metadata-key {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.metadata-key strong {
+  color: #d7d7d7;
+  font-size: 0.8rem;
+}
+
+.metadata-key code {
+  color: #8f8f8f;
+  font-size: 0.7rem;
+}
+
+.metadata-key small {
+  color: #777;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.metadata-aliases {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.35rem 0 0;
+  border-left: 2px solid #3d4650;
+  padding-left: 0.5rem;
+}
+
+.metadata-aliases > div {
+  display: grid;
+  grid-template-columns:
+    max-content
+    minmax(0, 1fr);
+  gap: 0.55rem;
+}
+
+.metadata-aliases dt,
+.metadata-aliases dd {
+  margin: 0;
+  font-size: 0.65rem;
+  line-height: 1.35;
+}
+
+.metadata-aliases dt {
+  color: #7f8d9d;
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.metadata-aliases dd {
+  overflow-wrap: anywhere;
+  color: #9da9b5;
+}
+
+.metadata-aliases .alias-unverified {
+  color: #806f58;
+  font-style: italic;
+}
+
+@media (max-width: 52rem) {
+  .metadata-aliases > div {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .metadata-aliases dt {
+    white-space: normal;
+  }
+}
+
+.indexed-metadata-row {
+  box-shadow:
+    inset 0.2rem 0 #4b5663;
+}
+
+.indexed-metadata-row .metadata-key {
+  padding-left: 0.35rem;
+}
+
+.indexed-metadata-row .metadata-key strong::before {
+  content: "Record field · ";
+  color: #718091;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.metadata-document-tabs {
+  display: flex;
+  gap: 0.35rem;
+  overflow-x: auto;
+  margin: 1rem 0 0;
+  border-bottom: 1px solid #343b43;
+  padding: 0 0.25rem;
+  scrollbar-width: thin;
+}
+
+.metadata-document-tabs button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  margin: 0;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius:
+    0.35rem
+    0.35rem
+    0
+    0;
+  padding: 0.55rem 0.8rem;
+  background: transparent;
+  color: #8f9aa6;
+  white-space: nowrap;
+}
+
+.metadata-document-tabs button:hover {
+  background: #242a31;
+  color: #d7dde4;
+}
+
+.metadata-document-tabs button.active {
+  border-color: #3b444e;
+  background: #292f36;
+  color: #f0f2f4;
+}
+
+.metadata-document-tabs button small {
+  display: inline-grid;
+  min-width: 1.25rem;
+  min-height: 1.25rem;
+  place-items: center;
+  border-radius: 999px;
+  padding: 0 0.3rem;
+  background: #363f49;
+  color: #aeb8c2;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.metadata-document-tabs button.active small {
+  background: #485565;
+  color: #eef2f6;
+}
+
+@media (max-width: 40rem) {
+  .metadata-document-tabs {
+    margin-inline:
+      calc(var(--page-gutter, 1rem) * -1);
+    padding-inline:
+      var(--page-gutter, 1rem);
+  }
+}
+
+.metadata-file-tabs {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  margin: 0.75rem 0 0.9rem;
+  border-bottom: 1px solid #303840;
+  padding: 0 0.2rem;
+  scrollbar-width: thin;
+}
+
+.metadata-file-tabs button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.4rem;
+  min-height: 2.15rem;
+  margin: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0.25rem 0.25rem 0 0;
+  padding: 0.4rem 0.65rem;
+  background: transparent;
+  color: #89949f;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.metadata-file-tabs button:hover {
+  background: #252b31;
+  color: #d2d8de;
+}
+
+.metadata-file-tabs button.active {
+  border-bottom-color: #8797a8;
+  background: #292f35;
+  color: #f0f2f4;
+}
+
+.metadata-file-tabs button small {
+  display: inline-grid;
+  min-width: 1.15rem;
+  min-height: 1.15rem;
+  place-items: center;
+  border-radius: 999px;
+  padding: 0 0.25rem;
+  background: #815f34;
+  color: #fff0d9;
+  font-size: 0.62rem;
+  font-weight: 700;
+}
+
+.draft-status.has-unsaved-changes {
+  border-color: #765c38;
+  background: #30291f;
+  box-shadow:
+    inset 0.2rem 0 #a6783f;
+}
+
+.draft-status .badge.unsaved {
+  background: #815f34;
+  color: #fff0d9;
+}
+
+.metadata-document-tabs button small.document-count {
+  background: #363f49;
+  color: #aeb8c2;
+}
+
+.metadata-document-tabs button small.unsaved-count {
+  background: #815f34;
+  color: #fff0d9;
+}
+
+.metadata-document-tabs button.active small.document-count {
+  background: #485565;
+  color: #eef2f6;
+}
+
+.metadata-document-tabs button.active small.unsaved-count {
+  background: #9a713d;
+  color: #fff6e9;
+}

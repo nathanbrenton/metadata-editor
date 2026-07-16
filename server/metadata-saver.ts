@@ -22,9 +22,11 @@ import {
   assertPathWithinRoot,
   toLibraryRelativePath,
 } from "./media-root.js";
+import {
+  applyMetadataChanges,
+} from "./metadata-change-set.js";
 import type {
   ReleaseScanResult,
-  EditableMetadataValue,
   MetadataValueChange,
   ScalarMetadataSaveReceipt,
 } from "./types.js";
@@ -35,135 +37,6 @@ function hashContent(
   return createHash("sha256")
     .update(content)
     .digest("hex");
-}
-
-function isEditableMetadataValue(
-  value: unknown,
-): value is EditableMetadataValue {
-  return (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean" ||
-    (
-      Array.isArray(value) &&
-      value.every(
-        (entry) => typeof entry === "string",
-      )
-    )
-  );
-}
-
-function describeEditableType(
-  value: EditableMetadataValue,
-): string {
-  return Array.isArray(value)
-    ? "string-array"
-    : typeof value;
-}
-
-function validateMetadataPath(
-  metadataPath: string,
-): string[] {
-  const segments = metadataPath.split(".");
-
-  if (
-    segments.length === 0 ||
-    segments.some(
-      (segment) =>
-        segment.length === 0 ||
-        segment === "__proto__" ||
-        segment === "prototype" ||
-        segment === "constructor",
-    )
-  ) {
-    throw new Error(
-      `Invalid metadata path: ${metadataPath}`,
-    );
-  }
-
-  return segments;
-}
-
-function applyScalarChange(
-  document: Record<string, unknown>,
-  change: MetadataValueChange,
-): void {
-  if (!isEditableMetadataValue(change.value)) {
-    throw new Error(
-      `Only scalar values and string arrays may be saved: ${change.path}`,
-    );
-  }
-
-  const segments = validateMetadataPath(
-    change.path,
-  );
-
-  let current: Record<string, unknown> =
-    document;
-
-  for (
-    let index = 0;
-    index < segments.length - 1;
-    index += 1
-  ) {
-    const segment = segments[index];
-    const nextValue = current[segment];
-
-    if (
-      typeof nextValue !== "object" ||
-      nextValue === null ||
-      Array.isArray(nextValue)
-    ) {
-      throw new Error(
-        `Metadata path does not reference a table: ${change.path}`,
-      );
-    }
-
-    current =
-      nextValue as Record<string, unknown>;
-  }
-
-  const finalSegment =
-    segments[segments.length - 1];
-
-  if (
-    !Object.prototype.hasOwnProperty.call(
-      current,
-      finalSegment,
-    )
-  ) {
-    throw new Error(
-      `Metadata path does not exist: ${change.path}`,
-    );
-  }
-
-  const originalValue = current[finalSegment];
-
-  if (!isEditableMetadataValue(originalValue)) {
-    throw new Error(
-      `Metadata path is not an editable scalar or string array: ${change.path}`,
-    );
-  }
-
-  if (
-    describeEditableType(originalValue) !==
-    describeEditableType(change.value)
-  ) {
-    throw new Error(
-      `Metadata type mismatch at ${change.path}: expected ${describeEditableType(originalValue)}`,
-    );
-  }
-
-  if (
-    typeof change.value === "number" &&
-    !Number.isFinite(change.value)
-  ) {
-    throw new Error(
-      `Metadata number must be finite: ${change.path}`,
-    );
-  }
-
-  current[finalSegment] = change.value;
 }
 
 function findAllowedMetadataPath(
@@ -276,14 +149,10 @@ export async function saveScalarMetadataChanges(
   }
 
   const updatedDocument =
-    parsed as Record<string, unknown>;
-
-  for (const change of changes) {
-    applyScalarChange(
-      updatedDocument,
-      change,
+    applyMetadataChanges(
+      parsed,
+      changes,
     );
-  }
 
   const updatedContent =
     `${stringify(updatedDocument).trimEnd()}\n`;
