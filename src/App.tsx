@@ -118,6 +118,7 @@ type ParsedMetadataDocument = {
   scope: "release" | "track";
   trackId?: string;
   content: string;
+  sha256: string;
   parsed: Record<string, unknown>;
 };
 
@@ -966,24 +967,81 @@ function TrackCard({
   );
 }
 
-type EditableScalar =
+type EditableMetadataValue =
   | string
   | number
-  | boolean;
+  | boolean
+  | string[];
 
 type MetadataDraft = Record<
   string,
-  EditableScalar
+  EditableMetadataValue
 >;
 
-function isEditableScalar(
+
+type MetadataValueChange = {
+  path: string;
+  value: EditableMetadataValue;
+};
+
+type ScalarMetadataSaveReceipt = {
+  relativePath: string;
+  backupRelativePath: string;
+  previousSha256: string;
+  savedSha256: string;
+  bytes: number;
+  savedAt: string;
+};
+
+function isEditableMetadataValue(
   value: unknown,
-): value is EditableScalar {
+): value is EditableMetadataValue {
   return (
     typeof value === "string" ||
     typeof value === "number" ||
-    typeof value === "boolean"
+    typeof value === "boolean" ||
+    (
+      Array.isArray(value) &&
+      value.every(
+        (entry) => typeof entry === "string",
+      )
+    )
   );
+}
+
+function metadataValuesEqual(
+  left: EditableMetadataValue,
+  right: EditableMetadataValue,
+): boolean {
+  if (
+    Array.isArray(left) &&
+    Array.isArray(right)
+  ) {
+    return (
+      left.length === right.length &&
+      left.every(
+        (entry, index) =>
+          entry === right[index],
+      )
+    );
+  }
+
+  return left === right;
+}
+
+function stringArrayToEditorText(
+  values: string[],
+): string {
+  return values.join("\n");
+}
+
+function editorTextToStringArray(
+  value: string,
+): string[] {
+  return value
+    .split("\n")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
 }
 
 function buildDocumentDraftKey(
@@ -991,6 +1049,35 @@ function buildDocumentDraftKey(
   metadataPath: string,
 ): string {
   return `${document.relativePath}::${metadataPath}`;
+}
+
+function getDocumentDraftChanges(
+  document: ParsedMetadataDocument,
+  draft: MetadataDraft,
+): MetadataValueChange[] {
+  const prefix = `${document.relativePath}::`;
+
+  return Object.entries(draft)
+    .filter(([key]) =>
+      key.startsWith(prefix),
+    )
+    .map(([key, value]) => ({
+      path: key.slice(prefix.length),
+      value,
+    }));
+}
+
+function removeDocumentDraftChanges(
+  document: ParsedMetadataDocument,
+  draft: MetadataDraft,
+): MetadataDraft {
+  const prefix = `${document.relativePath}::`;
+
+  return Object.fromEntries(
+    Object.entries(draft).filter(
+      ([key]) => !key.startsWith(prefix),
+    ),
+  );
 }
 
 function parseDraftNumber(
@@ -1020,6 +1107,16 @@ function ReleaseMetadataDetailView({
     useState(false);
   const [draft, setDraft] =
     useState<MetadataDraft>({});
+  const [
+    savingDocumentPath,
+    setSavingDocumentPath,
+  ] = useState<string | null>(null);
+  const [saveError, setSaveError] =
+    useState<string | null>(null);
+  const [saveReceipt, setSaveReceipt] =
+    useState<ScalarMetadataSaveReceipt | null>(
+      null,
+    );
 
   const dirtyCount = Object.keys(
     draft,
@@ -1028,8 +1125,8 @@ function ReleaseMetadataDetailView({
   const updateDraftValue = (
     document: ParsedMetadataDocument,
     metadataPath: string,
-    originalValue: EditableScalar,
-    nextValue: EditableScalar,
+    originalValue: EditableMetadataValue,
+    nextValue: EditableMetadataValue,
   ) => {
     const key = buildDocumentDraftKey(
       document,
@@ -1041,7 +1138,12 @@ function ReleaseMetadataDetailView({
         ...currentDraft,
       };
 
-      if (nextValue === originalValue) {
+      if (
+        metadataValuesEqual(
+          nextValue,
+          originalValue,
+        )
+      ) {
         delete nextDraft[key];
       } else {
         nextDraft[key] = nextValue;
@@ -1049,6 +1151,88 @@ function ReleaseMetadataDetailView({
 
       return nextDraft;
     });
+  };
+
+  const saveDocumentDraft = async (
+    document: ParsedMetadataDocument,
+  ) => {
+    const changes = getDocumentDraftChanges(
+      document,
+      draft,
+    );
+
+    if (changes.length === 0) {
+      setSaveError(
+        "This document has no scalar changes to save.",
+      );
+      return;
+    }
+
+    setSavingDocumentPath(
+      document.relativePath,
+    );
+    setSaveError(null);
+    setSaveReceipt(null);
+
+    try {
+      const response = await fetch(
+        "/api/library/save-scalar-metadata",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: detail.releaseId,
+            relativePath:
+              document.relativePath,
+            originalSha256:
+              document.sha256,
+            changes,
+          }),
+        },
+      );
+
+      const result = (await response.json()) as
+        | ScalarMetadataSaveReceipt
+        | {
+            error?: string;
+          };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error ??
+                `Save failed: HTTP ${response.status}`
+            : `Save failed: HTTP ${response.status}`,
+        );
+      }
+
+      setSaveReceipt(
+        result as ScalarMetadataSaveReceipt,
+      );
+
+      setDraft((currentDraft) =>
+        removeDocumentDraftChanges(
+          document,
+          currentDraft,
+        ),
+      );
+
+      /*
+       * Refresh immediately so the browser receives the new hash and
+       * canonical TOML representation from disk.
+       */
+      await onRefresh();
+    } catch (error) {
+      setSaveError(
+        error instanceof Error
+          ? error.message
+          : "Unknown scalar metadata save error",
+      );
+    } finally {
+      setSavingDocumentPath(null);
+    }
   };
 
   const discardDraft = () => {
@@ -1142,12 +1326,67 @@ function ReleaseMetadataDetailView({
         </span>
       </section>
 
+      {saveError && (
+        <p className="message error">
+          {saveError}
+        </p>
+      )}
+
+      {saveReceipt && (
+        <section className="save-receipt">
+          <div>
+            <strong>Metadata saved and verified</strong>
+            <code>{saveReceipt.relativePath}</code>
+          </div>
+
+          <dl>
+            <div>
+              <dt>Backup</dt>
+              <dd>
+                <code>
+                  {saveReceipt.backupRelativePath}
+                </code>
+              </dd>
+            </div>
+
+            <div>
+              <dt>SHA-256</dt>
+              <dd>
+                <code>
+                  {saveReceipt.savedSha256}
+                </code>
+              </dd>
+            </div>
+
+            <div>
+              <dt>Bytes</dt>
+              <dd>{saveReceipt.bytes}</dd>
+            </div>
+
+            <div>
+              <dt>Saved</dt>
+              <dd>
+                {new Date(
+                  saveReceipt.savedAt,
+                ).toLocaleString()}
+              </dd>
+            </div>
+          </dl>
+        </section>
+      )}
+
       <MetadataDocumentSection
         title="Release documents"
         documents={releaseDocuments}
         editMode={editMode}
         draft={draft}
         onDraftValueChange={updateDraftValue}
+        savingDocumentPath={
+          savingDocumentPath
+        }
+        onSaveDocument={(document) =>
+          void saveDocumentDraft(document)
+        }
       />
 
       {trackIds.map((trackId) => (
@@ -1161,6 +1400,12 @@ function ReleaseMetadataDetailView({
           editMode={editMode}
           draft={draft}
           onDraftValueChange={updateDraftValue}
+          savingDocumentPath={
+            savingDocumentPath
+          }
+          onSaveDocument={(document) =>
+            void saveDocumentDraft(document)
+          }
         />
       ))}
 
@@ -1211,6 +1456,8 @@ function MetadataDocumentSection({
   editMode,
   draft,
   onDraftValueChange,
+  savingDocumentPath,
+  onSaveDocument,
 }: {
   title: string;
   documents: ParsedMetadataDocument[];
@@ -1219,8 +1466,12 @@ function MetadataDocumentSection({
   onDraftValueChange: (
     document: ParsedMetadataDocument,
     metadataPath: string,
-    originalValue: EditableScalar,
-    nextValue: EditableScalar,
+    originalValue: EditableMetadataValue,
+    nextValue: EditableMetadataValue,
+  ) => void;
+  savingDocumentPath: string | null;
+  onSaveDocument: (
+    document: ParsedMetadataDocument,
   ) => void;
 }) {
   return (
@@ -1246,6 +1497,13 @@ function MetadataDocumentSection({
             onDraftValueChange={
               onDraftValueChange
             }
+            saving={
+              savingDocumentPath ===
+              document.relativePath
+            }
+            onSave={() =>
+              onSaveDocument(document)
+            }
           />
         ))
       )}
@@ -1267,11 +1525,11 @@ function MetadataValueCell({
   onDraftValueChange: (
     document: ParsedMetadataDocument,
     metadataPath: string,
-    originalValue: EditableScalar,
-    nextValue: EditableScalar,
+    originalValue: EditableMetadataValue,
+    nextValue: EditableMetadataValue,
   ) => void;
 }) {
-  if (!isEditableScalar(row.value)) {
+  if (!isEditableMetadataValue(row.value)) {
     return (
       <span className="metadata-value readonly-complex">
         {formatMetadataValue(row.value)}
@@ -1309,6 +1567,49 @@ function MetadataValueCell({
       >
         {formatMetadataValue(currentValue)}
       </span>
+    );
+  }
+
+  if (Array.isArray(originalValue)) {
+    const currentArray = Array.isArray(
+      currentValue,
+    )
+      ? currentValue
+      : originalValue;
+
+    return (
+      <label className="metadata-editor-field array-field">
+        <textarea
+          rows={Math.max(
+            3,
+            currentArray.length + 1,
+          )}
+          value={stringArrayToEditorText(
+            currentArray,
+          )}
+          placeholder="One value per line"
+          onChange={(event) =>
+            onDraftValueChange(
+              document,
+              row.path,
+              originalValue,
+              editorTextToStringArray(
+                event.target.value,
+              ),
+            )
+          }
+        />
+
+        <span className="array-field-help">
+          One value per line
+        </span>
+
+        {changed && (
+          <span className="changed-indicator">
+            Modified
+          </span>
+        )}
+      </label>
     );
   }
 
@@ -1401,6 +1702,8 @@ function MetadataDocumentTable({
   editMode,
   draft,
   onDraftValueChange,
+  saving,
+  onSave,
 }: {
   document: ParsedMetadataDocument;
   editMode: boolean;
@@ -1408,13 +1711,21 @@ function MetadataDocumentTable({
   onDraftValueChange: (
     document: ParsedMetadataDocument,
     metadataPath: string,
-    originalValue: EditableScalar,
-    nextValue: EditableScalar,
+    originalValue: EditableMetadataValue,
+    nextValue: EditableMetadataValue,
   ) => void;
+  saving: boolean;
+  onSave: () => void;
 }) {
   const rows = flattenMetadata(
     document.parsed,
   );
+
+  const documentChangeCount =
+    getDocumentDraftChanges(
+      document,
+      draft,
+    ).length;
 
   return (
     <article className="metadata-document-table">
@@ -1424,9 +1735,32 @@ function MetadataDocumentTable({
           <code>{document.relativePath}</code>
         </div>
 
-        <span className="badge complete">
-          Parsed
-        </span>
+        <div className="document-save-controls">
+          <span
+            className={
+              documentChangeCount > 0
+                ? "badge preview"
+                : "badge complete"
+            }
+          >
+            {documentChangeCount > 0
+              ? `${documentChangeCount} modified`
+              : "Parsed"}
+          </span>
+
+          <button
+            type="button"
+            disabled={
+              saving ||
+              documentChangeCount === 0
+            }
+            onClick={onSave}
+          >
+            {saving
+              ? "Saving…"
+              : "Save this TOML"}
+          </button>
+        </div>
       </header>
 
       <div className="metadata-table-header">

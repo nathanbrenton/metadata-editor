@@ -8,6 +8,7 @@ import { readJsonBody } from "./http.js";
 import { buildMetadataPreview } from "./inference.js";
 import { resolveMediaRoot } from "./media-root.js";
 import { readReleaseMetadataDetail } from "./metadata-reader.js";
+import { saveScalarMetadataChanges } from "./metadata-saver.js";
 import { executeMetadataCreationPlan } from "./metadata-writer.js";
 import { buildGeneratedTomlPreview } from "./toml-preview.js";
 import {
@@ -197,6 +198,131 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown metadata creation error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/save-scalar-metadata"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : null;
+
+        const relativePath =
+          "relativePath" in body &&
+          typeof body.relativePath === "string"
+            ? body.relativePath
+            : null;
+
+        const originalSha256 =
+          "originalSha256" in body &&
+          typeof body.originalSha256 === "string"
+            ? body.originalSha256
+            : null;
+
+        const changes =
+          "changes" in body &&
+          Array.isArray(body.changes)
+            ? body.changes
+            : null;
+
+        if (
+          !releaseId ||
+          !relativePath ||
+          !originalSha256 ||
+          !changes
+        ) {
+          sendJson(response, 400, {
+            error:
+              "releaseId, relativePath, originalSha256, and changes are required",
+          });
+          return;
+        }
+
+        const normalizedChanges =
+          changes.map((change) => {
+            if (
+              typeof change !== "object" ||
+              change === null ||
+              !("path" in change) ||
+              typeof change.path !== "string" ||
+              !("value" in change) ||
+              !(
+                typeof change.value === "string" ||
+                typeof change.value === "number" ||
+                typeof change.value === "boolean" ||
+                (
+                  Array.isArray(change.value) &&
+                  change.value.every(
+                    (entry: unknown) =>
+                      typeof entry === "string",
+                  )
+                )
+              )
+            ) {
+              throw new Error(
+                "Each change requires a scalar path and value",
+              );
+            }
+
+            return {
+              path: change.path,
+              value: change.value,
+            };
+          });
+
+        const mediaRoot =
+          await resolveMediaRoot();
+
+        const release =
+          await scanReleaseById(
+            mediaRoot,
+            releaseId,
+          );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        const receipt =
+          await saveScalarMetadataChanges(
+            mediaRoot,
+            release,
+            relativePath,
+            originalSha256,
+            normalizedChanges,
+          );
+
+        sendJson(response, 200, receipt);
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown scalar metadata save error",
         });
       }
 

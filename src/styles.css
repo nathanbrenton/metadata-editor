@@ -1309,3 +1309,113 @@ button,
     grid-template-columns: 1fr;
   }
 }
+
+.document-save-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.document-save-controls button {
+  padding: 0.45rem 0.65rem;
+  font-size: 0.75rem;
+}
+
+.save-receipt {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid #48634d;
+  border-radius: 0.25rem;
+  padding: 0.85rem;
+  background: #172019;
+}
+
+.save-receipt > div > strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: #b7d9bc;
+}
+
+.save-receipt dl {
+  display: grid;
+  grid-template-columns:
+    repeat(2, minmax(12rem, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0;
+}
+
+.save-receipt dl > div {
+  min-width: 0;
+}
+
+.save-receipt dt {
+  margin-bottom: 0.2rem;
+  color: #8fa493;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.save-receipt dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 52rem) {
+  .document-save-controls {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .document-save-controls button {
+    width: 100%;
+  }
+
+  .save-receipt dl {
+    grid-template-columns: 1fr;
+  }
+}
+
+.metadata-editor-field textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid #555;
+  border-radius: 0.2rem;
+  padding: 0.55rem;
+  color: #eee;
+  background: #101010;
+  font: inherit;
+  line-height: 1.45;
+}
+
+.metadata-editor-field textarea:focus {
+  border-color: #7b91aa;
+  outline: 2px solid #344355;
+}
+
+.array-field {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.array-field-help {
+  align-self: start;
+  color: #777;
+  font-size: 0.68rem;
+}
+
+.array-field .changed-indicator {
+  grid-column: 2;
+}
+
+@media (max-width: 52rem) {
+  .array-field {
+    grid-template-columns: 1fr;
+  }
+
+  .array-field .changed-indicator {
+    grid-column: 1;
+  }
+}

@@ -135,6 +135,7 @@ export type ParsedMetadataDocument = {
   scope: "release" | "track";
   trackId?: string;
   content: string;
+  sha256: string;
   parsed: Record<string, unknown>;
 };
 
@@ -144,4 +145,31 @@ export type ReleaseMetadataDetail = {
   documents: ParsedMetadataDocument[];
   missingFiles: MetadataFileStatus[];
   warnings: string[];
+};
+
+export type EditableMetadataValue =
+  | string
+  | number
+  | boolean
+  | string[];
+
+export type MetadataValueChange = {
+  path: string;
+  value: EditableMetadataValue;
+};
+
+export type ScalarMetadataSaveRequest = {
+  releaseId: string;
+  relativePath: string;
+  originalSha256: string;
+  changes: MetadataValueChange[];
+};
+
+export type ScalarMetadataSaveReceipt = {
+  relativePath: string;
+  backupRelativePath: string;
+  previousSha256: string;
+  savedSha256: string;
+  bytes: number;
+  savedAt: string;
 };

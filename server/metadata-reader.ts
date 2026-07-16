@@ -3,6 +3,9 @@ import {
   readFile,
   realpath,
 } from "node:fs/promises";
+import {
+  createHash,
+} from "node:crypto";
 import path from "node:path";
 import { parse } from "smol-toml";
 
@@ -83,6 +86,9 @@ async function readMetadataDocument(
     scope,
     ...(trackId ? { trackId } : {}),
     content,
+    sha256: createHash("sha256")
+      .update(content, "utf8")
+      .digest("hex"),
     parsed: parsed as Record<string, unknown>,
   };
 }
