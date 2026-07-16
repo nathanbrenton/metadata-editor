@@ -196,6 +196,47 @@ type CompatibilityStatusFilter =
   | "not-visible"
   | "unverified";
 
+
+type ExportContainer =
+  | "mp3"
+  | "flac"
+  | "m4a"
+  | "ogg-vorbis"
+  | "opus"
+  | "wav";
+
+type ExportGuidanceStatus =
+  | "supported"
+  | "normalized"
+  | "omitted"
+  | "unverified";
+
+type ExportGuidance = {
+  status: ExportGuidanceStatus;
+  tags: string[];
+  note: string;
+};
+
+const exportContainerLabels:
+  Record<ExportContainer, string> = {
+    mp3: "MP3 / ID3",
+    flac: "FLAC / Vorbis",
+    m4a: "M4A / MP4",
+    "ogg-vorbis": "OGG Vorbis",
+    opus: "Opus",
+    wav: "WAV / RIFF",
+  };
+
+const coreExportPaths = new Set([
+  "release.title",
+  "release.primary_artist.name",
+  "release.dates.release",
+  "release.genres",
+  "track.title",
+  "track.primary_artist.name",
+  "track.numbering.track_number",
+]);
+
 function formatMetadataValue(
   value: unknown,
 ): string {
@@ -637,6 +678,125 @@ function formatAliasValues(
     : "—";
 }
 
+function getContainerTags(
+  field: MetadataFieldDefinition,
+  container: ExportContainer,
+): string[] {
+  switch (container) {
+    case "mp3":
+      return field.aliases?.id3 ?? [];
+    case "flac":
+    case "ogg-vorbis":
+    case "opus":
+      return field.aliases?.vorbis ?? [];
+    case "m4a":
+      return field.aliases?.mp4 ?? [];
+    case "wav":
+      return field.aliases?.riff ?? [];
+  }
+}
+
+function getExportGuidance(
+  field: MetadataFieldDefinition,
+  container: ExportContainer,
+): ExportGuidance {
+  const tags = getContainerTags(
+    field,
+    container,
+  );
+
+  const omittedByWav = new Set([
+    "release.primary_artist.name",
+    "track.numbering.disc_number",
+    "track.numbering.disc_total",
+    "track.composers[].name",
+  ]);
+
+  if (
+    container === "wav" &&
+    omittedByWav.has(field.tomlPath)
+  ) {
+    return {
+      status: "omitted",
+      tags,
+      note:
+        "The controlled FFmpeg WAV fixture did not preserve this value.",
+    };
+  }
+
+  if (tags.length === 0) {
+    return {
+      status: "unverified",
+      tags: [],
+      note:
+        "No verified container tag is registered for this field.",
+    };
+  }
+
+  if (
+    field.tomlPath ===
+      "release.dates.release" &&
+    ["mp3", "m4a", "wav"].includes(
+      container,
+    )
+  ) {
+    return {
+      status: "normalized",
+      tags,
+      note:
+        "FFprobe preserved the date, but tested players displayed only the four-digit year for this container.",
+    };
+  }
+
+  if (
+    field.tomlPath ===
+      "track.numbering.track_number"
+  ) {
+    return {
+      status: "normalized",
+      tags,
+      note:
+        "Current and total numbering may share one container tag. VLC displayed only the current number; Apple Music displayed both values.",
+    };
+  }
+
+  if (
+    field.tomlPath ===
+      "track.numbering.track_total" ||
+    field.tomlPath ===
+      "track.numbering.disc_total"
+  ) {
+    return {
+      status: "normalized",
+      tags,
+      note:
+        "The total is commonly stored with the current track or disc number rather than as an independent visible field.",
+    };
+  }
+
+  if (
+    field.tomlPath ===
+      "track.text.comment" &&
+    ["flac", "ogg-vorbis", "opus"].includes(
+      container,
+    )
+  ) {
+    return {
+      status: "normalized",
+      tags,
+      note:
+        "VLC merged comment and description text into its Description field for Vorbis-style containers.",
+    };
+  }
+
+  return {
+    status: "supported",
+    tags,
+    note:
+      "A container tag is registered and the controlled fixture did not identify a preservation failure.",
+  };
+}
+
 function MetadataCompatibilityView({
   fields,
 }: {
@@ -652,6 +812,10 @@ function MetadataCompatibilityView({
     useState<CompatibilityStatusFilter>(
       "all",
     );
+  const [
+    exportContainer,
+    setExportContainer,
+  ] = useState<ExportContainer>("mp3");
 
   const scopes = useMemo(
     () =>
@@ -743,6 +907,47 @@ function MetadataCompatibilityView({
     searchText,
     statusFilter,
   ]);
+
+  const exportSummary = useMemo(() => {
+    const guidance = fields.map((field) => ({
+      field,
+      guidance: getExportGuidance(
+        field,
+        exportContainer,
+      ),
+    }));
+
+    const counts = {
+      supported: 0,
+      normalized: 0,
+      omitted: 0,
+      unverified: 0,
+    };
+
+    for (const item of guidance) {
+      counts[item.guidance.status] += 1;
+    }
+
+    const recommended = guidance
+      .filter(
+        (item) =>
+          coreExportPaths.has(
+            item.field.tomlPath,
+          ) &&
+          (
+            item.guidance.status ===
+              "supported" ||
+            item.guidance.status ===
+              "normalized"
+          ),
+      )
+      .map((item) => item.field.label);
+
+    return {
+      counts,
+      recommended,
+    };
+  }, [exportContainer, fields]);
 
   return (
     <section className="compatibility-view">
@@ -862,6 +1067,78 @@ function MetadataCompatibilityView({
             </option>
           </select>
         </label>
+
+        <label>
+          <span>Export container</span>
+          <select
+            value={exportContainer}
+            onChange={(event) =>
+              setExportContainer(
+                event.currentTarget
+                  .value as ExportContainer,
+              )
+            }
+          >
+            {Object.entries(
+              exportContainerLabels,
+            ).map(([value, label]) => (
+              <option
+                key={value}
+                value={value}
+              >
+                {label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </section>
+
+      <section className="export-guidance-summary">
+        <header>
+          <div>
+            <p className="eyebrow">
+              Selected export target
+            </p>
+            <h3>
+              {
+                exportContainerLabels[
+                  exportContainer
+                ]
+              }
+            </h3>
+          </div>
+
+          <div className="export-guidance-counts">
+            <span className="guidance-supported">
+              {exportSummary.counts.supported}
+              {" supported"}
+            </span>
+            <span className="guidance-normalized">
+              {exportSummary.counts.normalized}
+              {" normalized"}
+            </span>
+            <span className="guidance-omitted">
+              {exportSummary.counts.omitted}
+              {" omitted"}
+            </span>
+            <span className="guidance-unverified">
+              {exportSummary.counts.unverified}
+              {" unverified"}
+            </span>
+          </div>
+        </header>
+
+        <p>
+          <strong>
+            Recommended core fields:
+          </strong>{" "}
+          {exportSummary.recommended.length >
+          0
+            ? exportSummary.recommended.join(
+                ", ",
+              )
+            : "No verified core fields for this target."}
+        </p>
       </section>
 
       {visibleFields.length === 0 ? (
@@ -880,6 +1157,9 @@ function MetadataCompatibilityView({
                 <th>Vorbis</th>
                 <th>MP4</th>
                 <th>RIFF</th>
+                <th>
+                  Export guidance
+                </th>
                 <th>VLC</th>
                 <th>Apple Music</th>
                 <th>
@@ -952,6 +1232,14 @@ function MetadataCompatibilityView({
                       )}
                     </td>
                     <td>
+                      <ExportGuidanceCell
+                        field={field}
+                        container={
+                          exportContainer
+                        }
+                      />
+                    </td>
+                    <td>
                       <CompatibilityPlayerCell
                         field={field}
                         player="vlc"
@@ -983,6 +1271,37 @@ function MetadataCompatibilityView({
         </div>
       )}
     </section>
+  );
+}
+
+function ExportGuidanceCell({
+  field,
+  container,
+}: {
+  field: MetadataFieldDefinition;
+  container: ExportContainer;
+}) {
+  const guidance = getExportGuidance(
+    field,
+    container,
+  );
+
+  return (
+    <div className="export-guidance-cell">
+      <span
+        className={`export-guidance-status guidance-${guidance.status}`}
+      >
+        {guidance.status}
+      </span>
+
+      <code>
+        {guidance.tags.length > 0
+          ? guidance.tags.join(", ")
+          : "No registered tag"}
+      </code>
+
+      <small>{guidance.note}</small>
+    </div>
   );
 }
 

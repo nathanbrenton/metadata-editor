@@ -1919,3 +1919,86 @@ button,
     grid-template-columns: 1fr;
   }
 }
+
+
+.export-guidance-summary {
+  margin: 1rem 0;
+  border: 1px solid #3c4650;
+  border-radius: 0.65rem;
+  padding: 0.9rem;
+  background: #192027;
+}
+
+.export-guidance-summary header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.export-guidance-summary h3,
+.export-guidance-summary p {
+  margin-bottom: 0;
+}
+
+.export-guidance-counts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.export-guidance-counts span,
+.export-guidance-status {
+  display: inline-flex;
+  border-radius: 999px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.guidance-supported {
+  background: #203a2a;
+  color: #b7ddc0;
+}
+
+.guidance-normalized {
+  background: #49381f;
+  color: #efd19c;
+}
+
+.guidance-omitted {
+  background: #472727;
+  color: #efb2b2;
+}
+
+.guidance-unverified {
+  background: #34383d;
+  color: #b7bdc4;
+}
+
+.export-guidance-cell {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 13rem;
+}
+
+.export-guidance-cell code {
+  color: #c1c8cf;
+}
+
+.export-guidance-cell small {
+  color: #929da7;
+  line-height: 1.4;
+}
+
+@media (max-width: 48rem) {
+  .export-guidance-summary header {
+    flex-direction: column;
+  }
+
+  .export-guidance-counts {
+    justify-content: flex-start;
+  }
+}
