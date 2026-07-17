@@ -21,6 +21,12 @@ export const metadataFieldRegistry:
       required: true,
       repeatable: false,
       inherited: false,
+      presentation: {
+        group: "Developer / Advanced",
+        order: 10,
+        help:
+          "Stable internal identifier. Keep it synchronized with the release directory name and references.",
+      },
       displayPolicy: "developer",
     },
     {
@@ -61,6 +67,16 @@ export const metadataFieldRegistry:
           note: "Apple Music displayed the embedded album value in Song Info.",
         },
       ],
+      presentation: {
+        group: "Release & Track Identity",
+        order: 10,
+        examples: [
+          "Sine Sweeps",
+          "Live at the Forum",
+        ],
+        help:
+          "Enter the public release title exactly as it should appear in players and storefronts.",
+      },
       displayPolicy: "always",
     },
     {
@@ -103,6 +119,15 @@ export const metadataFieldRegistry:
           note: "Apple Music displayed the embedded album-artist value in Song Info.",
         },
       ],
+      presentation: {
+        group: "Artists",
+        order: 10,
+        examples: [
+          "The Test Signalz",
+        ],
+        help:
+          "Enter the primary release-level artist credit. Track-level artists may override this value.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -145,6 +170,16 @@ export const metadataFieldRegistry:
           note: "Apple Music normalized the embedded full date to a four-digit year.",
         },
       ],
+      presentation: {
+        group: "Dates",
+        order: 10,
+        examples: [
+          "2026-07-13",
+          "2026",
+        ],
+        help:
+          "Use an ISO-style date when known. Some players display only the year.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -160,6 +195,12 @@ export const metadataFieldRegistry:
       required: true,
       repeatable: false,
       inherited: false,
+      presentation: {
+        group: "Developer / Advanced",
+        order: 20,
+        help:
+          "Stable internal identifier. Keep it synchronized with the track directory name.",
+      },
       displayPolicy: "developer",
     },
     {
@@ -202,6 +243,15 @@ export const metadataFieldRegistry:
           note: "Apple Music displayed the embedded title in Song Info.",
         },
       ],
+      presentation: {
+        group: "Release & Track Identity",
+        order: 20,
+        examples: [
+          "Sine Sweep Up",
+        ],
+        help:
+          "Enter the base public track title without redundant artist or album text.",
+      },
       displayPolicy: "always",
     },
     {
@@ -246,6 +296,15 @@ export const metadataFieldRegistry:
           note: "Apple Music displayed the embedded artist in Song Info.",
         },
       ],
+      presentation: {
+        group: "Artists",
+        order: 20,
+        examples: [
+          "Featured Artist",
+        ],
+        help:
+          "Use only when the track-level artist differs from or explicitly overrides the release artist.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -289,6 +348,13 @@ export const metadataFieldRegistry:
           note: "Apple Music displayed both current track number and track total.",
         },
       ],
+      presentation: {
+        group: "Track & Disc Numbering",
+        order: 10,
+        examples: ["1", "4", "12"],
+        help:
+          "Enter the track's sequence number on the current disc. Use a TOML integer without leading zeroes: 4 is valid; 04 is not.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -309,6 +375,16 @@ export const metadataFieldRegistry:
           vlc: [],
           appleMusic: [],
         },
+      },
+      presentation: {
+        group: "Release & Track Identity",
+        order: 80,
+        commonValues: [
+          "true",
+          "false",
+        ],
+        help:
+          "Mark true only when the track contains explicit content under the release's distribution policy.",
       },
       displayPolicy: "auto",
     },
@@ -352,6 +428,19 @@ export const metadataFieldRegistry:
           note: "Apple Music displayed the embedded genre in Song Info.",
         },
       ],
+      presentation: {
+        group: "Release & Track Identity",
+        order: 60,
+        commonValues: [
+          "rock",
+          "pop",
+          "electronic",
+          "ambient",
+          "soundtrack",
+        ],
+        help:
+          "Use a concise list of recognized genres. Keep spelling and capitalization consistent across the release.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -392,6 +481,19 @@ export const metadataFieldRegistry:
             "Apple Music did not expose the embedded language value in the inspected Song Info tabs.",
         },
       ],
+      presentation: {
+        group: "Writing, Lyrics & Language",
+        order: 20,
+        commonValues: [
+          "en",
+          "es",
+          "fr",
+          "de",
+          "ja",
+        ],
+        help:
+          "Use a two-letter ISO 639-1 language code when practical.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -432,6 +534,19 @@ export const metadataFieldRegistry:
             "Apple Music did not expose the embedded language value in the inspected Song Info tabs.",
         },
       ],
+      presentation: {
+        group: "Writing, Lyrics & Language",
+        order: 30,
+        commonValues: [
+          "en",
+          "es",
+          "fr",
+          "de",
+          "ja",
+        ],
+        help:
+          "Use the language of lyrical or spoken content. Instrumental tracks may leave this blank.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -474,6 +589,13 @@ export const metadataFieldRegistry:
             "Apple Music displayed the track total as the value after 'of'.",
         },
       ],
+      presentation: {
+        group: "Track & Disc Numbering",
+        order: 20,
+        examples: ["10", "12", "18"],
+        help:
+          "Enter the total number of tracks on the current disc. This field is optional but recommended when the total is known.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -516,6 +638,13 @@ export const metadataFieldRegistry:
             "Apple Music displayed the current disc number in Song Info.",
         },
       ],
+      presentation: {
+        group: "Track & Disc Numbering",
+        order: 30,
+        examples: ["1", "2", "3"],
+        help:
+          "Enter the disc or volume containing this track. For a single-disc release, this may be left blank unless explicit disc numbering is desired.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -558,6 +687,13 @@ export const metadataFieldRegistry:
             "Apple Music displayed the disc total as the value after 'of'.",
         },
       ],
+      presentation: {
+        group: "Track & Disc Numbering",
+        order: 40,
+        examples: ["1", "2", "4"],
+        help:
+          "Enter the total number of discs or volumes in the release. Leave blank when disc numbering is not used.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -600,6 +736,16 @@ export const metadataFieldRegistry:
             "Apple Music displayed the embedded composer in Song Info.",
         },
       ],
+      presentation: {
+        group: "Writing, Lyrics & Language",
+        order: 10,
+        examples: [
+          "Dean Dawson",
+          "Steve Mason",
+        ],
+        help:
+          "Enter the credited composer's display name exactly as supplied by the official credits.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -640,6 +786,12 @@ export const metadataFieldRegistry:
             "Apple Music did not expose the generic description value in the inspected Song Info tabs.",
         },
       ],
+      presentation: {
+        group: "Text and Notes",
+        order: 10,
+        help:
+          "Use for a public-facing description that may be exported to compatible containers.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -684,6 +836,12 @@ export const metadataFieldRegistry:
             "Apple Music displayed the M4A comment in Song Info. The MP3 fixture did not visibly populate comments.",
         },
       ],
+      presentation: {
+        group: "Text and Notes",
+        order: 20,
+        help:
+          "Use for a short public or technical comment. Avoid private production notes here.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -728,6 +886,15 @@ export const metadataFieldRegistry:
             "Apple Music displayed the M4A copyright value on the File tab. The MP3 fixture did not visibly expose it.",
         },
       ],
+      presentation: {
+        group: "Music Business & Rights",
+        order: 10,
+        examples: [
+          "© 2026 Example Records",
+        ],
+        help:
+          "Enter the credited copyright statement, including the year and rights holder when applicable.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -769,6 +936,15 @@ export const metadataFieldRegistry:
             "Apple Music did not expose publisher in the inspected Song Info tabs.",
         },
       ],
+      presentation: {
+        group: "Music Business & Rights",
+        order: 20,
+        examples: [
+          "Example Music Publishing",
+        ],
+        help:
+          "Enter the credited publisher, publishing administrator, or rights organization.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -811,6 +987,17 @@ export const metadataFieldRegistry:
             "Apple Music exposed a BPM field but did not populate it from the generic FFmpeg bpm tag in these fixtures.",
         },
       ],
+      presentation: {
+        group: "Technical Audio",
+        order: 10,
+        examples: [
+          "120",
+          "128",
+          "87.5",
+        ],
+        help:
+          "Enter the musical tempo as a whole or decimal number. Leave blank when tempo is not meaningful.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -832,6 +1019,12 @@ export const metadataFieldRegistry:
           vlc: [],
           appleMusic: [],
         },
+      },
+      presentation: {
+        group: "Performers",
+        order: 10,
+        help:
+          "Enter the credited performer name exactly as supplied by the artist, liner notes, or release documentation.",
       },
       displayPolicy: "auto",
     },
@@ -855,6 +1048,22 @@ export const metadataFieldRegistry:
           appleMusic: [],
         },
       },
+      presentation: {
+        group: "Performers",
+        order: 20,
+        commonValues: [
+          "lead vocals",
+          "background vocals",
+          "guitar",
+          "bass",
+          "drums",
+          "keyboards",
+          "percussion",
+          "programming",
+        ],
+        help:
+          "Use the specific credited instrument, vocal part, programming role, or other performance contribution.",
+      },
       displayPolicy: "auto",
     },
     {
@@ -872,7 +1081,222 @@ export const metadataFieldRegistry:
       required: false,
       repeatable: true,
       inherited: false,
+      presentation: {
+        group: "Performers",
+        order: 10,
+        examples: [
+          "Dawson, Dean",
+        ],
+        help:
+          "Optional sortable form, commonly Family name, Given name.",
+      },
       displayPolicy: "developer",
+    },
+    {
+      id: "track.contributors[].name",
+      canonicalName: "track.contributors[].name",
+      label: "Contributor Name",
+      description:
+        "Name credited for a technical, production, or creative contribution.",
+      scope: "credit",
+      storageFileRole: "track-credits",
+      tomlPath: "track.contributors[].name",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: false,
+      presentation: {
+        group: "Production",
+        order: 10,
+        help:
+          "Enter the credited person's name exactly as supplied by the contributor, liner notes, or release documentation.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.contributors[].role",
+      canonicalName: "track.contributors[].role",
+      label: "Contributor Role",
+      description:
+        "Production, engineering, editing, arrangement, writing, or coordination role.",
+      scope: "credit",
+      storageFileRole: "track-credits",
+      tomlPath: "track.contributors[].role",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: false,
+      presentation: {
+        group: "Production",
+        order: 20,
+        commonValues: [
+          "producer",
+          "co-producer",
+          "additional producer",
+          "executive producer",
+          "vocal producer",
+          "recording engineer",
+          "assistant recording engineer",
+          "editor",
+          "audio editor",
+          "vocal editor",
+          "drum editor",
+          "mix engineer",
+          "assistant mix engineer",
+          "mix technician",
+          "mastering engineer",
+          "mastering assistant",
+          "sound designer",
+          "programmer",
+          "MIDI programmer",
+          "arranger",
+          "orchestrator",
+          "conductor",
+          "composer",
+          "lyricist",
+          "songwriter",
+          "restoration engineer",
+          "transfer engineer",
+          "remastering engineer",
+          "studio assistant",
+          "creative director",
+          "art director",
+          "project coordinator",
+          "production coordinator",
+        ],
+        help:
+          "Prefer the wording used in the official credit. Suggestions are examples, not restrictions; custom roles remain valid.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.contributors[].sort_name",
+      canonicalName: "track.contributors[].sort_name",
+      label: "Contributor Sort Name",
+      description:
+        "Optional normalized name used when sorting contributor credits.",
+      scope: "credit",
+      storageFileRole: "track-credits",
+      tomlPath: "track.contributors[].sort_name",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: false,
+      presentation: {
+        group: "Production",
+        order: 30,
+        examples: [
+          "Smith, Jordan",
+          "Bowie, David",
+        ],
+        help:
+          "Use Family name, Given name when a sortable form is needed. Leave blank when the display name already sorts correctly.",
+      },
+      displayPolicy: "developer",
+    },
+    {
+      id: "track.production.recording.location",
+      canonicalName: "track.production.recording.location",
+      label: "Recording Location",
+      description:
+        "City, region, and country where recording took place.",
+      scope: "production",
+      storageFileRole: "track-production",
+      tomlPath: "track.production.recording.location",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Recording and Editing",
+        order: 50,
+        examples: [
+          "Los Angeles, California, United States",
+          "London, England, United Kingdom",
+          "Berlin, Germany",
+        ],
+        help:
+          "Recommended format: City, State/Region, Country. Use the studio or facility field for the credited recording house.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.production.mixing.house",
+      canonicalName: "track.production.mixing.house",
+      label: "Mixing Studio / House",
+      description:
+        "Credited studio, facility, company, or independent mixing house.",
+      scope: "production",
+      storageFileRole: "track-production",
+      tomlPath: "track.production.mixing.house",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Mixing",
+        order: 40,
+        examples: [
+          "Electric Lady Studios",
+          "Abbey Road Studios",
+          "The Mix Room",
+          "Independent / home studio",
+        ],
+        help:
+          "Enter the credited facility or company name. Keep geographic information in Mixing Location.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.production.mixing.location",
+      canonicalName: "track.production.mixing.location",
+      label: "Mixing Location",
+      description:
+        "City, region, and country where the final mix was completed.",
+      scope: "production",
+      storageFileRole: "track-production",
+      tomlPath: "track.production.mixing.location",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Mixing",
+        order: 50,
+        examples: [
+          "Los Angeles, California, United States",
+          "London, England, United Kingdom",
+          "Berlin, Germany",
+        ],
+        help:
+          "Recommended format: City, State/Region, Country.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.production.mastering.location",
+      canonicalName: "track.production.mastering.location",
+      label: "Mastering Location",
+      description:
+        "City, region, and country where mastering was completed.",
+      scope: "production",
+      storageFileRole: "track-production",
+      tomlPath: "track.production.mastering.location",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Mastering",
+        order: 50,
+        examples: [
+          "New York, New York, United States",
+          "London, England, United Kingdom",
+        ],
+        help:
+          "Recommended format: City, State/Region, Country.",
+      },
+      displayPolicy: "auto",
     },
   ];
 

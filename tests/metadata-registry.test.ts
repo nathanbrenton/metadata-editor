@@ -163,3 +163,192 @@ test(
     );
   },
 );
+
+test(
+  "registers contributor grouping and help guidance",
+  () => {
+    const role = findMetadataField(
+      "track.contributors[].role",
+    );
+    const mixingHouse = findMetadataField(
+      "track.production.mixing.house",
+    );
+    const mixingLocation =
+      findMetadataField(
+        "track.production.mixing.location",
+      );
+
+    assert.ok(role);
+    assert.equal(
+      role.presentation?.group,
+      "Production",
+    );
+    assert.equal(
+      role.presentation?.commonValues?.includes(
+        "mix engineer",
+      ),
+      true,
+    );
+
+    assert.equal(
+      mixingHouse?.presentation?.group,
+      "Mixing",
+    );
+    assert.equal(
+      mixingLocation?.presentation?.examples
+        ?.includes(
+          "Los Angeles, California, United States",
+        ),
+      true,
+    );
+  },
+);
+
+test(
+  "groups track and disc numbering fields",
+  () => {
+    const paths = [
+      "track.numbering.track_number",
+      "track.numbering.track_total",
+      "track.numbering.disc_number",
+      "track.numbering.disc_total",
+    ];
+
+    const fields = paths.map(
+      (path) => {
+        const field =
+          findMetadataField(path);
+
+        assert.ok(field);
+        return field;
+      },
+    );
+
+    assert.deepEqual(
+      fields.map(
+        (field) =>
+          field.presentation?.group,
+      ),
+      [
+        "Track & Disc Numbering",
+        "Track & Disc Numbering",
+        "Track & Disc Numbering",
+        "Track & Disc Numbering",
+      ],
+    );
+
+    assert.deepEqual(
+      fields.map(
+        (field) =>
+          field.presentation?.order,
+      ),
+      [10, 20, 30, 40],
+    );
+
+    assert.equal(
+      fields[0].presentation?.help
+        ?.includes("leading zeroes"),
+      true,
+    );
+  },
+);
+
+test(
+  "assigns practical presentation groups to registered fields",
+  () => {
+    const expectedGroups = new Map([
+      [
+        "release.title",
+        "Release & Track Identity",
+      ],
+      [
+        "release.dates.release",
+        "Dates",
+      ],
+      [
+        "track.primary_artist.name",
+        "Artists",
+      ],
+      [
+        "track.composers[].name",
+        "Writing, Lyrics & Language",
+      ],
+      [
+        "release.rights.copyright",
+        "Music Business & Rights",
+      ],
+      [
+        "track.text.comment",
+        "Text and Notes",
+      ],
+      [
+        "track.audio.bpm",
+        "Technical Audio",
+      ],
+      [
+        "track.contributors[].sort_name",
+        "Production",
+      ],
+    ]);
+
+    for (const [
+      path,
+      expectedGroup,
+    ] of expectedGroups) {
+      const field =
+        findMetadataField(path);
+
+      assert.ok(field);
+      assert.equal(
+        field.presentation?.group,
+        expectedGroup,
+      );
+    }
+  },
+);
+
+test(
+  "uses the refined grouping hierarchy",
+  () => {
+    const expectedGroups = new Map([
+      [
+        "release.dates.release",
+        "Dates",
+      ],
+      [
+        "release.language",
+        "Writing, Lyrics & Language",
+      ],
+      [
+        "track.language",
+        "Writing, Lyrics & Language",
+      ],
+      [
+        "track.composers[].name",
+        "Writing, Lyrics & Language",
+      ],
+      [
+        "release.rights.publisher",
+        "Music Business & Rights",
+      ],
+      [
+        "track.performers[].sort_name",
+        "Performers",
+      ],
+    ]);
+
+    for (const [
+      path,
+      expectedGroup,
+    ] of expectedGroups) {
+      const field =
+        findMetadataField(path);
+
+      assert.ok(field);
+      assert.equal(
+        field.presentation?.group,
+        expectedGroup,
+      );
+    }
+  },
+);

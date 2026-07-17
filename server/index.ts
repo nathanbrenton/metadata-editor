@@ -5,6 +5,9 @@ import {
 
 import { buildMetadataExportPlan } from "./export-plan.js";
 import {
+  executeValidatedExportPlan,
+} from "./export-executor.js";
+import {
   resolveExportOutputRoot,
   validateMetadataExportPlan,
 } from "./export-validator.js";
@@ -312,6 +315,156 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown export validation error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/export/execute"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          throw new Error(
+            "Expected a JSON object.",
+          );
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : "";
+        const container =
+          "container" in body &&
+          typeof body.container === "string"
+            ? body.container
+            : "";
+        const trackId =
+          "trackId" in body &&
+          typeof body.trackId === "string"
+            ? body.trackId
+            : undefined;
+        const outputDirectory =
+          "outputDirectory" in body &&
+          typeof body.outputDirectory === "string"
+            ? body.outputDirectory
+            : undefined;
+        const confirmation =
+          "confirmation" in body &&
+          typeof body.confirmation === "string"
+            ? body.confirmation
+            : "";
+
+        const allowedContainers =
+          new Set([
+            "mp3",
+            "flac",
+            "m4a",
+            "ogg-vorbis",
+            "opus",
+            "wav",
+          ]);
+
+        if (!releaseId) {
+          throw new Error(
+            "Missing releaseId.",
+          );
+        }
+
+        if (!allowedContainers.has(container)) {
+          throw new Error(
+            "Invalid export container.",
+          );
+        }
+
+        const mediaRoot =
+          await resolveMediaRoot();
+        const release =
+          await scanReleaseById(
+            mediaRoot,
+            releaseId,
+          );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        const detail =
+          await readReleaseMetadataDetail(
+            mediaRoot,
+            release,
+          );
+        const plan =
+          buildMetadataExportPlan(
+            release,
+            detail,
+            metadataFieldRegistry,
+            {
+              container:
+                container as
+                  | "mp3"
+                  | "flac"
+                  | "m4a"
+                  | "ogg-vorbis"
+                  | "opus"
+                  | "wav",
+              scope: trackId
+                ? "track"
+                : "all",
+              trackId,
+              outputDirectory,
+            },
+          );
+        const capabilities =
+          await detectFfmpegCapabilities();
+        const outputRoot =
+          resolveExportOutputRoot();
+        const validation =
+          await validateMetadataExportPlan(
+            plan,
+            mediaRoot,
+            capabilities,
+            outputRoot,
+          );
+
+        if (!validation.canExport) {
+          sendJson(response, 409, {
+            error:
+              "The export plan no longer passes dry-run validation.",
+            validation,
+          });
+          return;
+        }
+
+        sendJson(
+          response,
+          200,
+          await executeValidatedExportPlan(
+            plan,
+            mediaRoot,
+            outputRoot,
+            capabilities,
+            confirmation,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown export execution error",
         });
       }
 

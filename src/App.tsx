@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -177,6 +178,34 @@ type MetadataFieldDefinition = {
     displayLabel?: string;
     note: string;
   }>;
+
+  presentation?: {
+    group:
+      | "Release & Track Identity"
+      | "Artists"
+      | "Music Business & Rights"
+      | "Dates"
+      | "Track & Disc Numbering"
+      | "Movement & Work"
+      | "Performers"
+      | "Production"
+      | "Arrangement"
+      | "Recording and Editing"
+      | "Mixing"
+      | "Mastering"
+      | "Writing, Lyrics & Language"
+      | "Identifiers"
+      | "Text and Notes"
+      | "Artwork"
+      | "Technical Audio"
+      | "Files and Sources"
+      | "Developer / Advanced";
+    order?: number;
+    commonValues?: string[];
+    examples?: string[];
+    help?: string;
+  };
+
   displayPolicy: string;
 };
 
@@ -318,6 +347,31 @@ type ExportDryRunValidation = {
   };
   canExport: boolean;
 };
+
+type ExportExecutionResult = {
+  releaseId: string;
+  container: ExportContainer;
+  executedAt: string;
+  confirmationPhrase: string;
+  items: Array<{
+    trackId: string;
+    status: "created" | "failed";
+    sourceAudioRelativePath?: string;
+    destinationRelativePath?: string;
+    encoder?: string;
+    sizeBytes?: number;
+    sha256?: string;
+    createdAt?: string;
+    error?: string;
+  }>;
+  summary: {
+    createdCount: number;
+    failedCount: number;
+  };
+};
+
+const EXPORT_CONFIRMATION_PHRASE =
+  "CREATE_VALIDATED_EXPORTS";
 
 const exportContainerLabels:
   Record<ExportContainer, string> = {
@@ -566,17 +620,28 @@ export function App() {
             </div>
 
             {applicationView === "library" && (
-              <button
-                type="button"
-                disabled={loading}
-                onClick={() =>
-                  void refreshLibrary()
-                }
-              >
-                {loading
-                  ? "Scanning…"
-                  : "Refresh library"}
-              </button>
+              <div className="page-header-actions">
+                {scan && (
+                  <p className="scan-time">
+                    Last scan:{" "}
+                    {new Date(
+                      scan.scannedAt,
+                    ).toLocaleString()}
+                  </p>
+                )}
+
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() =>
+                    void refreshLibrary()
+                  }
+                >
+                  {loading
+                    ? "Scanning…"
+                    : "Refresh library"}
+                </button>
+              </div>
             )}
           </header>
 
@@ -673,13 +738,6 @@ export function App() {
                       }
                     />
                   </section>
-
-                  <p className="scan-time">
-                    Last scan:{" "}
-                    {new Date(
-                      scan.scannedAt,
-                    ).toLocaleString()}
-                  </p>
 
                   {scan.warnings.length > 0 && (
                     <section className="warning-panel">
@@ -972,6 +1030,26 @@ function MetadataCompatibilityView({
 
 
   const [
+    exportConfirmation,
+    setExportConfirmation,
+  ] = useState("");
+  const [
+    exportExecution,
+    setExportExecution,
+  ] = useState<ExportExecutionResult | null>(
+    null,
+  );
+  const [
+    exportExecutionLoading,
+    setExportExecutionLoading,
+  ] = useState(false);
+  const [
+    exportExecutionError,
+    setExportExecutionError,
+  ] = useState<string | null>(null);
+
+
+  const [
     ffmpegCapabilities,
     setFfmpegCapabilities,
   ] = useState<FfmpegCapabilities | null>(
@@ -1116,6 +1194,9 @@ function MetadataCompatibilityView({
     setExportPlanError(null);
     setExportValidation(null);
     setExportValidationError(null);
+    setExportExecution(null);
+    setExportExecutionError(null);
+    setExportConfirmation("");
 
     try {
       const query = new URLSearchParams({
@@ -1224,6 +1305,90 @@ function MetadataCompatibilityView({
         );
       } finally {
         setExportValidationLoading(false);
+      }
+    };
+
+  const requestExportExecution =
+    async () => {
+      if (
+        !exportValidation?.canExport
+      ) {
+        setExportExecutionError(
+          "Run a successful dry-run validation before exporting.",
+        );
+        return;
+      }
+
+      if (
+        exportConfirmation !==
+        EXPORT_CONFIRMATION_PHRASE
+      ) {
+        setExportExecutionError(
+          `Type ${EXPORT_CONFIRMATION_PHRASE} exactly to confirm.`,
+        );
+        return;
+      }
+
+      setExportExecutionLoading(true);
+      setExportExecutionError(null);
+      setExportExecution(null);
+
+      try {
+        const response = await fetch(
+          "/api/export/execute",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              releaseId:
+                selectedExportReleaseId,
+              container:
+                exportContainer,
+              outputDirectory:
+                exportOutputDirectory,
+              ...(selectedExportTrackId !==
+              "all"
+                ? {
+                    trackId:
+                      selectedExportTrackId,
+                  }
+                : {}),
+              confirmation:
+                exportConfirmation,
+            }),
+          },
+        );
+
+        const result =
+          (await response.json()) as
+            | ExportExecutionResult
+            | { error?: string };
+
+        if (!response.ok) {
+          throw new Error(
+            "error" in result
+              ? result.error ??
+                  `Export execution failed: HTTP ${response.status}`
+              : `Export execution failed: HTTP ${response.status}`,
+          );
+        }
+
+        setExportExecution(
+          result as ExportExecutionResult,
+        );
+        setExportConfirmation("");
+        setExportValidation(null);
+      } catch (error) {
+        setExportExecutionError(
+          error instanceof Error
+            ? error.message
+            : "Unknown export execution error",
+        );
+      } finally {
+        setExportExecutionLoading(false);
       }
     };
 
@@ -2078,6 +2243,184 @@ function MetadataCompatibilityView({
                   </details>
                 );
               },
+            )}
+          </section>
+        )}
+
+
+        {exportValidation?.canExport && (
+          <section className="export-execution-gate">
+            <header>
+              <div>
+                <p className="eyebrow">
+                  Create-only execution
+                </p>
+                <h3>Execute validated export</h3>
+              </div>
+
+              <span className="status-warning">
+                Writes media files
+              </span>
+            </header>
+
+            <p>
+              The server rebuilds and validates the
+              plan immediately before execution.
+              Existing destination files are never
+              replaced.
+            </p>
+
+            <label>
+              <span>
+                Type{" "}
+                <code>
+                  {EXPORT_CONFIRMATION_PHRASE}
+                </code>{" "}
+                to confirm
+              </span>
+              <input
+                type="text"
+                autoComplete="off"
+                aria-describedby="export-confirmation-help"
+                value={exportConfirmation}
+                onChange={(event) =>
+                  setExportConfirmation(
+                    event.currentTarget.value,
+                  )
+                }
+              />
+            </label>
+
+            <p
+              id="export-confirmation-help"
+              className={`export-confirmation-help ${
+                exportConfirmation ===
+                EXPORT_CONFIRMATION_PHRASE
+                  ? "status-ready"
+                  : ""
+              }`}
+              aria-live="polite"
+            >
+              {exportConfirmation ===
+              EXPORT_CONFIRMATION_PHRASE
+                ? "Confirmation phrase matches. Export execution is enabled."
+                : `Enter ${EXPORT_CONFIRMATION_PHRASE} exactly to enable execution.`}
+            </p>
+
+            <button
+              type="button"
+              className={
+                exportExecutionLoading
+                  ? "is-loading"
+                  : undefined
+              }
+              disabled={
+                exportExecutionLoading ||
+                exportConfirmation !==
+                  EXPORT_CONFIRMATION_PHRASE
+              }
+              onClick={() =>
+                void requestExportExecution()
+              }
+            >
+              {exportExecutionLoading
+                ? "Creating exports…"
+                : "Create validated exports"}
+            </button>
+          </section>
+        )}
+
+        {exportExecutionError && (
+          <p className="message error">
+            {exportExecutionError}
+          </p>
+        )}
+
+        {exportExecution && (
+          <section className="export-execution-results">
+            <header>
+              <div>
+                <p className="eyebrow">
+                  Export receipts
+                </p>
+                <h3>Execution results</h3>
+              </div>
+
+              <div className="export-plan-summary">
+                <span>
+                  {
+                    exportExecution.summary
+                      .createdCount
+                  }
+                  {" created"}
+                </span>
+                <span>
+                  {
+                    exportExecution.summary
+                      .failedCount
+                  }
+                  {" failed"}
+                </span>
+              </div>
+            </header>
+
+            {exportExecution.items.map(
+              (item) => (
+                <details
+                  key={item.trackId}
+                  className={`export-execution-item status-${item.status}`}
+                >
+                  <summary>
+                    <strong>{item.trackId}</strong>
+                    <span>{item.status}</span>
+                  </summary>
+
+                  <div>
+                    {item.destinationRelativePath && (
+                      <p>
+                        <strong>
+                          Destination
+                        </strong>
+                        <code>
+                          {
+                            item.destinationRelativePath
+                          }
+                        </code>
+                      </p>
+                    )}
+
+                    {item.encoder && (
+                      <p>
+                        <strong>Encoder</strong>
+                        <code>{item.encoder}</code>
+                      </p>
+                    )}
+
+                    {item.sha256 && (
+                      <p>
+                        <strong>SHA-256</strong>
+                        <code>{item.sha256}</code>
+                      </p>
+                    )}
+
+                    {typeof item.sizeBytes ===
+                      "number" && (
+                      <p>
+                        <strong>Size</strong>
+                        <span>
+                          {item.sizeBytes} bytes
+                        </span>
+                      </p>
+                    )}
+
+                    {item.error && (
+                      <p className="message error">
+                        {item.error}
+                      </p>
+                    )}
+                  </div>
+                </details>
+              ),
             )}
           </section>
         )}
@@ -3113,6 +3456,689 @@ function buildMetadataAliasGroups(
   return groups;
 }
 
+const contributorRoleGroups: Array<{
+  pattern: RegExp;
+  group: NonNullable<
+    MetadataFieldDefinition["presentation"]
+  >["group"];
+}> = [
+  {
+    pattern:
+      /\b(mix|mixer|mixing)\b/i,
+    group: "Mixing",
+  },
+  {
+    pattern:
+      /\b(master|mastering|remaster)\b/i,
+    group: "Mastering",
+  },
+  {
+    pattern:
+      /\b(record|recording|engineer|editor|editing|transfer|restoration)\b/i,
+    group: "Recording and Editing",
+  },
+  {
+    pattern:
+      /\b(arrang|orchestrat|conductor)\b/i,
+    group: "Arrangement",
+  },
+  {
+    pattern:
+      /\b(composer|lyricist|songwriter|written|lyrics|music by)\b/i,
+    group: "Writing, Lyrics & Language",
+  },
+  {
+    pattern:
+      /\b(publisher|publishing|administrator)\b/i,
+    group: "Music Business & Rights",
+  },
+  {
+    pattern:
+      /\b(producer|production|programmer|sound designer|creative director|art director|coordinator|studio assistant|technician)\b/i,
+    group: "Production",
+  },
+];
+
+const metadataGroupOrder = [
+  "Release & Track Identity",
+  "Artists",
+  "Music Business & Rights",
+  "Dates",
+  "Track & Disc Numbering",
+  "Movement & Work",
+  "Performers",
+  "Writing, Lyrics & Language",
+  "Arrangement",
+  "Production",
+  "Recording and Editing",
+  "Mixing",
+  "Mastering",
+  "Identifiers",
+  "Text and Notes",
+  "Artwork",
+  "Technical Audio",
+  "Files and Sources",
+  "Developer / Advanced",
+] as const;
+
+const metadataGroupRank = new Map(
+  metadataGroupOrder.map(
+    (group, index) => [
+      group,
+      index,
+    ],
+  ),
+);
+
+function resolveMetadataRowGroup(
+  rows: FlattenedMetadataRow[],
+  row: FlattenedMetadataRow,
+  field:
+    | MetadataFieldDefinition
+    | undefined,
+): string {
+  const contributorMatch = row.path.match(
+    /^(track\.contributors\[\d+\])\./,
+  );
+
+  if (contributorMatch) {
+    const roleRow = rows.find(
+      (candidate) =>
+        candidate.path ===
+        `${contributorMatch[1]}.role`,
+    );
+
+    if (
+      roleRow &&
+      typeof roleRow.value === "string"
+    ) {
+      const roleValue = roleRow.value;
+
+      const matchedGroup =
+        contributorRoleGroups.find(
+          ({ pattern }) =>
+            pattern.test(roleValue),
+        );
+
+      if (matchedGroup) {
+        return matchedGroup.group;
+      }
+    }
+
+    return "Production";
+  }
+
+  const path = row.path;
+
+  /*
+   * Artwork entries are arrays-of-tables, so their paths commonly
+   * contain indexes such as release.artwork[0].role.
+   *
+   * Keep local file/path fields under Files and Sources, while the
+   * descriptive and structural artwork metadata belongs to Artwork.
+   */
+  const isArtworkPath =
+    /^(release|track)\.artwork(?:\[\d+\])?(?:\.|$)/.test(
+      path,
+    ) ||
+    /^production\.artwork(?:\[\d+\])?(?:\.|$)/.test(
+      path,
+    );
+
+  if (isArtworkPath) {
+    const artworkLeaf =
+      path.split(".").at(-1) ?? "";
+
+    const isArtworkFileReference =
+      /^(file|filename|path|relative_path|absolute_path|directory|source|source_file|master_path|web_path|embedded_path|local_path|uri|url)$/.test(
+        artworkLeaf,
+      ) ||
+      /(?:^|_)(file|filename|path|directory|source_path)$/.test(
+        artworkLeaf,
+      );
+
+    return isArtworkFileReference
+      ? "Files and Sources"
+      : "Artwork";
+  }
+
+  /*
+   * Also recognize artwork-related records nested below assets.
+   * Path-like leaves remain under Files and Sources.
+   */
+  if (
+    /^(release|track)\.assets\.(artwork|cover|front_cover|back_cover|booklet|disc_artwork|thumbnail)(?:\[\d+\])?(?:\.|$)/.test(
+      path,
+    )
+  ) {
+    const artworkLeaf =
+      path.split(".").at(-1) ?? "";
+
+    return /^(file|filename|path|relative_path|directory|source|source_file|local_path|uri|url)$/.test(
+      artworkLeaf,
+    )
+      ? "Files and Sources"
+      : "Artwork";
+  }
+
+  /*
+   * Keep sort fields beside the names or titles they support.
+   * These checks intentionally run before registry fallbacks.
+   */
+  if (
+    /^(release|track)\.(primary_artist|album_artists|featured_artists|remixers)(\[|\.|$)/.test(
+      path,
+    ) ||
+    /^release\.(album_artists|credits\.featured_artists|credits\.remixers)(\[|\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Artists";
+  }
+
+  if (
+    /^(track\.performers|release\.credits\.performers)(\[|\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Performers";
+  }
+
+  if (
+    /^(track\.(arrangers|orchestrators|conductors)|release\.credits\.arrangers)(\[|\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Arrangement";
+  }
+
+  if (
+    /^(track\.(composers|lyricists|songwriters)|release\.credits\.(composers|lyricists|songwriters))(\[|\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Writing, Lyrics & Language";
+  }
+
+  if (
+    /^track\.(language|script)(\.|$)/.test(
+      path,
+    ) ||
+    /^release\.(language|script)(\.|$)/.test(
+      path,
+    ) ||
+    /^track\.text\.(lyrics|lyrics_language|lyrics_script|lyrics_source|lyrics_copyright)(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Writing, Lyrics & Language";
+  }
+
+  if (
+    /^(release|track)\.(title|subtitle|display_title|version|type|status|explicit)(\.|$)/.test(
+      path,
+    ) ||
+    /^release\.(genres|identifiers\.(release_genres|release_moods|release_styles|release_tags))(\.|$)/.test(
+      path,
+    ) ||
+    /^track\.(classification|sort_title)(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Release & Track Identity";
+  }
+
+  if (
+    /^(release|track)\.id(\.|$)/.test(
+      path,
+    ) ||
+    /^(schema|release_reference|track_reference|settings)(\.|$)/.test(
+      path,
+    ) ||
+    /\.(missing_file_policy)$/.test(
+      path,
+    )
+  ) {
+    return "Developer / Advanced";
+  }
+
+  if (
+    /^release\.(label|distributor|rights)(\.|$)/.test(
+      path,
+    ) ||
+    /^track\.(publishers|publishing|rights)(\[|\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Music Business & Rights";
+  }
+
+  if (
+    /^(release|track)\.dates(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Dates";
+  }
+
+  if (
+    /^(release|track)\.numbering(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Track & Disc Numbering";
+  }
+
+  if (
+    /^track\.movement(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Movement & Work";
+  }
+
+  /*
+   * Artwork classification must run before generic identity,
+   * identifier, and file/source rules. Artwork fields may occur
+   * beneath artwork, assets, identifiers, or production paths.
+   */
+  if (
+    /(^|\.)(artwork|artwork_master|cover|cover_art|cover_artwork|front_cover|back_cover|embedded_artwork|image|thumbnail)(\.|$)/.test(
+      path,
+    ) ||
+    /^(release|track)\.assets\.(front|back|cover|artwork|image|thumbnail)(\.|$)/.test(
+      path,
+    ) ||
+    /^production\.artwork(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Artwork";
+  if (
+    /^(release|track)\.identifiers(\.|$)/.test(
+      path,
+    ) ||
+    /\.(isrc|iswc|isni|ipi_name_number|ipi_base_number|musicbrainz_[a-z_]+|discogs_[a-z_]+|acoustid|spotify_[a-z_]+|barcode|ean|upc|catalog_number)$/.test(
+      path,
+    )
+  ) {
+    return "Identifiers";
+  }
+
+  }
+
+  if (
+    /^track\.text(\.|$)/.test(path) ||
+    /^release\.text(\.|$)/.test(path) ||
+    /\.(comment|description|notes|liner_notes|website)$/.test(
+      path,
+    )
+  ) {
+    return "Text and Notes";
+  }
+
+  if (
+    /^track\.audio(\.|$)/.test(path) ||
+    /\.(sample_rate|bit_depth|channels|channel_layout|codec|bpm|key|camelot_key|time_signature|tuning_hz|duration)(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Technical Audio";
+  }
+
+  if (
+    /^(release|track)\.(assets|track_sources|settings_source|credit_sources|production_note_sources)(\.|$)/.test(
+      path,
+    ) ||
+    /^production\.(archive|project)(\.|$)/.test(
+      path,
+    ) ||
+    /\.(file|session_file|directory|master_path|web_path|embedded_path)$/.test(
+      path,
+    )
+  ) {
+    return "Files and Sources";
+  }
+
+  if (
+    /^production\.(mix|mixing)(\.|$)/.test(
+      path,
+    ) ||
+    /^track\.production\.(mix|mixing)(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Mixing";
+  }
+
+  if (
+    /^production\.mastering(\.|$)/.test(
+      path,
+    ) ||
+    /^track\.production\.mastering(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Mastering";
+  }
+
+  if (
+    /^production\.(recording|editing|sound_design)(\.|$)/.test(
+      path,
+    ) ||
+    /^track\.production\.(recording|editing|sound_design)(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Recording and Editing";
+  }
+
+  if (
+    /^(production|track\.production|release\.credits\.contributors)(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Production";
+  }
+
+  const registeredGroup =
+    field?.presentation?.group;
+
+  if (registeredGroup) {
+    return registeredGroup;
+  }
+
+  /*
+   * Unknown authored fields remain visible, but no generic Core
+   * section is created. Identity is the safest user-facing fallback.
+   */
+  return "Release & Track Identity";
+}
+
+type MetadataFieldModalView =
+  | "help"
+  | "information";
+
+function MetadataFieldModal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  const closeButtonRef =
+    useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const previousOverflow =
+      document.body.style.overflow;
+
+    document.body.style.overflow =
+      "hidden";
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (
+      event: KeyboardEvent,
+    ) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    window.addEventListener(
+      "keydown",
+      handleKeyDown,
+    );
+
+    return () => {
+      document.body.style.overflow =
+        previousOverflow;
+      window.removeEventListener(
+        "keydown",
+        handleKeyDown,
+      );
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="metadata-field-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (
+          event.target ===
+          event.currentTarget
+        ) {
+          onClose();
+        }
+      }}
+    >
+      <section
+        className="metadata-field-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="metadata-field-modal-title"
+      >
+        <header>
+          <h3 id="metadata-field-modal-title">
+            {title}
+          </h3>
+
+          <button
+            ref={closeButtonRef}
+            type="button"
+            className="metadata-field-modal-close"
+            aria-label="Close dialog"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </header>
+
+        <div className="metadata-field-modal-body">
+          {children}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MetadataFieldControls({
+  field,
+  path,
+  valueType,
+}: {
+  field:
+    | MetadataFieldDefinition
+    | undefined;
+  path: string;
+  valueType:
+    FlattenedMetadataRow["valueType"];
+}) {
+  const [
+    modalView,
+    setModalView,
+  ] =
+    useState<MetadataFieldModalView | null>(
+      null,
+    );
+
+  const presentation =
+    field?.presentation;
+  const hasHelp = Boolean(
+    presentation &&
+      (presentation.help ||
+        presentation.commonValues
+          ?.length ||
+        presentation.examples?.length),
+  );
+  const groups = field
+    ? buildMetadataAliasGroups(field)
+    : [];
+
+  return (
+    <>
+      <span className="metadata-field-controls">
+        {hasHelp && (
+          <button
+            type="button"
+            className="metadata-field-control"
+            aria-label={`Help for ${
+              field?.label ?? path
+            }`}
+            title="Usage help"
+            onClick={() =>
+              setModalView("help")
+            }
+          >
+            ?
+          </button>
+        )}
+
+        <button
+          type="button"
+          className="metadata-field-control"
+          aria-label={`Information for ${
+            field?.label ?? path
+          }`}
+          title="Field information"
+          onClick={() =>
+            setModalView("information")
+          }
+        >
+          i
+        </button>
+      </span>
+
+      {modalView === "help" &&
+        field &&
+        presentation && (
+          <MetadataFieldModal
+            title={`${field.label} — Help`}
+            onClose={() =>
+              setModalView(null)
+            }
+          >
+            {presentation.help && (
+              <p>{presentation.help}</p>
+            )}
+
+            {presentation.commonValues &&
+              presentation.commonValues
+                .length > 0 && (
+                <section>
+                  <h4>Common values</h4>
+                  <ul className="metadata-field-modal-values">
+                    {presentation.commonValues.map(
+                      (value) => (
+                        <li key={value}>
+                          <code>{value}</code>
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </section>
+              )}
+
+            {presentation.examples &&
+              presentation.examples.length >
+                0 && (
+                <section>
+                  <h4>Examples</h4>
+                  <ul className="metadata-field-modal-values">
+                    {presentation.examples.map(
+                      (value) => (
+                        <li key={value}>
+                          <code>{value}</code>
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </section>
+              )}
+          </MetadataFieldModal>
+        )}
+
+      {modalView === "information" && (
+        <MetadataFieldModal
+          title={`${
+            field?.label ?? path
+          } — Field Information`}
+          onClose={() =>
+            setModalView(null)
+          }
+        >
+          <dl className="metadata-field-facts">
+            <div>
+              <dt>Canonical path</dt>
+              <dd>
+                <code>{path}</code>
+              </dd>
+            </div>
+
+            {field && (
+              <div>
+                <dt>Description</dt>
+                <dd>
+                  {field.description}
+                </dd>
+              </div>
+            )}
+
+            <div>
+              <dt>Data type</dt>
+              <dd>
+                <code>{valueType}</code>
+              </dd>
+            </div>
+          </dl>
+
+          {field &&
+            groups.length > 0 && (
+              <section className="metadata-tag-details">
+                <h4>
+                  Player compatibility and
+                  tag mappings
+                </h4>
+
+                <dl className="metadata-aliases">
+                  {groups.map((group) => (
+                    <div
+                      key={group.label}
+                    >
+                      <dt>
+                        {group.label}
+                      </dt>
+
+                      <dd
+                        className={
+                          group.verified ===
+                          false
+                            ? "alias-unverified"
+                            : undefined
+                        }
+                      >
+                        {group.values.join(
+                          ", ",
+                        )}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+
+                <MetadataCompatibilityNotes
+                  field={field}
+                />
+              </section>
+            )}
+        </MetadataFieldModal>
+      )}
+    </>
+  );
+}
+
 function ReleaseMetadataDetailView({
   detail,
   metadataRegistry,
@@ -3986,40 +5012,6 @@ function MetadataCompatibilityNotes({
   );
 }
 
-function MetadataAliasList({
-  field,
-}: {
-  field: MetadataFieldDefinition;
-}) {
-  const groups =
-    buildMetadataAliasGroups(field);
-
-  return (
-    <>
-      <dl className="metadata-aliases">
-        {groups.map((group) => (
-          <div key={group.label}>
-            <dt>{group.label}</dt>
-
-            <dd
-              className={
-                group.verified === false
-                  ? "alias-unverified"
-                  : undefined
-              }
-            >
-              {group.values.join(", ")}
-            </dd>
-          </div>
-        ))}
-      </dl>
-
-      <MetadataCompatibilityNotes
-        field={field}
-      />
-    </>
-  );
-}
 
 function MetadataValueCell({
   document,
@@ -4232,6 +5224,197 @@ function MetadataDocumentTable({
   const rows = flattenMetadata(
     document.parsed,
   );
+  const metadataSectionsRef =
+    useRef<HTMLDivElement>(null);
+
+  const handleMetadataSectionClick = (
+    event: React.MouseEvent<HTMLElement>,
+  ) => {
+    if (!event.altKey) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const details =
+      event.currentTarget.closest(
+        "details",
+      );
+
+    if (!(details instanceof HTMLDetailsElement)) {
+      return;
+    }
+
+    const shouldOpen = !details.open;
+
+    metadataSectionsRef.current
+      ?.querySelectorAll<HTMLDetailsElement>(
+        "details[data-metadata-section]",
+      )
+      .forEach((section) => {
+        section.open = shouldOpen;
+      });
+  };
+
+  const groupedRows = rows.map(
+    (row, sourceIndex) => {
+      const fieldDefinition =
+        findRegisteredMetadataField(
+          metadataRegistry,
+          row.path,
+        );
+
+      return {
+        row,
+        fieldDefinition,
+        group:
+          resolveMetadataRowGroup(
+            rows,
+            row,
+            fieldDefinition,
+          ),
+        sourceIndex,
+      };
+    },
+  );
+
+  const numberingRows =
+    groupedRows
+      .filter(
+        ({ row }) =>
+          /^(release|track)\.numbering\./.test(
+            row.path,
+          ),
+      )
+      .sort(
+        (left, right) =>
+          (left.fieldDefinition
+            ?.presentation?.order ??
+            Number.MAX_SAFE_INTEGER) -
+          (right.fieldDefinition
+            ?.presentation?.order ??
+            Number.MAX_SAFE_INTEGER),
+      );
+
+  const standardRows =
+    groupedRows
+      .filter(
+        ({ row }) =>
+          !/^(release|track)\.numbering\./.test(
+            row.path,
+          ),
+      )
+      .sort((left, right) => {
+        const groupDifference =
+          (metadataGroupRank.get(
+            left.group as
+              typeof metadataGroupOrder[number],
+          ) ??
+            Number.MAX_SAFE_INTEGER) -
+          (metadataGroupRank.get(
+            right.group as
+              typeof metadataGroupOrder[number],
+          ) ??
+            Number.MAX_SAFE_INTEGER);
+
+        if (groupDifference !== 0) {
+          return groupDifference;
+        }
+
+        const inferPathOrder = (
+          path: string,
+        ): number => {
+          if (
+            /\.name$/.test(path)
+          ) {
+            return 10;
+          }
+
+          if (
+            /\.sort_name$/.test(path)
+          ) {
+            return 20;
+          }
+
+          if (
+            /\.(role|type|status)$/.test(
+              path,
+            )
+          ) {
+            return 30;
+          }
+
+          if (
+            /\.(label|publisher|copyright|phonographic_copyright|license)/.test(
+              path,
+            )
+          ) {
+            return 40;
+          }
+
+          if (
+            /\.(recorded_start|recorded_end|original_release|release|mixed|mastered|composed|arranged|remixed|remastered)$/.test(
+              path,
+            )
+          ) {
+            return 50;
+          }
+
+          return Number.MAX_SAFE_INTEGER;
+        };
+
+        const orderDifference =
+          (left.fieldDefinition
+            ?.presentation?.order ??
+            inferPathOrder(
+              left.row.path,
+            )) -
+          (right.fieldDefinition
+            ?.presentation?.order ??
+            inferPathOrder(
+              right.row.path,
+            ));
+
+        return orderDifference !== 0
+          ? orderDifference
+          : left.sourceIndex -
+              right.sourceIndex;
+      })
+      .map((item, index, items) => ({
+        ...item,
+        startsGroup:
+          index === 0 ||
+          item.group !==
+            items[index - 1].group,
+      })); 
+
+  const standardSections =
+    standardRows.reduce<
+      Array<{
+        group: string;
+        rows: Array<
+          (typeof standardRows)[number]
+        >;
+      }>
+    >((sections, item) => {
+      const current =
+        sections[sections.length - 1];
+
+      if (
+        !current ||
+        current.group !== item.group
+      ) {
+        sections.push({
+          group: item.group,
+          rows: [item],
+        });
+      } else {
+        current.rows.push(item);
+      }
+
+      return sections;
+    }, []);
+
 
   const documentChangeCount =
     getDocumentDraftChanges(
@@ -4278,68 +5461,211 @@ function MetadataDocumentTable({
       <div className="metadata-table-header">
         <span>Metadata key</span>
         <span>Value</span>
-        <span>Type</span>
       </div>
 
-      <div className="metadata-table-body">
-        {rows.map((row) => {
-          const fieldDefinition =
-            findRegisteredMetadataField(
-              metadataRegistry,
-              row.path,
-            );
-
-          return (
-            <div
-              key={row.path}
-              className={[
-                "metadata-table-row",
-                /\[\d+\]/.test(row.path)
-                  ? "indexed-metadata-row"
-                  : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
+      <div
+        ref={metadataSectionsRef}
+        className="metadata-table-body"
+      >
+        {numberingRows.length > 0 && (
+          <details
+            className="metadata-section metadata-numbering-group"
+            data-metadata-section
+            open
+          >
+            <summary
+              onClick={
+                handleMetadataSectionClick
+              }
             >
-              <div className="metadata-key">
-                <strong>
-                  {fieldDefinition?.label ??
-                    row.path}
-                </strong>
+              <span
+                className="metadata-section-triangle"
+                aria-hidden="true"
+              />
 
-                <code>{row.path}</code>
-
-                {fieldDefinition && (
-                  <>
-                    <small>
-                      {
-                        fieldDefinition.description
-                      }
-                    </small>
-
-                    <MetadataAliasList
-                      field={fieldDefinition}
-                    />
-                  </>
-                )}
+              <div>
+                <h4>
+                  Track &amp; Disc Numbering
+                </h4>
+                <p>
+                  Sequence and release-volume
+                  information.
+                </p>
               </div>
 
-              <MetadataValueCell
-              document={document}
-              row={row}
-              editMode={editMode}
-              draft={draft}
-              onDraftValueChange={
-                onDraftValueChange
-              }
-            />
-
-              <span className="metadata-type">
-                {row.valueType}
+              <span className="metadata-numbering-summary">
+                Track {String(
+                  numberingRows.find(
+                    ({ row }) =>
+                      row.path ===
+                      "track.numbering.track_number",
+                  )?.row.value ?? "—",
+                )} of {String(
+                  numberingRows.find(
+                    ({ row }) =>
+                      row.path ===
+                      "track.numbering.track_total",
+                  )?.row.value ??
+                    numberingRows.find(
+                      ({ row }) =>
+                        row.path ===
+                        "release.numbering.track_total",
+                    )?.row.value ??
+                    "—",
+                )}
+                {" · "}
+                Disc {String(
+                  numberingRows.find(
+                    ({ row }) =>
+                      row.path ===
+                      "track.numbering.disc_number",
+                  )?.row.value ?? "—",
+                )} of {String(
+                  numberingRows.find(
+                    ({ row }) =>
+                      row.path ===
+                      "track.numbering.disc_total",
+                  )?.row.value ??
+                    numberingRows.find(
+                      ({ row }) =>
+                        row.path ===
+                        "release.numbering.disc_total",
+                    )?.row.value ??
+                    "—",
+                )}
               </span>
+            </summary>
+
+            <div className="metadata-numbering-grid">
+              {numberingRows.map(
+                ({
+                  row,
+                  fieldDefinition,
+                }) => (
+                  <div
+                    key={row.path}
+                    className="metadata-numbering-card"
+                  >
+                    <div className="metadata-key">
+                      <div className="metadata-key-heading">
+                        <strong>
+                          {fieldDefinition
+                            ?.label ??
+                            row.path}
+                        </strong>
+
+                        <MetadataFieldControls
+                          field={fieldDefinition}
+                          path={row.path}
+                          valueType={
+                            row.valueType
+                          }
+                        />
+                      </div>
+                    </div>
+
+                    <MetadataValueCell
+                      document={document}
+                      row={row}
+                      editMode={editMode}
+                      draft={draft}
+                      onDraftValueChange={
+                        onDraftValueChange
+                      }
+                    />
+                  </div>
+                ),
+              )}
             </div>
-          );
-        })}
+          </details>
+        )}
+
+        {standardSections.map(
+          (section) => (
+            <details
+              key={section.group}
+              className="metadata-section"
+              data-metadata-section
+              open
+            >
+              <summary
+                onClick={
+                  handleMetadataSectionClick
+                }
+              >
+                <span
+                  className="metadata-section-triangle"
+                  aria-hidden="true"
+                />
+
+                <strong>
+                  {section.group}
+                </strong>
+
+                <small>
+                  {section.rows.length}
+                  {" "}
+                  {section.rows.length === 1
+                    ? "field"
+                    : "fields"}
+                </small>
+              </summary>
+
+              <div className="metadata-section-rows">
+                {section.rows.map(
+                  ({
+                    row,
+                    fieldDefinition,
+                  }) => (
+                    <div
+                      key={row.path}
+                      className={[
+                        "metadata-table-row",
+                        /\[\d+\]/.test(
+                          row.path,
+                        )
+                          ? "indexed-metadata-row"
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                    >
+                      <div className="metadata-key">
+                        <div className="metadata-key-heading">
+                          <strong>
+                            {fieldDefinition
+                              ?.label ??
+                              row.path}
+                          </strong>
+
+                          <MetadataFieldControls
+                            field={
+                              fieldDefinition
+                            }
+                            path={row.path}
+                            valueType={
+                              row.valueType
+                            }
+                          />
+                        </div>
+                      </div>
+
+                      <MetadataValueCell
+                        document={document}
+                        row={row}
+                        editMode={editMode}
+                        draft={draft}
+                        onDraftValueChange={
+                          onDraftValueChange
+                        }
+                      />
+                    </div>
+                  ),
+                )}
+              </div>
+            </details>
+          ),
+        )}
       </div>
 
       <details className="raw-toml">

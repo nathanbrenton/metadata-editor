@@ -295,6 +295,32 @@ export type ExportDryRunValidation = {
   canExport: boolean;
 };
 
+
+
+export type ExportExecutionItem = {
+  trackId: string;
+  status: "created" | "failed";
+  sourceAudioRelativePath?: string;
+  destinationRelativePath?: string;
+  encoder?: string;
+  sizeBytes?: number;
+  sha256?: string;
+  createdAt?: string;
+  error?: string;
+};
+
+export type ExportExecutionResult = {
+  releaseId: string;
+  container: ExportContainer;
+  executedAt: string;
+  confirmationPhrase: string;
+  items: ExportExecutionItem[];
+  summary: {
+    createdCount: number;
+    failedCount: number;
+  };
+};
+
 export type MetadataValueType =
   | "string"
   | "integer"
@@ -357,6 +383,33 @@ export type MetadataFieldDefinition = {
     displayLabel?: string;
     note: string;
   }>;
+
+  presentation?: {
+    group:
+      | "Release & Track Identity"
+      | "Artists"
+      | "Music Business & Rights"
+      | "Dates"
+      | "Track & Disc Numbering"
+      | "Movement & Work"
+      | "Performers"
+      | "Production"
+      | "Arrangement"
+      | "Recording and Editing"
+      | "Mixing"
+      | "Mastering"
+      | "Writing, Lyrics & Language"
+      | "Identifiers"
+      | "Text and Notes"
+      | "Artwork"
+      | "Technical Audio"
+      | "Files and Sources"
+      | "Developer / Advanced";
+    order?: number;
+    commonValues?: string[];
+    examples?: string[];
+    help?: string;
+  };
 
   displayPolicy:
     | "auto"
