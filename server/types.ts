@@ -233,6 +233,32 @@ export type MetadataExportPlan = {
   warnings: string[];
 };
 
+
+export type FfmpegCapabilityStatus =
+  | "ready"
+  | "fallback-required"
+  | "unsupported";
+
+export type FfmpegContainerCapability = {
+  container: ExportContainer;
+  status: FfmpegCapabilityStatus;
+  preferredEncoder: string;
+  selectedEncoder?: string;
+  fallbackEncoders: string[];
+  note: string;
+};
+
+export type FfmpegCapabilities = {
+  available: boolean;
+  version?: string;
+  executable: string;
+  encoders: string[];
+  containers:
+    FfmpegContainerCapability[];
+  checkedAt: string;
+  error?: string;
+};
+
 export type MetadataValueType =
   | "string"
   | "integer"

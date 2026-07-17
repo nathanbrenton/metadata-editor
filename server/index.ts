@@ -4,6 +4,9 @@ import {
 } from "node:http";
 
 import { buildMetadataExportPlan } from "./export-plan.js";
+import {
+  detectFfmpegCapabilities,
+} from "./ffmpeg-capabilities.js";
 import { buildMetadataGenerationPlan } from "./generation-plan.js";
 import { readJsonBody } from "./http.js";
 import { buildMetadataPreview } from "./inference.js";
@@ -70,6 +73,19 @@ const server = createServer(
       request.url ?? "/",
       `http://${host}:${port}`,
     );
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/ffmpeg/capabilities"
+    ) {
+      sendJson(
+        response,
+        200,
+        await detectFfmpegCapabilities(),
+      );
+      return;
+    }
 
     if (
       request.method === "GET" &&

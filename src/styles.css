@@ -2170,3 +2170,74 @@ button,
     display: grid;
   }
 }
+
+
+.ffmpeg-capability-panel {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1fr)
+    minmax(0, 1fr)
+    auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid
+    #3f3f3f;
+  border-radius: 0.75rem;
+  background:
+    color-mix(
+      in srgb,
+      #1b1b1b 92%,
+      transparent
+    );
+}
+
+.ffmpeg-capability-panel > div {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.ffmpeg-capability-panel span,
+.ffmpeg-capability-panel small {
+  color: #aaa;
+}
+
+.ffmpeg-capability-selection code {
+  overflow-wrap: anywhere;
+}
+
+.ffmpeg-capability-status {
+  width: fit-content;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid
+    currentColor;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ffmpeg-capability-status.status-ready {
+  color: #8fcf9f;
+}
+
+.ffmpeg-capability-status.status-fallback-required {
+  color: #e5bd6d;
+}
+
+.ffmpeg-capability-status.status-unsupported {
+  color: #e58b8b;
+}
+
+@media (max-width: 760px) {
+  .ffmpeg-capability-panel {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .ffmpeg-capability-panel button {
+    width: 100%;
+  }
+}

@@ -263,6 +263,31 @@ type MetadataExportPlan = {
   warnings: string[];
 };
 
+type FfmpegCapabilityStatus =
+  | "ready"
+  | "fallback-required"
+  | "unsupported";
+
+type FfmpegContainerCapability = {
+  container: ExportContainer;
+  status: FfmpegCapabilityStatus;
+  preferredEncoder: string;
+  selectedEncoder?: string;
+  fallbackEncoders: string[];
+  note: string;
+};
+
+type FfmpegCapabilities = {
+  available: boolean;
+  version?: string;
+  executable: string;
+  encoders: string[];
+  containers:
+    FfmpegContainerCapability[];
+  checkedAt: string;
+  error?: string;
+};
+
 const exportContainerLabels:
   Record<ExportContainer, string> = {
     mp3: "MP3 / ID3",
@@ -896,6 +921,78 @@ function MetadataCompatibilityView({
     setExportPlanError,
   ] = useState<string | null>(null);
 
+  const [
+    ffmpegCapabilities,
+    setFfmpegCapabilities,
+  ] = useState<FfmpegCapabilities | null>(
+    null,
+  );
+  const [
+    ffmpegCapabilitiesLoading,
+    setFfmpegCapabilitiesLoading,
+  ] = useState(false);
+  const [
+    ffmpegCapabilitiesError,
+    setFfmpegCapabilitiesError,
+  ] = useState<string | null>(null);
+
+  const refreshFfmpegCapabilities =
+    useCallback(async () => {
+      setFfmpegCapabilitiesLoading(true);
+      setFfmpegCapabilitiesError(null);
+
+      try {
+        const response = await fetch(
+          "/api/ffmpeg/capabilities",
+        );
+
+        const result =
+          (await response.json()) as
+            | FfmpegCapabilities
+            | { error?: string };
+
+        if (!response.ok) {
+          throw new Error(
+            "error" in result
+              ? result.error ??
+                  `FFmpeg capability request failed: HTTP ${response.status}`
+              : `FFmpeg capability request failed: HTTP ${response.status}`,
+          );
+        }
+
+        setFfmpegCapabilities(
+          result as FfmpegCapabilities,
+        );
+      } catch (error) {
+        setFfmpegCapabilities(null);
+        setFfmpegCapabilitiesError(
+          error instanceof Error
+            ? error.message
+            : "Unknown FFmpeg capability error",
+        );
+      } finally {
+        setFfmpegCapabilitiesLoading(false);
+      }
+    }, []);
+
+  useEffect(() => {
+    void refreshFfmpegCapabilities();
+  }, [refreshFfmpegCapabilities]);
+
+  const selectedContainerCapability =
+    useMemo(
+      () =>
+        ffmpegCapabilities?.containers.find(
+          (capability) =>
+            capability.container ===
+            exportContainer,
+        ) ?? null,
+      [
+        ffmpegCapabilities,
+        exportContainer,
+      ],
+    );
+
   useEffect(() => {
     if (
       selectedExportReleaseId &&
@@ -1325,6 +1422,84 @@ function MetadataCompatibilityView({
             </p>
           </div>
         </header>
+
+        <section className="ffmpeg-capability-panel">
+          <div>
+            <p className="eyebrow">
+              Local FFmpeg
+            </p>
+
+            {ffmpegCapabilitiesLoading ? (
+              <strong>
+                Checking encoder availability…
+              </strong>
+            ) : ffmpegCapabilities ? (
+              <>
+                <strong>
+                  {ffmpegCapabilities.available
+                    ? `FFmpeg ${ffmpegCapabilities.version ?? "unknown"}`
+                    : "FFmpeg unavailable"}
+                </strong>
+                <span>
+                  {ffmpegCapabilities.available
+                    ? `${ffmpegCapabilities.encoders.length} encoders detected`
+                    : ffmpegCapabilities.error ??
+                      "The ffmpeg executable could not be run."}
+                </span>
+              </>
+            ) : (
+              <strong>
+                Capability check unavailable
+              </strong>
+            )}
+          </div>
+
+          <div className="ffmpeg-capability-selection">
+            {selectedContainerCapability ? (
+              <>
+                <span
+                  className={`ffmpeg-capability-status status-${selectedContainerCapability.status}`}
+                >
+                  {
+                    selectedContainerCapability.status
+                  }
+                </span>
+                <code>
+                  {selectedContainerCapability.selectedEncoder ??
+                    selectedContainerCapability.preferredEncoder}
+                </code>
+                <small>
+                  {
+                    selectedContainerCapability.note
+                  }
+                </small>
+              </>
+            ) : (
+              <small>
+                No capability result is available
+                for the selected container.
+              </small>
+            )}
+          </div>
+
+          <button
+            type="button"
+            disabled={
+              ffmpegCapabilitiesLoading
+            }
+            onClick={() =>
+              void refreshFfmpegCapabilities()
+            }
+          >
+            Recheck FFmpeg
+          </button>
+        </section>
+
+        {ffmpegCapabilitiesError && (
+          <p className="message error">
+            {ffmpegCapabilitiesError}
+          </p>
+        )}
 
         <div className="export-plan-controls">
           <label>
