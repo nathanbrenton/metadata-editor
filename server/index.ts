@@ -1,7 +1,12 @@
 import {
+  readFile,
+  realpath,
+} from "node:fs/promises";
+import {
   createServer,
   type ServerResponse,
 } from "node:http";
+import path from "node:path";
 
 import { buildMetadataExportPlan } from "./export-plan.js";
 import {
@@ -18,9 +23,20 @@ import { buildMetadataGenerationPlan } from "./generation-plan.js";
 import { readJsonBody } from "./http.js";
 import { buildMetadataPreview } from "./inference.js";
 import { metadataFieldRegistry } from "./metadata-registry.js";
-import { resolveMediaRoot } from "./media-root.js";
+import {
+  assertPathWithinRoot,
+  resolveMediaRoot,
+} from "./media-root.js";
 import { readReleaseMetadataDetail } from "./metadata-reader.js";
 import { saveScalarMetadataChanges } from "./metadata-saver.js";
+import {
+  getReleaseNumberingTotalsFromChanges,
+  synchronizeTrackNumberingTotals,
+} from "./numbering-sync.js";
+import {
+  buildStarterMetadataPlan,
+  type StarterMetadataInput,
+} from "./starter-metadata.js";
 import { executeMetadataCreationPlan } from "./metadata-writer.js";
 import { buildGeneratedTomlPreview } from "./toml-preview.js";
 import {
@@ -74,12 +90,97 @@ function sendJson(
   );
 }
 
+const artworkContentTypes = new Map([
+  [".avif", "image/avif"],
+  [".gif", "image/gif"],
+  [".jpeg", "image/jpeg"],
+  [".jpg", "image/jpeg"],
+  [".png", "image/png"],
+  [".tif", "image/tiff"],
+  [".tiff", "image/tiff"],
+  [".webp", "image/webp"],
+]);
+
+async function sendLibraryArtwork(
+  response: ServerResponse,
+  relativePath: string,
+): Promise<void> {
+  const extension = path
+    .extname(relativePath)
+    .toLowerCase();
+  const contentType =
+    artworkContentTypes.get(extension);
+
+  if (!contentType) {
+    sendJson(response, 415, {
+      error: "Unsupported artwork file type",
+    });
+    return;
+  }
+
+  const mediaRoot = await resolveMediaRoot();
+  const candidatePath = assertPathWithinRoot(
+    mediaRoot,
+    path.join(mediaRoot, relativePath),
+  );
+
+  // Canonicalize the file itself so symlinks cannot escape the root.
+  const canonicalPath = await realpath(candidatePath);
+  assertPathWithinRoot(mediaRoot, canonicalPath);
+
+  const content = await readFile(canonicalPath);
+
+  response.statusCode = 200;
+  response.setHeader("Content-Type", contentType);
+  response.setHeader(
+    "Cache-Control",
+    "private, max-age=60",
+  );
+  response.setHeader(
+    "X-Content-Type-Options",
+    "nosniff",
+  );
+  response.end(content);
+}
+
 const server = createServer(
   async (request, response) => {
     const requestUrl = new URL(
       request.url ?? "/",
       `http://${host}:${port}`,
     );
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/library/artwork"
+    ) {
+      const relativePath =
+        requestUrl.searchParams.get("path");
+
+      if (!relativePath) {
+        sendJson(response, 400, {
+          error: "Missing artwork path",
+        });
+        return;
+      }
+
+      try {
+        await sendLibraryArtwork(
+          response,
+          relativePath,
+        );
+      } catch (error) {
+        sendJson(response, 404, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Artwork not found",
+        });
+      }
+
+      return;
+    }
 
     if (
       request.method === "GET" &&
@@ -620,6 +721,103 @@ const server = createServer(
     if (
       request.method === "POST" &&
       requestUrl.pathname ===
+        "/api/library/create-starter-metadata"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const confirmation =
+          "confirmation" in body &&
+          typeof body.confirmation === "string"
+            ? body.confirmation
+            : null;
+
+        if (
+          confirmation !==
+          "CREATE_STARTER_METADATA"
+        ) {
+          sendJson(response, 400, {
+            error:
+              "Explicit CREATE_STARTER_METADATA confirmation is required",
+          });
+          return;
+        }
+
+        const input =
+          "starter" in body &&
+          typeof body.starter === "object" &&
+          body.starter !== null
+            ? (body.starter as StarterMetadataInput)
+            : null;
+
+        if (!input) {
+          sendJson(response, 400, {
+            error:
+              "Missing starter metadata payload",
+          });
+          return;
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        const release = await scanReleaseById(
+          mediaRoot,
+          input.releaseId,
+        );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        const plan =
+          buildStarterMetadataPlan(
+            release,
+            input,
+          );
+
+        if (plan.summary.blockedCount > 0) {
+          sendJson(response, 409, {
+            error:
+              "Starter metadata cannot be created because one or more target files already exist.",
+            plan,
+          });
+          return;
+        }
+
+        const result =
+          await executeMetadataCreationPlan(
+            mediaRoot,
+            plan,
+          );
+
+        sendJson(response, 201, result);
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown starter metadata creation error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
         "/api/library/save-scalar-metadata"
     ) {
       try {
@@ -729,7 +927,29 @@ const server = createServer(
             normalizedChanges,
           );
 
-        sendJson(response, 200, receipt);
+        const totals =
+          relativePath.endsWith(
+            "/release.toml",
+          )
+            ? getReleaseNumberingTotalsFromChanges(
+                normalizedChanges,
+              )
+            : {};
+
+        const synchronization =
+          await synchronizeTrackNumberingTotals(
+            mediaRoot,
+            release,
+            totals,
+          );
+
+        sendJson(response, 200, {
+          ...receipt,
+          synchronizedTrackFiles:
+            synchronization.synchronizedTrackFiles,
+          skippedTrackFiles:
+            synchronization.skippedTrackFiles,
+        });
       } catch (error) {
         sendJson(response, 409, {
           error:

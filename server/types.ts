@@ -174,6 +174,12 @@ export type ScalarMetadataSaveReceipt = {
   savedAt: string;
 };
 
+export type ScalarMetadataSaveResponse =
+  ScalarMetadataSaveReceipt & {
+    synchronizedTrackFiles?: number;
+    skippedTrackFiles?: number;
+  };
+
 export type ExportContainer =
   | "mp3"
   | "flac"

@@ -72,6 +72,22 @@ type LibraryMetadataPreview = {
   warnings: string[];
 };
 
+type StarterTrackDraft = {
+  trackId: string;
+  trackNumber: number;
+  artist: string;
+  title: string;
+};
+
+type StarterMetadataDraft = {
+  releaseId: string;
+  releaseTitle: string;
+  releaseDate: string;
+  releaseArtist: string;
+  tracks: StarterTrackDraft[];
+};
+
+
 type GeneratedMetadataDocument = {
   storageRole: string;
   filename: string;
@@ -217,6 +233,25 @@ type MetadataRegistryResponse = {
 type ApplicationView =
   | "library"
   | "compatibility";
+
+type ToastMessage = {
+  id: number;
+  message: string;
+  tone: "success" | "info" | "error";
+};
+
+type ReleaseMetadataTab =
+  | "overview"
+  | "credits"
+  | "recording"
+  | "rights"
+  | "lyrics"
+  | "artwork"
+  | "notes"
+  | "files"
+  | "developer"
+  | "settings"
+  | "raw";
 
 type CompatibilityStatusFilter =
   | "all"
@@ -442,6 +477,69 @@ export function App() {
     useState<MetadataFieldDefinition[]>([]);
   const [applicationView, setApplicationView] =
     useState<ApplicationView>("library");
+  const [toast, setToast] =
+    useState<ToastMessage | null>(null);
+  const toastTimerRef =
+    useRef<number | null>(null);
+
+  const notify = useCallback(
+    (
+      message: string,
+      tone: ToastMessage["tone"] = "info",
+    ) => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(
+          toastTimerRef.current,
+        );
+      }
+
+      const nextToast = {
+        id: Date.now(),
+        message,
+        tone,
+      };
+
+      setToast(nextToast);
+      toastTimerRef.current =
+        window.setTimeout(() => {
+          setToast((current) =>
+            current?.id === nextToast.id
+              ? null
+              : current,
+          );
+          toastTimerRef.current = null;
+        }, 2600);
+    },
+    [],
+  );
+
+  useEffect(
+    () => () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(
+          toastTimerRef.current,
+        );
+      }
+    },
+    [],
+  );
+
+  const [menuOpen, setMenuOpen] =
+    useState(false);
+  const applicationMenuRef =
+    useRef<HTMLElement>(null);
+  const [showAdminTools, setShowAdminTools] =
+    useState(() => {
+      try {
+        return (
+          window.localStorage.getItem(
+            "metadata-editor.show-admin-tools-v2",
+          ) === "true"
+        );
+      } catch {
+        return false;
+      }
+    });
 
   const openReleaseDetail = useCallback(
     async (releaseId: string) => {
@@ -489,7 +587,9 @@ export function App() {
     [],
   );
 
-  const refreshLibrary = useCallback(async () => {
+  const refreshLibrary = useCallback(async (
+    announce = false,
+  ) => {
     setLoading(true);
     setError(null);
 
@@ -507,21 +607,81 @@ export function App() {
       setScan(
         (await response.json()) as LibraryScanResult,
       );
+
+      if (announce) {
+        notify(
+          "Library refreshed",
+          "success",
+        );
+      }
     } catch (scanError) {
-      setError(
+      const message =
         scanError instanceof Error
           ? scanError.message
-          : "Unknown scan error",
-      );
+          : "Unknown scan error";
+
+      setError(message);
+
+      if (announce) {
+        notify(
+          "Library refresh failed",
+          "error",
+        );
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     void refreshLibrary();
   }, [refreshLibrary]);
 
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        "metadata-editor.show-admin-tools-v2",
+        String(showAdminTools),
+      );
+    } catch {
+      // Local storage is optional; the session state still works.
+    }
+  }, [showAdminTools]);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (
+      event: PointerEvent,
+    ) => {
+      if (
+        event.target instanceof Node &&
+        !applicationMenuRef.current?.contains(
+          event.target,
+        ) &&
+        !(event.target instanceof Element &&
+          event.target.closest(
+            ".menu-button",
+          ))
+      ) {
+        setMenuOpen(false);
+      }
+    };
+
+    window.addEventListener(
+      "pointerdown",
+      handlePointerDown,
+    );
+
+    return () =>
+      window.removeEventListener(
+        "pointerdown",
+        handlePointerDown,
+      );
+  }, [menuOpen]);
 
   useEffect(() => {
     const loadRegistry = async () => {
@@ -594,7 +754,19 @@ export function App() {
       {selectedReleaseDetail ? (
         <ReleaseMetadataDetailView
           detail={selectedReleaseDetail}
+          release={
+            scan?.releases.find(
+              (release) =>
+                release.id ===
+                selectedReleaseDetail.releaseId,
+            ) ?? null
+          }
           metadataRegistry={metadataRegistry}
+          showAdminTools={showAdminTools}
+          onShowAdminToolsChange={
+            setShowAdminTools
+          }
+          onNotify={notify}
           onBack={() =>
             setSelectedReleaseDetail(null)
           }
@@ -607,21 +779,18 @@ export function App() {
       ) : (
         <>
           <header className="page-header">
-            <div>
-              <p className="eyebrow">
-                Local administration
-              </p>
+            <div className="page-header-title">
               <h1>Metadata Editor</h1>
               <p className="subtitle">
                 {applicationView === "library"
                   ? "Library discovery and metadata editing"
-                  : "Verified player and container mappings"}
+                  : "Metadata field reference and player mappings"}
               </p>
             </div>
 
-            {applicationView === "library" && (
-              <div className="page-header-actions">
-                {scan && (
+            <div className="page-header-actions">
+              {applicationView === "library" &&
+                scan && (
                   <p className="scan-time">
                     Last scan:{" "}
                     {new Date(
@@ -630,20 +799,79 @@ export function App() {
                   </p>
                 )}
 
-                <button
-                  type="button"
-                  disabled={loading}
-                  onClick={() =>
-                    void refreshLibrary()
-                  }
-                >
-                  {loading
-                    ? "Scanning…"
-                    : "Refresh library"}
-                </button>
-              </div>
-            )}
+              <button
+                type="button"
+                className="menu-button"
+                aria-label="Open application menu"
+                aria-expanded={menuOpen}
+                onClick={() =>
+                  setMenuOpen((open) => !open)
+                }
+              >
+                <span aria-hidden="true">☰</span>
+              </button>
+            </div>
           </header>
+
+          {menuOpen && (
+            <aside
+              ref={applicationMenuRef}
+              className="application-menu"
+              aria-label="Application menu"
+            >
+              {applicationView === "library" && (
+                <section className="menu-card">
+                  <h2>Refresh Library</h2>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      void refreshLibrary(true);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    {loading
+                      ? "Scanning…"
+                      : "Refresh library"}
+                  </button>
+                </section>
+              )}
+
+              <section className="menu-card">
+                <h2>About</h2>
+                <p>
+                  Metadata Editor provides local library
+                  discovery, metadata review, and
+                  controlled metadata editing.
+                </p>
+                <p className="menu-meta">
+                  Version 0.0.1 · Proprietary software
+                </p>
+              </section>
+
+              <section className="menu-card">
+                <h2>Admin</h2>
+                <label className="admin-toggle">
+                  <input
+                    type="checkbox"
+                    checked={showAdminTools}
+                    onChange={(event) =>
+                      setShowAdminTools(
+                        event.target.checked,
+                      )
+                    }
+                  />
+                  <span>
+                    Show Developer / Admin Tools
+                  </span>
+                </label>
+                <p className="menu-meta">
+                  Enables troubleshooting controls,
+                  source paths, settings, and raw TOML.
+                </p>
+              </section>
+            </aside>
+          )}
 
           <nav
             className="application-tabs"
@@ -668,12 +896,15 @@ export function App() {
 
             <button
               type="button"
-              className={
+              className={[
+                "tag-search-tab",
                 applicationView ===
                 "compatibility"
                   ? "active"
-                  : undefined
-              }
+                  : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
               aria-pressed={
                 applicationView ===
                 "compatibility"
@@ -684,7 +915,7 @@ export function App() {
                 )
               }
             >
-              Compatibility
+              Tag Search
             </button>
           </nav>
 
@@ -706,39 +937,6 @@ export function App() {
 
               {scan && summary && (
                 <>
-                  <section className="summary-grid">
-                    <SummaryCard
-                      label="Releases"
-                      value={summary.releaseCount}
-                    />
-                    <SummaryCard
-                      label="Tracks"
-                      value={summary.trackCount}
-                    />
-                    <SummaryCard
-                      label="Missing TOMLs"
-                      value={
-                        summary.missingMetadataCount
-                      }
-                      warning={
-                        summary.missingMetadataCount >
-                        0
-                      }
-                    />
-                    <SummaryCard
-                      label="Audio masters"
-                      value={
-                        summary.audioMasterCount
-                      }
-                    />
-                    <SummaryCard
-                      label="Artwork masters"
-                      value={
-                        summary.artworkMasterCount
-                      }
-                    />
-                  </section>
-
                   {scan.warnings.length > 0 && (
                     <section className="warning-panel">
                       <h2>Scanner warnings</h2>
@@ -771,10 +969,14 @@ export function App() {
                               release.id,
                             )
                           }
+                          showAdminTools={
+                            showAdminTools
+                          }
                         />
                       ),
                     )}
                   </section>
+
                 </>
               )}
 
@@ -792,6 +994,50 @@ export function App() {
             </>
           )}
         </>
+      )}
+      <footer className="app-footer">
+        {summary && (
+          <p className="library-counters">
+            {summary.releaseCount}{" "}
+            {summary.releaseCount === 1
+              ? "release"
+              : "releases"}
+            {" · "}
+            {summary.trackCount}{" "}
+            {summary.trackCount === 1
+              ? "track"
+              : "tracks"}
+            {" · "}
+            {summary.audioMasterCount} audio
+            masters
+            {" · "}
+            {summary.artworkMasterCount} artwork
+            files
+            {" · "}
+            {summary.missingMetadataCount} missing
+            TOMLs
+          </p>
+        )}
+
+        <p>
+          Copyright © 2026 Nathan Brenton.
+          All rights reserved.
+        </p>
+      </footer>
+
+          {toast && (
+        <div
+          key={toast.id}
+          className={`toast-notification ${toast.tone}`}
+          role={
+            toast.tone === "error"
+              ? "alert"
+              : "status"
+          }
+          aria-live="polite"
+        >
+          {toast.message}
+        </div>
       )}
     </main>
   );
@@ -2729,36 +2975,19 @@ function CompatibilityPlayerCell({
   );
 }
 
-function SummaryCard({
-  label,
-  value,
-  warning = false,
-}: {
-  label: string;
-  value: number;
-  warning?: boolean;
-}) {
-  return (
-    <section
-      className={`summary-card${
-        warning ? " warning" : ""
-      }`}
-    >
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </section>
-  );
-}
-
 function ReleaseCard({
   release,
   onLibraryChanged,
   onOpenMetadata,
+  showAdminTools,
 }: {
   release: ReleaseScanResult;
   onLibraryChanged: () => Promise<void>;
   onOpenMetadata: () => void;
+  showAdminTools: boolean;
 }) {
+  const [adminToolsOpen, setAdminToolsOpen] =
+    useState(false);
   const [preview, setPreview] =
     useState<LibraryMetadataPreview | null>(null);
   const [previewError, setPreviewError] =
@@ -3003,30 +3232,92 @@ function ReleaseCard({
       0,
     );
 
+  const releaseDateMatch =
+    release.id.match(
+      /^(\d{4})-(\d{2})-(\d{2})_/,
+    );
+
+  const releaseDateLabel = releaseDateMatch
+    ? new Date(
+        `${releaseDateMatch[1]}-${releaseDateMatch[2]}-${releaseDateMatch[3]}T12:00:00`,
+      ).toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
+    : "Release date not identified";
+
+  const releaseArtwork =
+    release.artworkMasters[0];
+
+  const audioMasters =
+    release.tracks.flatMap(
+      (track) => track.audioMasters,
+    );
+
+  const trackArtwork =
+    release.tracks.flatMap(
+      (track) =>
+        track.artworkMasters.map(
+          (asset) => ({
+            ...asset,
+            trackId: track.id,
+          }),
+        ),
+    );
+
   return (
-    <article className="release-card">
-      <header className="card-header">
-        <div>
-          <p className="card-type">
-            Release
-          </p>
-          <h2>
-            {formatReleaseDisplayName(
-              release.id,
-            )}
-          </h2>
-
-          <code>{release.relativePath}</code>
-        </div>
-
-        <div className="card-actions">
-          <button
-            type="button"
-            onClick={onOpenMetadata}
+    <article className="release-card library-release-card">
+      <header className="library-release-header">
+        <button
+          type="button"
+          className="release-primary-action"
+          onClick={onOpenMetadata}
+          aria-label={`Open metadata for ${formatReleaseTitle(
+            release.id,
+          )}`}
+        >
+          <span
+            className="release-artwork-tile"
+            aria-hidden="true"
           >
-            Open metadata detail
-          </button>
+            {releaseArtwork ? (
+              <img
+                src={`/api/library/artwork?${new URLSearchParams(
+                  {
+                    path: releaseArtwork.relativePath,
+                  },
+                ).toString()}`}
+                alt=""
+                loading="lazy"
+              />
+            ) : (
+              <>
+                <strong>No artwork</strong>
+                <small>Release</small>
+              </>
+            )}
+          </span>
 
+          <span className="release-summary">
+            <strong className="release-title">
+              {formatReleaseTitle(
+                release.id,
+              )}
+            </strong>
+
+            <span className="release-subtitle">
+              {releaseDateLabel}
+              {" · "}
+              {release.tracks.length}{" "}
+              {release.tracks.length === 1
+                ? "track"
+                : "tracks"}
+            </span>
+          </span>
+        </button>
+
+        <div className="release-status-actions">
           <span
             className={
               missingCount > 0
@@ -3039,60 +3330,208 @@ function ReleaseCard({
               : "Metadata complete"}
           </span>
 
-          <button
-            type="button"
-            disabled={previewLoading}
-            onClick={() => void loadPreview()}
-          >
-            {previewLoading
-              ? "Loading preview…"
-              : preview
-                ? "Refresh inference"
-                : "Preview inferred metadata"}
-          </button>
+          {showAdminTools && (
+            <button
+              type="button"
+              className="admin-tools-button"
+              aria-expanded={adminToolsOpen}
+              onClick={() =>
+                setAdminToolsOpen(
+                  (open) => !open,
+                )
+              }
+            >
+              Developer / Admin Tools
+            </button>
+          )}
 
           <button
             type="button"
-            disabled={generatedPreviewLoading}
-            onClick={() =>
-              void loadGeneratedPreview()
-            }
+            className="primary-button"
+            onClick={onOpenMetadata}
           >
-            {generatedPreviewLoading
-              ? "Rendering TOML…"
-              : generatedPreview
-                ? "Refresh TOML preview"
-                : "Preview generated TOML"}
-          </button>
-
-          <button
-            type="button"
-            disabled={generationPlanLoading}
-            onClick={() =>
-              void loadGenerationPlan()
-            }
-          >
-            {generationPlanLoading
-              ? "Building plan…"
-              : generationPlan
-                ? "Refresh generation plan"
-                : "View generation plan"}
+            View metadata
           </button>
         </div>
       </header>
 
-      <section className="detail-grid">
-        <MetadataPanel
-          title="Release metadata"
-          files={release.metadataFiles}
-        />
+      {showAdminTools && adminToolsOpen && (
+      <div
+        className="library-release-disclosures"
+        onClick={(event) => {
+          if (
+            !event.altKey ||
+            !(event.target instanceof HTMLElement)
+          ) {
+            return;
+          }
 
-        <AssetPanel
-          title="Release artwork"
-          assets={release.artworkMasters}
-          emptyLabel="No release artwork master detected"
-        />
-      </section>
+          const summary =
+            event.target.closest("summary");
+
+          if (!summary) {
+            return;
+          }
+
+          const clickedDetails =
+            summary.parentElement;
+
+          if (
+            !(clickedDetails instanceof
+              HTMLDetailsElement)
+          ) {
+            return;
+          }
+
+          event.preventDefault();
+
+          const shouldOpen =
+            !clickedDetails.open;
+
+          event.currentTarget
+            .querySelectorAll("details")
+            .forEach((details) => {
+              details.open = shouldOpen;
+            });
+        }}
+      >
+        <section
+          className="admin-disclosure"
+          aria-label="Developer and admin tools"
+        >
+          <div className="admin-disclosure-content">
+            <details>
+              <summary>
+                <span>Release Metadata</span>
+                <small>
+                  {release.metadataFiles.length} files
+                </small>
+              </summary>
+
+              <div className="library-disclosure-content">
+                <MetadataPanel
+                  title="Release metadata files"
+                  files={release.metadataFiles}
+                />
+              </div>
+            </details>
+
+            <details>
+              <summary>
+                <span>Track Metadata</span>
+                <small>
+                  {release.tracks.length} tracks
+                </small>
+              </summary>
+
+              <div className="library-disclosure-content tracks">
+                {release.tracks.length === 0 ? (
+                  <p className="empty-state">
+                    No track directories discovered.
+                  </p>
+                ) : (
+                  release.tracks.map((track) => (
+                    <TrackMetadataSummary
+                      key={track.relativePath}
+                      track={track}
+                    />
+                  ))
+                )}
+              </div>
+            </details>
+
+            <details>
+              <summary>
+                <span>Audio Masters</span>
+                <small>
+                  {audioMasters.length} files
+                </small>
+              </summary>
+
+              <div className="library-disclosure-content">
+                <AssetPanel
+                  title="Audio master files"
+                  assets={audioMasters}
+                  emptyLabel="No audio masters detected"
+                />
+              </div>
+            </details>
+
+            <details>
+              <summary>
+                <span>Track Artwork</span>
+                <small>
+                  {release.artworkMasters.length +
+                    trackArtwork.length}{" "}
+                  files
+                </small>
+              </summary>
+
+              <div className="library-disclosure-content asset-stack">
+                <AssetPanel
+                  title="Release artwork"
+                  assets={release.artworkMasters}
+                  emptyLabel="No release artwork detected"
+                />
+
+                {release.tracks.map((track) => (
+                  <AssetPanel
+                    key={track.relativePath}
+                    title={`${track.id} artwork`}
+                    assets={track.artworkMasters}
+                    emptyLabel="No track artwork detected"
+                  />
+                ))}
+              </div>
+            </details>
+
+            <div className="library-disclosure-content admin-actions">
+              <div className="card-actions">
+                <button
+                  type="button"
+                  disabled={previewLoading}
+                  onClick={() => void loadPreview()}
+                >
+                  {previewLoading
+                    ? "Loading preview…"
+                    : preview
+                      ? "Refresh inference"
+                      : "Preview inferred metadata"}
+                </button>
+
+                <button
+                  type="button"
+                  disabled={generatedPreviewLoading}
+                  onClick={() =>
+                    void loadGeneratedPreview()
+                  }
+                >
+                  {generatedPreviewLoading
+                    ? "Rendering TOML…"
+                    : generatedPreview
+                      ? "Refresh TOML preview"
+                      : "Preview generated TOML"}
+                </button>
+
+                <button
+                  type="button"
+                  disabled={generationPlanLoading}
+                  onClick={() =>
+                    void loadGenerationPlan()
+                  }
+                >
+                  {generationPlanLoading
+                    ? "Building plan…"
+                    : generationPlan
+                      ? "Refresh generation plan"
+                      : "View generation plan"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+      )}
 
       {previewError && (
         <p className="message error">
@@ -3150,36 +3589,22 @@ function ReleaseCard({
           }
         />
       )}
-
-      <section className="tracks">
-        <h3>
-          Tracks ({release.tracks.length})
-        </h3>
-
-        {release.tracks.length === 0 ? (
-          <p className="empty-state">
-            No track directories discovered.
-          </p>
-        ) : (
-          release.tracks.map((track) => (
-            <TrackCard
-              key={track.relativePath}
-              track={track}
-            />
-          ))
-        )}
-      </section>
     </article>
   );
 }
 
-function TrackCard({
+function TrackMetadataSummary({
   track,
 }: {
   track: TrackScanResult;
 }) {
+  const missingCount =
+    track.metadataFiles.filter(
+      (file) => !file.exists,
+    ).length;
+
   return (
-    <article className="track-card">
+    <article className="track-card track-metadata-summary">
       <header className="track-header">
         <div>
           <p className="card-type">
@@ -3188,31 +3613,28 @@ function TrackCard({
           <h4>{track.id}</h4>
           <code>{track.relativePath}</code>
         </div>
+
+        <span
+          className={
+            missingCount > 0
+              ? "badge missing"
+              : "badge complete"
+          }
+        >
+          {missingCount > 0
+            ? `${missingCount} missing`
+            : "Complete"}
+        </span>
       </header>
 
-      <section className="detail-grid">
-        <MetadataPanel
-          title="Track metadata"
-          files={track.metadataFiles}
-        />
-
-        <div className="asset-stack">
-          <AssetPanel
-            title="Audio masters"
-            assets={track.audioMasters}
-            emptyLabel="No audio master detected"
-          />
-
-          <AssetPanel
-            title="Track artwork"
-            assets={track.artworkMasters}
-            emptyLabel="No track artwork master detected"
-          />
-        </div>
-      </section>
+      <MetadataPanel
+        title="Track metadata files"
+        files={track.metadataFiles}
+      />
     </article>
   );
 }
+
 
 type EditableMetadataValue =
   | string
@@ -3238,6 +3660,8 @@ type ScalarMetadataSaveReceipt = {
   savedSha256: string;
   bytes: number;
   savedAt: string;
+  synchronizedTrackFiles?: number;
+  skippedTrackFiles?: number;
 };
 
 function isEditableMetadataValue(
@@ -3530,6 +3954,66 @@ const metadataGroupRank = new Map(
   ),
 );
 
+function MetadataFieldLabel({
+  label,
+  path,
+}: {
+  label: string | undefined;
+  path: string;
+}) {
+  /*
+   * Friendly registry labels remain unchanged. Canonical path labels
+   * use a dim namespace and a brighter final field name.
+   */
+  if (label && label !== path) {
+    return <>{label}</>;
+  }
+
+  const lastDotIndex = path.lastIndexOf(
+    ".",
+  );
+
+  if (lastDotIndex < 0) {
+    return (
+      <span className="metadata-path-leaf">
+        {path}
+      </span>
+    );
+  }
+
+  return (
+    <span className="metadata-path-label">
+      <span className="metadata-path-namespace">
+        {path.slice(0, lastDotIndex + 1)}
+      </span>
+      <span className="metadata-path-leaf">
+        {path.slice(lastDotIndex + 1)}
+      </span>
+    </span>
+  );
+}
+
+function isTrackDiscNumberingPath(
+  path: string,
+): boolean {
+  /*
+   * Canonical paths live below release.numbering or track.numbering.
+   * The leaf-name fallback also keeps common imported/legacy spellings
+   * together instead of scattering them into identity or advanced groups.
+   */
+  return (
+    /^(release|track)\.numbering\.(track_number|track_total|disc_number|disc_total|disk_number|disk_total)$/.test(
+      path,
+    ) ||
+    /^(release|track)\.(track_number|track_total|total_tracks|disc_number|disc_total|total_discs|disk_number|disk_total|total_disks)$/.test(
+      path,
+    ) ||
+    /(^|\.)(track_number|track_total|total_tracks|disc_number|disc_total|total_discs|disk_number|disk_total|total_disks)$/.test(
+      path,
+    )
+  );
+}
+
 function resolveMetadataRowGroup(
   rows: FlattenedMetadataRow[],
   row: FlattenedMetadataRow,
@@ -3724,7 +4208,8 @@ function resolveMetadataRowGroup(
   if (
     /^(release|track)\.numbering(\.|$)/.test(
       path,
-    )
+    ) ||
+    isTrackDiscNumberingPath(path)
   ) {
     return "Track & Disc Numbering";
   }
@@ -4141,15 +4626,49 @@ function MetadataFieldControls({
 
 function ReleaseMetadataDetailView({
   detail,
+  release,
   metadataRegistry,
+  showAdminTools,
+  onShowAdminToolsChange,
+  onNotify,
   onBack,
   onRefresh,
 }: {
   detail: ReleaseMetadataDetail;
+  release: ReleaseScanResult | null;
   metadataRegistry: MetadataFieldDefinition[];
+  showAdminTools: boolean;
+  onShowAdminToolsChange: (
+    visible: boolean,
+  ) => void;
+  onNotify: (
+    message: string,
+    tone?: ToastMessage["tone"],
+  ) => void;
   onBack: () => void;
-  onRefresh: () => void;
+  onRefresh: () => void | Promise<void>;
 }) {
+  const [setupMode, setSetupMode] =
+    useState(false);
+  const [
+    starterDraft,
+    setStarterDraft,
+  ] = useState<StarterMetadataDraft | null>(
+    null,
+  );
+  const [
+    starterReviewed,
+    setStarterReviewed,
+  ] = useState(false);
+  const [
+    starterCreationLoading,
+    setStarterCreationLoading,
+  ] = useState(false);
+  const [
+    starterCreationError,
+    setStarterCreationError,
+  ] = useState<string | null>(null);
+
   const [editMode, setEditMode] =
     useState(false);
   const [draft, setDraft] =
@@ -4158,6 +4677,8 @@ function ReleaseMetadataDetailView({
     savingDocumentPath,
     setSavingDocumentPath,
   ] = useState<string | null>(null);
+  const [savingAll, setSavingAll] =
+    useState(false);
   const [saveError, setSaveError] =
     useState<string | null>(null);
   const [saveReceipt, setSaveReceipt] =
@@ -4168,15 +4689,83 @@ function ReleaseMetadataDetailView({
     activeDocumentGroup,
     setActiveDocumentGroup,
   ] = useState("release");
+  const [
+    activeMetadataTab,
+    setActiveMetadataTab,
+  ] = useState<ReleaseMetadataTab>(
+    "overview",
+  );
+  const [
+    detailMenuOpen,
+    setDetailMenuOpen,
+  ] = useState(false);
+  const detailMenuRef =
+    useRef<HTMLElement>(null);
 
   useEffect(() => {
     setActiveDocumentGroup("release");
+    setActiveMetadataTab("overview");
+    setDetailMenuOpen(false);
+    setSetupMode(false);
+    setStarterDraft(null);
+    setStarterReviewed(false);
+    setStarterCreationError(null);
   }, [detail.releaseId]);
+
+  useEffect(() => {
+    if (
+      !showAdminTools &&
+      [
+        "files",
+        "developer",
+        "settings",
+        "raw",
+      ].includes(activeMetadataTab)
+    ) {
+      setActiveMetadataTab("overview");
+    }
+  }, [
+    activeMetadataTab,
+    showAdminTools,
+  ]);
+
+  useEffect(() => {
+    if (!detailMenuOpen) {
+      return;
+    }
+
+    const handlePointerDown = (
+      event: PointerEvent,
+    ) => {
+      if (
+        event.target instanceof Node &&
+        !detailMenuRef.current?.contains(
+          event.target,
+        ) &&
+        !(event.target instanceof Element &&
+          event.target.closest(
+            ".detail-menu-button",
+          ))
+      ) {
+        setDetailMenuOpen(false);
+      }
+    };
+
+    window.addEventListener(
+      "pointerdown",
+      handlePointerDown,
+    );
+
+    return () =>
+      window.removeEventListener(
+        "pointerdown",
+        handlePointerDown,
+      );
+  }, [detailMenuOpen]);
 
   const dirtyCount = Object.keys(
     draft,
   ).length;
-
 
   useEffect(() => {
     if (dirtyCount === 0) {
@@ -4310,20 +4899,185 @@ function ReleaseMetadataDetailView({
        * canonical TOML representation from disk.
        */
       await onRefresh();
+      const synchronizedTrackFiles =
+        (
+          result as
+            ScalarMetadataSaveReceipt
+        ).synchronizedTrackFiles ?? 0;
+
+      onNotify(
+        synchronizedTrackFiles > 0
+          ? `Metadata saved · ${synchronizedTrackFiles} track ${
+              synchronizedTrackFiles === 1
+                ? "file"
+                : "files"
+            } synchronized`
+          : "Metadata saved",
+        "success",
+      );
     } catch (error) {
       setSaveError(
         error instanceof Error
           ? error.message
           : "Unknown metadata save error",
       );
+      onNotify(
+        "Metadata save failed",
+        "error",
+      );
     } finally {
       setSavingDocumentPath(null);
+    }
+  };
+
+  const saveAllDrafts = async () => {
+    const changedDocuments =
+      detail.documents
+        .filter(
+          (document) =>
+            getDocumentDraftChanges(
+              document,
+              draft,
+            ).length > 0,
+        )
+        /*
+         * Save track documents before release.toml. A release save may
+         * synchronize authoritative totals into track.toml files, so
+         * placing it last avoids stale-hash conflicts with unsaved
+         * track changes.
+         */
+        .sort((left, right) => {
+          const leftIsRelease =
+            left.scope === "release";
+          const rightIsRelease =
+            right.scope === "release";
+
+          return Number(leftIsRelease) -
+            Number(rightIsRelease);
+        });
+
+    if (changedDocuments.length === 0) {
+      return;
+    }
+
+    setSavingAll(true);
+    setSaveError(null);
+    setSaveReceipt(null);
+
+    let savedCount = 0;
+    let synchronizedTrackFiles = 0;
+
+    try {
+      for (const document of changedDocuments) {
+        const changes =
+          getDocumentDraftChanges(
+            document,
+            draft,
+          );
+
+        const response = await fetch(
+          "/api/library/save-scalar-metadata",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+            body: JSON.stringify({
+              releaseId: detail.releaseId,
+              relativePath:
+                document.relativePath,
+              originalSha256:
+                document.sha256,
+              changes,
+            }),
+          },
+        );
+
+        const result =
+          (await response.json()) as
+            | ScalarMetadataSaveReceipt
+            | {
+                error?: string;
+              };
+
+        if (!response.ok) {
+          throw new Error(
+            "error" in result
+              ? result.error ??
+                  `Save failed: HTTP ${response.status}`
+              : `Save failed: HTTP ${response.status}`,
+          );
+        }
+
+        const receipt =
+          result as ScalarMetadataSaveReceipt;
+
+        savedCount += 1;
+        synchronizedTrackFiles +=
+          receipt.synchronizedTrackFiles ??
+          0;
+
+        setSaveReceipt(receipt);
+
+        setDraft((currentDraft) =>
+          removeDocumentDraftChanges(
+            document,
+            currentDraft,
+          ),
+        );
+      }
+
+      await onRefresh();
+      setEditMode(false);
+
+      const fileLabel =
+        savedCount === 1
+          ? "metadata file"
+          : "metadata files";
+
+      onNotify(
+        synchronizedTrackFiles > 0
+          ? `${savedCount} ${fileLabel} saved · ${synchronizedTrackFiles} track ${
+              synchronizedTrackFiles === 1
+                ? "file"
+                : "files"
+            } synchronized`
+          : `${savedCount} ${fileLabel} saved`,
+        "success",
+      );
+    } catch (error) {
+      /*
+       * Some earlier documents may already be saved. Refresh hashes and
+       * canonical values while retaining drafts for documents that did
+       * not complete.
+       */
+      await onRefresh();
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown metadata save error";
+
+      setSaveError(message);
+      onNotify(
+        savedCount > 0
+          ? `${savedCount} saved before an error occurred`
+          : "Metadata save failed",
+        "error",
+      );
+    } finally {
+      setSavingAll(false);
     }
   };
 
   const discardDraft = () => {
     setDraft({});
     setEditMode(false);
+    onNotify(
+      "Changes discarded",
+      "info",
+    );
   };
 
   const releaseDocuments =
@@ -4332,16 +5086,73 @@ function ReleaseMetadataDetailView({
         document.scope === "release",
     );
 
+  /*
+   * Build track navigation from the scanner result rather than from
+   * parsed TOML documents. This keeps every discovered track visible
+   * even before its metadata files have been created.
+   *
+   * Preserve any document-only track IDs as a defensive fallback for
+   * older or partially migrated libraries.
+   */
+  const scannedTrackIds =
+    release?.tracks.map((track) => track.id) ??
+    [];
+
+  const documentTrackIds =
+    detail.documents
+      .map((document) => document.trackId)
+      .filter(
+        (trackId): trackId is string =>
+          Boolean(trackId),
+      );
+
   const trackIds = Array.from(
-    new Set(
-      detail.documents
-        .map((document) => document.trackId)
-        .filter(
-          (trackId): trackId is string =>
-            Boolean(trackId),
-        ),
-    ),
+    new Set([
+      ...scannedTrackIds,
+      ...documentTrackIds,
+    ]),
   );
+
+
+  const metadataEntryIds = [
+    "release",
+    ...trackIds,
+  ];
+
+  const activeMetadataEntryIndex =
+    Math.max(
+      0,
+      metadataEntryIds.indexOf(
+        activeDocumentGroup,
+      ),
+    );
+
+  const activeMetadataEntryLabel =
+    activeDocumentGroup === "release"
+      ? "Release"
+      : `Track ${
+          activeMetadataEntryIndex
+        } of ${trackIds.length}`;
+
+  const cycleMetadataEntry = (
+    direction: -1 | 1,
+  ) => {
+    if (metadataEntryIds.length < 2) {
+      return;
+    }
+
+    const nextIndex =
+      (
+        activeMetadataEntryIndex +
+        direction +
+        metadataEntryIds.length
+      ) % metadataEntryIds.length;
+
+    setActiveDocumentGroup(
+      metadataEntryIds[nextIndex] ??
+        "release",
+    );
+  };
 
   const countDraftChangesForDocuments = (
     documents: ParsedMetadataDocument[],
@@ -4366,22 +5177,284 @@ function ReleaseMetadataDetailView({
       releaseDocuments,
     );
 
+  const releaseDateLabel =
+    formatReleaseDate(detail.releaseId);
+  const releaseArtwork =
+    release?.artworkMasters[0] ?? null;
+  const isMetadataEmpty =
+    detail.documents.length === 0;
+  const inferredReleaseTitle =
+    formatReleaseTitle(detail.releaseId);
+
+  const inferredTracks = trackIds
+    .map(inferTrackSummary)
+    .map((track) => ({
+      ...track,
+      title: formatInferredTrackTitle(
+        track.title,
+        inferredReleaseTitle,
+      ),
+    }));
+
+  const inferredReleaseArtist =
+    inferCommonReleaseArtist(
+      inferredTracks,
+    );
+
+  const metadataHealthLabel =
+    isMetadataEmpty
+      ? "Not started"
+      : detail.warnings.length > 0
+        ? "Needs review"
+        : detail.missingFiles.length > 0
+          ? "Partial"
+          : "Parsed";
+
+  const metadataHealthTone =
+    isMetadataEmpty
+      ? "missing"
+      : detail.warnings.length > 0
+        ? "warning"
+        : detail.missingFiles.length > 0
+          ? "preview"
+          : "complete";
+
+  const beginStarterSetup = () => {
+    setStarterDraft({
+      releaseId: detail.releaseId,
+      releaseTitle: inferredReleaseTitle,
+      releaseDate:
+        detail.releaseId.slice(0, 10),
+      releaseArtist:
+        inferredReleaseArtist,
+      tracks: inferredTracks.map(
+        (track, index) => ({
+          trackId: track.id,
+          trackNumber:
+            track.number ?? index + 1,
+          artist: track.artist,
+          title: track.title,
+        }),
+      ),
+    });
+    setStarterReviewed(false);
+    setStarterCreationError(null);
+    setSetupMode(true);
+  };
+
+  const updateStarterTrack = (
+    trackId: string,
+    field:
+      | "trackNumber"
+      | "artist"
+      | "title",
+    value: string,
+  ) => {
+    setStarterDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      return {
+        ...current,
+        tracks: current.tracks.map(
+          (track) =>
+            track.trackId === trackId
+              ? {
+                  ...track,
+                  [field]:
+                    field === "trackNumber"
+                      ? Number.parseInt(
+                          value,
+                          10,
+                        ) || 0
+                      : value,
+                }
+              : track,
+        ),
+      };
+    });
+  };
+
+  const createStarterMetadata = async () => {
+    if (
+      !starterDraft ||
+      !starterReviewed
+    ) {
+      setStarterCreationError(
+        "Review the inferred values and confirm them before creating starter metadata.",
+      );
+      return;
+    }
+
+    setStarterCreationLoading(true);
+    setStarterCreationError(null);
+
+    try {
+      const response = await fetch(
+        "/api/library/create-starter-metadata",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            starter: starterDraft,
+            confirmation:
+              "CREATE_STARTER_METADATA",
+          }),
+        },
+      );
+
+      const result = (await response.json()) as {
+        created?: string[];
+        receipts?: Array<unknown>;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ??
+            `Starter metadata creation failed: HTTP ${response.status}`,
+        );
+      }
+
+      setSetupMode(false);
+      setStarterDraft(null);
+      setStarterReviewed(false);
+
+      await Promise.resolve(onRefresh());
+      onNotify(
+        "Starter metadata created",
+        "success",
+      );
+    } catch (error) {
+      onNotify(
+        "Starter metadata creation failed",
+        "error",
+      );
+      setStarterCreationError(
+        error instanceof Error
+          ? error.message
+          : "Unknown starter metadata creation error",
+      );
+    } finally {
+      setStarterCreationLoading(false);
+    }
+  };
+
+  const metadataTabs: Array<{
+    id: ReleaseMetadataTab;
+    label: string;
+    adminOnly?: boolean;
+  }> = [
+    {
+      id: "overview",
+      label: "Overview",
+    },
+    {
+      id: "credits",
+      label:
+        "Artists, Performers & Writers",
+    },
+    {
+      id: "recording",
+      label: "Recording, Mixing & Mastering",
+    },
+    {
+      id: "rights",
+      label:
+        "Label, Publishing & Copyright",
+    },
+    {
+      id: "lyrics",
+      label: "Lyrics & Language",
+    },
+    {
+      id: "artwork",
+      label: "Artwork",
+    },
+    {
+      id: "notes",
+      label: "Production & Text Notes",
+    },
+    {
+      id: "files",
+      label: "Files & Sources",
+      adminOnly: true,
+    },
+    {
+      id: "developer",
+      label: "Developer / Advanced",
+      adminOnly: true,
+    },
+    {
+      id: "settings",
+      label: "Settings",
+      adminOnly: true,
+    },
+    {
+      id: "raw",
+      label: "Raw TOML",
+      adminOnly: true,
+    },
+  ];
+
   return (
     <section className="metadata-detail">
       <header className="metadata-detail-header">
-        <div>
-          <p className="eyebrow">
-            Release metadata
-          </p>
-          <h1>
-            {formatReleaseDisplayName(
-              detail.releaseId,
+        <div className="metadata-detail-identity">
+          <span
+            className="metadata-detail-artwork"
+            aria-hidden="true"
+          >
+            {releaseArtwork ? (
+              <img
+                src={`/api/library/artwork?${new URLSearchParams(
+                  {
+                    path:
+                      releaseArtwork.relativePath,
+                  },
+                ).toString()}`}
+                alt=""
+              />
+            ) : (
+              <strong>No artwork</strong>
             )}
-          </h1>
+          </span>
 
-          <code>
-            {detail.releaseRelativePath}
-          </code>
+          <div>
+            <h1>
+              {formatReleaseTitle(
+                detail.releaseId,
+              )}
+            </h1>
+
+            <p className="metadata-detail-date">
+              {releaseDateLabel}
+            </p>
+
+            <div
+              className="metadata-health-summary"
+              aria-label="Metadata health summary"
+            >
+              <span
+                className={`badge ${metadataHealthTone}`}
+              >
+                {metadataHealthLabel}
+              </span>
+              <span className="metadata-health-count">
+                {detail.documents.length} parsed
+              </span>
+              <span className="metadata-health-count">
+                {detail.missingFiles.length} missing
+              </span>
+              <span className="metadata-health-count">
+                {detail.warnings.length} warnings
+              </span>
+            </div>
+          </div>
         </div>
 
         <div className="detail-actions">
@@ -4405,30 +5478,75 @@ function ReleaseMetadataDetailView({
 
           <button
             type="button"
-            onClick={onRefresh}
-          >
-            Refresh metadata
-          </button>
-
-          <button
-            type="button"
+            className="menu-button detail-menu-button"
+            aria-label="Open release menu"
+            aria-expanded={detailMenuOpen}
             onClick={() =>
-              setEditMode((current) => !current)
+              setDetailMenuOpen(
+                (open) => !open,
+              )
             }
           >
-            {editMode
-              ? "Stop editing"
-              : "Edit metadata values"}
-          </button>
-
-          <button
-            type="button"
-            disabled={dirtyCount === 0}
-            onClick={discardDraft}
-          >
-            Discard edits
+            <span aria-hidden="true">☰</span>
           </button>
         </div>
+
+        {detailMenuOpen && (
+          <aside
+            ref={detailMenuRef}
+            className="application-menu detail-menu"
+            aria-label="Release menu"
+          >
+            <section className="menu-card">
+              <h2>Refresh Metadata</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  void Promise.resolve(
+                    onRefresh(),
+                  )
+                    .then(() => {
+                      onNotify(
+                        "Metadata refreshed",
+                        "success",
+                      );
+                    })
+                    .catch(() => {
+                      onNotify(
+                        "Metadata refresh failed",
+                        "error",
+                      );
+                    });
+                  setDetailMenuOpen(false);
+                }}
+              >
+                Refresh metadata
+              </button>
+            </section>
+
+            <section className="menu-card">
+              <h2>Admin</h2>
+              <label className="admin-toggle">
+                <input
+                  type="checkbox"
+                  checked={showAdminTools}
+                  onChange={(event) =>
+                    onShowAdminToolsChange(
+                      event.target.checked,
+                    )
+                  }
+                />
+                <span>
+                  Show Developer / Admin Tools
+                </span>
+              </label>
+              <p className="menu-meta">
+                Enables troubleshooting controls,
+                source paths, settings, and raw TOML.
+              </p>
+            </section>
+          </aside>
+        )}
       </header>
 
       <section
@@ -4443,34 +5561,129 @@ function ReleaseMetadataDetailView({
         role="status"
         aria-live="polite"
       >
-        <span>
-          Mode:{" "}
-          <strong>
-            {editMode
-              ? "Editing in browser"
-              : "Read-only"}
-          </strong>
-        </span>
+        <div className="draft-status-copy">
+          <span>
+            Mode:{" "}
+            <strong>
+              {editMode
+                ? "Editing in browser"
+                : "Read-only"}
+            </strong>
+          </span>
 
-        <span>
-          Unsaved changes:{" "}
-          <strong>{dirtyCount}</strong>
-        </span>
+          <span>
+            Unsaved changes:{" "}
+            <strong>{dirtyCount}</strong>
+          </span>
 
-        <span
-          className={[
-            "badge",
-            dirtyCount > 0
-              ? "unsaved"
-              : "preview",
-          ]
-            .filter(Boolean)
-            .join(" ")}
+          <span
+            className={[
+              "badge",
+              dirtyCount > 0
+                ? "unsaved"
+                : "preview",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          >
+            {dirtyCount > 0
+              ? "Unsaved browser changes"
+              : "No filesystem writes"}
+          </span>
+        </div>
+
+        <div
+          className="metadata-entry-cycle"
+          aria-label="Release and track navigation"
         >
-          {dirtyCount > 0
-            ? "Unsaved browser changes"
-            : "No filesystem writes"}
-        </span>
+          <button
+            type="button"
+            className="metadata-entry-arrow"
+            aria-label="Previous metadata entry"
+            title="Previous release or track"
+            disabled={
+              metadataEntryIds.length < 2 ||
+              savingAll ||
+              savingDocumentPath !== null
+            }
+            onClick={() =>
+              cycleMetadataEntry(-1)
+            }
+          >
+            ←
+          </button>
+
+          <button
+            type="button"
+            className="metadata-entry-arrow"
+            aria-label="Next metadata entry"
+            title="Next release or track"
+            disabled={
+              metadataEntryIds.length < 2 ||
+              savingAll ||
+              savingDocumentPath !== null
+            }
+            onClick={() =>
+              cycleMetadataEntry(1)
+            }
+          >
+            →
+          </button>
+        </div>
+
+        <div className="draft-status-actions">
+          {isMetadataEmpty ? (
+            <button
+              type="button"
+              className="primary-action"
+              onClick={beginStarterSetup}
+            >
+              {setupMode
+                ? "Metadata setup"
+                : "Start metadata setup"}
+            </button>
+          ) : editMode ? (
+            <>
+              <button
+                type="button"
+                className="primary-action"
+                disabled={
+                  dirtyCount === 0 ||
+                  savingAll ||
+                  savingDocumentPath !== null
+                }
+                onClick={() =>
+                  void saveAllDrafts()
+                }
+              >
+                {savingAll
+                  ? "Saving edits…"
+                  : "Save edits"}
+              </button>
+
+              <button
+                type="button"
+                disabled={
+                  dirtyCount === 0 ||
+                  savingAll ||
+                  savingDocumentPath !== null
+                }
+                onClick={discardDraft}
+              >
+                Discard edits
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                setEditMode(true)
+              }
+            >
+              Edit metadata
+            </button>
+          )}
+        </div>
       </section>
 
       {saveError && (
@@ -4522,10 +5735,308 @@ function ReleaseMetadataDetailView({
         </section>
       )}
 
+      {isMetadataEmpty && (
+        <section className="new-release-onboarding">
+          <div className="new-release-onboarding-heading">
+            <div>
+              <span className="eyebrow">
+                New release setup
+              </span>
+              <h2>
+                {setupMode
+                  ? "Confirm starter metadata"
+                  : "Review inferred metadata"}
+              </h2>
+              <p>
+                {setupMode
+                  ? "Correct the inferred values below, then create the minimum starter documents needed for normal editing."
+                  : "Metadata Editor found the release, artwork, tracks, and audio masters. Review the suggestions, then start metadata setup."}
+              </p>
+            </div>
+
+            <span className="badge preview">
+              {inferredTracks.length} tracks
+            </span>
+          </div>
+
+          {!setupMode ? (
+            <>
+              <dl className="inferred-release-summary">
+                <div>
+                  <dt>Release title</dt>
+                  <dd>
+                    {inferredReleaseTitle}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Release date</dt>
+                  <dd>{releaseDateLabel}</dd>
+                </div>
+                <div>
+                  <dt>Suggested artist</dt>
+                  <dd>
+                    {inferredReleaseArtist}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Artwork</dt>
+                  <dd>
+                    {releaseArtwork
+                      ? "Release artwork found"
+                      : "No release artwork found"}
+                  </dd>
+                </div>
+              </dl>
+
+              <div className="inferred-track-list">
+                <div className="inferred-track-row inferred-track-header">
+                  <span>No.</span>
+                  <span>Artist</span>
+                  <span>Track title</span>
+                </div>
+
+                {inferredTracks.map(
+                  (track) => (
+                    <div
+                      key={track.id}
+                      className="inferred-track-row"
+                    >
+                      <span>
+                        {track.number === null
+                          ? "—"
+                          : String(
+                              track.number,
+                            ).padStart(
+                              2,
+                              "0",
+                            )}
+                      </span>
+                      <strong>
+                        {track.artist}
+                      </strong>
+                      <span>
+                        {track.title}
+                      </span>
+                    </div>
+                  ),
+                )}
+              </div>
+
+              <div className="onboarding-actions">
+                <p>
+                  Folder-derived values remain
+                  suggestions until you review and
+                  create starter metadata.
+                </p>
+                <button
+                  type="button"
+                  className="primary-action"
+                  onClick={beginStarterSetup}
+                >
+                  Start metadata setup
+                </button>
+              </div>
+            </>
+          ) : starterDraft ? (
+            <>
+              <div className="starter-release-form">
+                <label>
+                  <span>Release title</span>
+                  <input
+                    value={
+                      starterDraft.releaseTitle
+                    }
+                    onChange={(event) =>
+                      setStarterDraft({
+                        ...starterDraft,
+                        releaseTitle:
+                          event.target.value,
+                      })
+                    }
+                  />
+                </label>
+
+                <label>
+                  <span>Release artist</span>
+                  <input
+                    value={
+                      starterDraft.releaseArtist
+                    }
+                    onChange={(event) =>
+                      setStarterDraft({
+                        ...starterDraft,
+                        releaseArtist:
+                          event.target.value,
+                      })
+                    }
+                  />
+                </label>
+
+                <label>
+                  <span>Release date</span>
+                  <input
+                    type="date"
+                    value={
+                      starterDraft.releaseDate
+                    }
+                    onChange={(event) =>
+                      setStarterDraft({
+                        ...starterDraft,
+                        releaseDate:
+                          event.target.value,
+                      })
+                    }
+                  />
+                </label>
+              </div>
+
+              <div className="starter-track-editor">
+                <div className="starter-track-editor-header">
+                  <span>No.</span>
+                  <span>Artist</span>
+                  <span>Track title</span>
+                </div>
+
+                {starterDraft.tracks.map(
+                  (track) => (
+                    <div
+                      key={track.trackId}
+                      className="starter-track-editor-row"
+                    >
+                      <input
+                        type="number"
+                        min="1"
+                        aria-label={`${track.trackId} track number`}
+                        value={
+                          track.trackNumber
+                        }
+                        onChange={(event) =>
+                          updateStarterTrack(
+                            track.trackId,
+                            "trackNumber",
+                            event.target.value,
+                          )
+                        }
+                      />
+                      <input
+                        aria-label={`${track.trackId} artist`}
+                        value={track.artist}
+                        onChange={(event) =>
+                          updateStarterTrack(
+                            track.trackId,
+                            "artist",
+                            event.target.value,
+                          )
+                        }
+                      />
+                      <input
+                        aria-label={`${track.trackId} title`}
+                        value={track.title}
+                        onChange={(event) =>
+                          updateStarterTrack(
+                            track.trackId,
+                            "title",
+                            event.target.value,
+                          )
+                        }
+                      />
+                    </div>
+                  ),
+                )}
+              </div>
+
+              <label className="starter-confirmation">
+                <input
+                  type="checkbox"
+                  checked={starterReviewed}
+                  onChange={(event) =>
+                    setStarterReviewed(
+                      event.target.checked,
+                    )
+                  }
+                />
+                <span>
+                  I reviewed the release and track
+                  values above.
+                </span>
+              </label>
+
+              {starterCreationError && (
+                <p className="message error">
+                  {starterCreationError}
+                </p>
+              )}
+
+              <div className="onboarding-actions">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSetupMode(false);
+                    setStarterDraft(null);
+                    setStarterReviewed(false);
+                    setStarterCreationError(null);
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  className="primary-action"
+                  disabled={
+                    !starterReviewed ||
+                    starterCreationLoading
+                  }
+                  onClick={() =>
+                    void createStarterMetadata()
+                  }
+                >
+                  {starterCreationLoading
+                    ? "Creating starter metadata…"
+                    : "Create starter metadata"}
+                </button>
+              </div>
+            </>
+          ) : null}
+        </section>
+      )}
+
       <nav
-        className="metadata-document-tabs"
-        aria-label="Metadata document groups"
+        className="release-metadata-tabs"
+        aria-label="Release metadata categories"
       >
+        {metadataTabs
+          .filter(
+            (tab) =>
+              !tab.adminOnly ||
+              showAdminTools,
+          )
+          .map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={
+                activeMetadataTab === tab.id
+                  ? "active"
+                  : undefined
+              }
+              aria-pressed={
+                activeMetadataTab === tab.id
+              }
+              onClick={() =>
+                setActiveMetadataTab(tab.id)
+              }
+            >
+              {tab.label}
+            </button>
+          ))}
+      </nav>
+
+      <div className="release-metadata-workspace">
+        <nav
+          className="metadata-document-tabs"
+          aria-label="Metadata document groups"
+        >
         <button
           type="button"
           className={
@@ -4540,7 +6051,14 @@ function ReleaseMetadataDetailView({
             setActiveDocumentGroup("release")
           }
         >
-          <span>Release</span>
+          <span className="document-nav-label">
+            <strong>Release</strong>
+            <small>
+              {formatReleaseTitle(
+                detail.releaseId,
+              )}
+            </small>
+          </span>
 
           <small
             className="document-count"
@@ -4595,8 +6113,21 @@ function ReleaseMetadataDetailView({
                 )
               }
             >
-              <span>
-                Track {index + 1}
+              <span className="document-nav-label">
+                <strong>
+                  Track {index + 1}
+                </strong>
+                <small>
+                  {readTrackDisplayTitle(
+                    trackId,
+                    trackDocuments,
+                    inferredTracks.find(
+                      (track) =>
+                        track.id === trackId,
+                    )?.title ??
+                      formatReleaseTitle(trackId),
+                  )}
+                </small>
               </span>
               <small
                 className="document-count"
@@ -4616,10 +6147,11 @@ function ReleaseMetadataDetailView({
             </button>
           );
         })}
-      </nav>
+        </nav>
 
-      {activeDocumentGroup ===
-        "release" && (
+        <div className="release-metadata-content">
+          {activeDocumentGroup ===
+            "release" && (
         <MetadataDocumentSection
           title="Release documents"
           documents={releaseDocuments}
@@ -4630,6 +6162,9 @@ function ReleaseMetadataDetailView({
           }
           metadataRegistry={
             metadataRegistry
+          }
+          activeMetadataTab={
+            activeMetadataTab
           }
           savingDocumentPath={
             savingDocumentPath
@@ -4657,6 +6192,9 @@ function ReleaseMetadataDetailView({
             metadataRegistry={
               metadataRegistry
             }
+            activeMetadataTab={
+              activeMetadataTab
+            }
             savingDocumentPath={
               savingDocumentPath
             }
@@ -4667,7 +6205,11 @@ function ReleaseMetadataDetailView({
         ) : null,
       )}
 
-      {detail.missingFiles.length > 0 && (
+        </div>
+      </div>
+
+      {showAdminTools &&
+        detail.missingFiles.length > 0 && (
         <section className="metadata-detail-section">
           <header>
             <h2>Missing metadata files</h2>
@@ -4706,6 +6248,229 @@ function ReleaseMetadataDetailView({
       )}
     </section>
   );
+}
+
+type InferredTrackSummary = {
+  id: string;
+  number: number | null;
+  artist: string;
+  title: string;
+};
+
+function titleCaseSlug(value: string): string {
+  return value
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(
+      /\b\w/g,
+      (character) =>
+        character.toUpperCase(),
+    );
+}
+
+function inferTrackSummary(
+  trackId: string,
+): InferredTrackSummary {
+  const match = trackId.match(
+    /^(.*?)_(\d{1,3})_(.+)$/,
+  );
+
+  if (!match) {
+    return {
+      id: trackId,
+      number: null,
+      artist: "Review artist",
+      title: titleCaseSlug(trackId),
+    };
+  }
+
+  const [, artistSlug, number, titleSlug] =
+    match;
+
+  return {
+    id: trackId,
+    number: Number(number),
+    artist: titleCaseSlug(
+      artistSlug.replace(
+        /-feat(?:uring)?-/g,
+        " feat. ",
+      ),
+    ),
+    title: titleCaseSlug(
+      titleSlug.replace(
+        /-feat(?:uring)?-/g,
+        " feat. ",
+      ),
+    ),
+  };
+}
+
+function formatInferredTrackTitle(
+  title: string,
+  releaseTitle: string,
+): string {
+  /*
+   * Release folders commonly use names such as "Nebula Remixes"
+   * while track folders use "Nebula Original Mix" or
+   * "Nebula feat. Saiin". Use the shared release-title base to
+   * present the mix/version portion in parentheses.
+   */
+  const releaseBase = releaseTitle
+    .replace(
+      /\s+(?:Remixes|Remix Collection)$/i,
+      "",
+    )
+    .trim();
+
+  if (
+    releaseBase &&
+    title.toLowerCase().startsWith(
+      `${releaseBase.toLowerCase()} `,
+    )
+  ) {
+    const suffix = title
+      .slice(releaseBase.length)
+      .trim();
+
+    if (
+      /^(?:original mix|.+ remix|feat\.\s+.+)$/i.test(
+        suffix,
+      )
+    ) {
+      return `${releaseBase} (${suffix})`;
+    }
+  }
+
+  /*
+   * Preserve useful featured-artist punctuation even when the
+   * track title does not share the inferred release-title base.
+   */
+  const featuredArtistMatch = title.match(
+    /^(.*?)\s+(feat\.\s+.+)$/i,
+  );
+
+  if (featuredArtistMatch) {
+    return `${featuredArtistMatch[1]} (${featuredArtistMatch[2]})`;
+  }
+
+  return title;
+}
+
+function readTrackDisplayTitle(
+  trackId: string,
+  documents: ParsedMetadataDocument[],
+  inferredTitle: string,
+): string {
+  const trackDocument = documents.find(
+    (document) =>
+      document.trackId === trackId &&
+      document.filename === "track.toml",
+  );
+
+  const trackValue =
+    trackDocument?.parsed.track;
+
+  if (
+    typeof trackValue === "object" &&
+    trackValue !== null &&
+    "title" in trackValue &&
+    typeof trackValue.title === "string" &&
+    trackValue.title.trim()
+  ) {
+    return trackValue.title.trim();
+  }
+
+  return inferredTitle;
+}
+
+function inferCommonReleaseArtist(
+  tracks: InferredTrackSummary[],
+): string {
+  const artistCounts = new Map<
+    string,
+    number
+  >();
+
+  for (const track of tracks) {
+    const primaryArtist =
+      track.artist.split(/\s+feat\.\s+/i)[0];
+
+    artistCounts.set(
+      primaryArtist,
+      (artistCounts.get(primaryArtist) ?? 0) +
+        1,
+    );
+  }
+
+  return (
+    Array.from(artistCounts.entries()).sort(
+      (left, right) =>
+        right[1] - left[1],
+    )[0]?.[0] ?? "Review artist"
+  );
+}
+
+function formatReleaseTitle(
+  releaseId: string,
+): string {
+  const match = releaseId.match(
+    /^\d{4}-\d{2}-\d{2}_(.+)$/,
+  );
+
+  if (!match) {
+    return releaseId;
+  }
+
+  return match[1]
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(
+      /\b\w/g,
+      (character) =>
+        character.toUpperCase(),
+    );
+}
+
+function formatReleaseDate(
+  releaseId: string,
+): string {
+  const match = releaseId.match(
+    /^(\d{4})-(\d{2})-(\d{2})_/,
+  );
+
+  if (!match) {
+    return "Release date not identified";
+  }
+
+  const [, year, month, day] = match;
+  const date = new Date(
+    Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+    ),
+  );
+
+  if (
+    date.getUTCFullYear() !== Number(year) ||
+    date.getUTCMonth() !==
+      Number(month) - 1 ||
+    date.getUTCDate() !== Number(day)
+  ) {
+    return "Release date not identified";
+  }
+
+  return new Intl.DateTimeFormat(
+    "en-US",
+    {
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    },
+  ).format(date);
 }
 
 function formatReleaseDisplayName(
@@ -4801,6 +6566,7 @@ function MetadataDocumentSection({
   draft,
   onDraftValueChange,
   metadataRegistry,
+  activeMetadataTab,
   savingDocumentPath,
   onSaveDocument,
 }: {
@@ -4815,123 +6581,41 @@ function MetadataDocumentSection({
     nextValue: EditableMetadataValue,
   ) => void;
   metadataRegistry: MetadataFieldDefinition[];
+  activeMetadataTab: ReleaseMetadataTab;
   savingDocumentPath: string | null;
   onSaveDocument: (
     document: ParsedMetadataDocument,
   ) => void;
 }) {
-  const [
-    activeDocumentPath,
-    setActiveDocumentPath,
-  ] = useState(
-    documents[0]?.relativePath ?? "",
-  );
-
-  useEffect(() => {
-    const selectedStillExists =
-      documents.some(
-        (document) =>
-          document.relativePath ===
-          activeDocumentPath,
-      );
-
-    if (!selectedStillExists) {
-      setActiveDocumentPath(
-        documents[0]?.relativePath ?? "",
-      );
-    }
-  }, [
-    activeDocumentPath,
-    documents,
-  ]);
-
-  const activeDocument =
-    documents.find(
-      (document) =>
-        document.relativePath ===
-        activeDocumentPath,
-    ) ?? documents[0];
 
   return (
     <section className="metadata-detail-section">
-      <header>
-        <h2>{title}</h2>
-        <span className="badge preview">
-          {documents.length} files
-        </span>
-      </header>
+      {activeMetadataTab === "raw" && (
+        <header className="raw-toml-section-header">
+          <div>
+            <h2>{title}</h2>
+            {documents.length === 1 && (
+              <code>
+                {documents[0]?.filename}
+              </code>
+            )}
+          </div>
+          <span className="badge preview">
+            {documents.length} files
+          </span>
+        </header>
+      )}
 
       {documents.length === 0 ? (
         <p className="empty-state">
-          No metadata documents available.
+          No metadata documents exist for this selection yet.
         </p>
       ) : (
-        <>
-          <nav
-            className="metadata-file-tabs"
-            aria-label={`${title} metadata files`}
-          >
-            {documents.map((document) => {
-              const documentDraftPrefix =
-                `${document.relativePath}::`;
-
-              const modifiedCount =
-                Object.keys(draft).filter(
-                  (key) =>
-                    key.startsWith(
-                      documentDraftPrefix,
-                    ),
-                ).length;
-
-              return (
-                <button
-                  key={document.relativePath}
-                  type="button"
-                  className={
-                    activeDocument
-                      ?.relativePath ===
-                    document.relativePath
-                      ? "active"
-                      : undefined
-                  }
-                  aria-pressed={
-                    activeDocument
-                      ?.relativePath ===
-                    document.relativePath
-                  }
-                  title={document.filename}
-                  onClick={() =>
-                    setActiveDocumentPath(
-                      document.relativePath,
-                    )
-                  }
-                >
-                  <span>
-                    {
-                      formatMetadataDocumentLabel(
-                        document.filename,
-                      )
-                    }
-                  </span>
-
-                  {modifiedCount > 0 && (
-                    <small
-                      title={`${modifiedCount} unsaved changes`}
-                    >
-                      {modifiedCount}
-                    </small>
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-
-          {activeDocument && (
+        <div className="metadata-category-documents">
+          {documents.map((document) => (
             <MetadataDocumentTable
-              key={
-                activeDocument.relativePath
-              }
-              document={activeDocument}
+              key={document.relativePath}
+              document={document}
               editMode={editMode}
               draft={draft}
               onDraftValueChange={
@@ -4940,18 +6624,19 @@ function MetadataDocumentSection({
               metadataRegistry={
                 metadataRegistry
               }
+              activeMetadataTab={
+                activeMetadataTab
+              }
               saving={
                 savingDocumentPath ===
-                activeDocument.relativePath
+                document.relativePath
               }
               onSave={() =>
-                onSaveDocument(
-                  activeDocument,
-                )
+                onSaveDocument(document)
               }
             />
-          )}
-        </>
+          ))}
+        </div>
       )}
     </section>
   );
@@ -5147,7 +6832,20 @@ function MetadataValueCell({
       <label className="metadata-editor-field">
         <input
           type="number"
-          step="any"
+          min={
+            isTrackDiscNumberingPath(
+              row.path,
+            )
+              ? 1
+              : undefined
+          }
+          step={
+            isTrackDiscNumberingPath(
+              row.path,
+            )
+              ? 1
+              : "any"
+          }
           value={String(currentValue)}
           onChange={(event) => {
             const parsed =
@@ -5199,12 +6897,102 @@ function MetadataValueCell({
   );
 }
 
+function metadataRowMatchesTab(
+  path: string,
+  group: string,
+  tab: ReleaseMetadataTab,
+): boolean {
+  const lowerPath = path.toLowerCase();
+
+  if (tab === "raw") {
+    return false;
+  }
+
+  if (tab === "settings") {
+    return true;
+  }
+
+  if (tab === "files") {
+    return group === "Files and Sources";
+  }
+
+  if (tab === "developer") {
+    return group === "Developer / Advanced";
+  }
+
+  if (tab === "artwork") {
+    return group === "Artwork";
+  }
+
+  if (tab === "lyrics") {
+    return (
+      /(^|\.)(lyrics?|language|script|translation)(\.|\[|$)/.test(
+        lowerPath,
+      )
+    );
+  }
+
+  if (tab === "credits") {
+    return (
+      group === "Artists" ||
+      group === "Performers" ||
+      group === "Arrangement" ||
+      /(^|\.)(composer|composers|songwriter|songwriters|lyricist|lyricists)(\.|\[|$)/.test(
+        lowerPath,
+      )
+    );
+  }
+
+  if (tab === "recording") {
+    return [
+      "Production",
+      "Recording and Editing",
+      "Mixing",
+      "Mastering",
+      "Technical Audio",
+    ].includes(group);
+  }
+
+  if (tab === "rights") {
+    return group === "Music Business & Rights";
+  }
+
+  if (tab === "notes") {
+    return (
+      group === "Text and Notes" ||
+      /(^|\.)(notes?|comment|description)(\.|\[|$)/.test(
+        lowerPath,
+      )
+    );
+  }
+
+  return ![
+    "Artists",
+    "Performers",
+    "Arrangement",
+    "Production",
+    "Recording and Editing",
+    "Mixing",
+    "Mastering",
+    "Technical Audio",
+    "Music Business & Rights",
+    "Artwork",
+    "Text and Notes",
+    "Files and Sources",
+    "Developer / Advanced",
+  ].includes(group) &&
+    !/(^|\.)(lyrics?|language|script|translation|composer|composers|songwriter|songwriters|lyricist|lyricists)(\.|\[|$)/.test(
+      lowerPath,
+    );
+}
+
 function MetadataDocumentTable({
   document,
   editMode,
   draft,
   onDraftValueChange,
   metadataRegistry,
+  activeMetadataTab,
   saving,
   onSave,
 }: {
@@ -5218,6 +7006,7 @@ function MetadataDocumentTable({
     nextValue: EditableMetadataValue,
   ) => void;
   metadataRegistry: MetadataFieldDefinition[];
+  activeMetadataTab: ReleaseMetadataTab;
   saving: boolean;
   onSave: () => void;
 }) {
@@ -5256,7 +7045,7 @@ function MetadataDocumentTable({
       });
   };
 
-  const groupedRows = rows.map(
+  const allGroupedRows = rows.map(
     (row, sourceIndex) => {
       const fieldDefinition =
         findRegisteredMetadataField(
@@ -5278,13 +7067,24 @@ function MetadataDocumentTable({
     },
   );
 
+  const groupedRows =
+    activeMetadataTab === "settings"
+      ? allGroupedRows
+      : allGroupedRows.filter(
+          ({ row, group }) =>
+            metadataRowMatchesTab(
+              row.path,
+              group,
+              activeMetadataTab,
+            ),
+        );
+
   const numberingRows =
     groupedRows
-      .filter(
-        ({ row }) =>
-          /^(release|track)\.numbering\./.test(
-            row.path,
-          ),
+      .filter(({ row }) =>
+        isTrackDiscNumberingPath(
+          row.path,
+        ),
       )
       .sort(
         (left, right) =>
@@ -5296,11 +7096,61 @@ function MetadataDocumentTable({
             Number.MAX_SAFE_INTEGER),
       );
 
+  const findNumberingRow = (
+    path: string,
+  ) =>
+    numberingRows.find(
+      ({ row }) => row.path === path,
+    );
+
+  const trackNumberItem =
+    findNumberingRow(
+      "track.numbering.track_number",
+    );
+  const trackTotalItem =
+    findNumberingRow(
+      "track.numbering.track_total",
+    ) ??
+    findNumberingRow(
+      "release.numbering.track_total",
+    );
+  const discNumberItem =
+    findNumberingRow(
+      "track.numbering.disc_number",
+    );
+  const discTotalItem =
+    findNumberingRow(
+      "track.numbering.disc_total",
+    ) ??
+    findNumberingRow(
+      "release.numbering.disc_total",
+    );
+
+  const isReleaseNumbering =
+    document.scope === "release";
+
+  const numberingDisplayValue = (
+    item:
+      | (typeof numberingRows)[number]
+      | undefined,
+  ): EditableMetadataValue | "—" => {
+    if (!item) {
+      return "—";
+    }
+
+    const draftKey = buildDocumentDraftKey(
+      document,
+      item.row.path,
+    );
+
+    return draft[draftKey] ?? item.row.value;
+  };
+
   const standardRows =
     groupedRows
       .filter(
         ({ row }) =>
-          !/^(release|track)\.numbering\./.test(
+          !isTrackDiscNumberingPath(
             row.path,
           ),
       )
@@ -5422,41 +7272,72 @@ function MetadataDocumentTable({
       draft,
     ).length;
 
+  const isSettingsDocument =
+    /settings/i.test(document.filename);
+
+  if (
+    activeMetadataTab === "settings" &&
+    !isSettingsDocument
+  ) {
+    return null;
+  }
+
+  if (
+    activeMetadataTab !== "raw" &&
+    groupedRows.length === 0
+  ) {
+    return null;
+  }
+
+  if (activeMetadataTab === "raw") {
+    return (
+      <article className="metadata-document-table raw-only-document">
+        <header>
+          <div>
+            <h3>{document.filename}</h3>
+            <code>{document.relativePath}</code>
+          </div>
+        </header>
+
+        <pre className="raw-toml-panel">
+          <code>{document.content}</code>
+        </pre>
+      </article>
+    );
+  }
+
   return (
     <article className="metadata-document-table">
-      <header>
-        <div>
-          <h3>{document.filename}</h3>
-          <code>{document.relativePath}</code>
-        </div>
+      {editMode && (
+        <header className="document-edit-actions">
+          <div className="document-save-controls">
+            <span
+              className={
+                documentChangeCount > 0
+                  ? "badge preview"
+                  : "badge complete"
+              }
+            >
+              {documentChangeCount > 0
+                ? `${documentChangeCount} modified`
+                : "No changes"}
+            </span>
 
-        <div className="document-save-controls">
-          <span
-            className={
-              documentChangeCount > 0
-                ? "badge preview"
-                : "badge complete"
-            }
-          >
-            {documentChangeCount > 0
-              ? `${documentChangeCount} modified`
-              : "Parsed"}
-          </span>
-
-          <button
-            type="button"
-            disabled={
-              saving ||
-              documentChangeCount === 0
-            }
-            onClick={onSave}
-          >
-            {saving
-              ? "Saving…"
-              : "Save this TOML"}
-          </button>
-        </div>
-      </header>
+            <button
+              type="button"
+              disabled={
+                saving ||
+                documentChangeCount === 0
+              }
+              onClick={onSave}
+            >
+              {saving
+                ? "Saving…"
+                : "Save changes"}
+            </button>
+          </div>
+        </header>
+      )}
 
       <div className="metadata-table-header">
         <span>Metadata key</span>
@@ -5484,98 +7365,180 @@ function MetadataDocumentTable({
               />
 
               <div>
-                <h4>
-                  Track &amp; Disc Numbering
-                </h4>
-                <p>
-                  Sequence and release-volume
-                  information.
-                </p>
+                <div className="metadata-numbering-title">
+                  <h4>
+                    Track &amp; Disc Numbering
+                  </h4>
+
+                  <MetadataFieldControls
+                    field={
+                      trackNumberItem
+                        ?.fieldDefinition ??
+                      trackTotalItem
+                        ?.fieldDefinition ??
+                      discNumberItem
+                        ?.fieldDefinition ??
+                      discTotalItem
+                        ?.fieldDefinition
+                    }
+                    path={
+                      trackNumberItem?.row.path ??
+                      trackTotalItem?.row.path ??
+                      discNumberItem?.row.path ??
+                      discTotalItem?.row.path ??
+                      "track.numbering"
+                    }
+                    valueType={
+                      trackNumberItem
+                        ?.row.valueType ??
+                      trackTotalItem
+                        ?.row.valueType ??
+                      discNumberItem
+                        ?.row.valueType ??
+                      discTotalItem
+                        ?.row.valueType ??
+                      "number"
+                    }
+                  />
+                </div>
+
+                {!isReleaseNumbering && (
+                  <p>
+                    Sequence and release-volume
+                    information.
+                  </p>
+                )}
               </div>
 
-              <span className="metadata-numbering-summary">
-                Track {String(
-                  numberingRows.find(
-                    ({ row }) =>
-                      row.path ===
-                      "track.numbering.track_number",
-                  )?.row.value ?? "—",
-                )} of {String(
-                  numberingRows.find(
-                    ({ row }) =>
-                      row.path ===
-                      "track.numbering.track_total",
-                  )?.row.value ??
-                    numberingRows.find(
-                      ({ row }) =>
-                        row.path ===
-                        "release.numbering.track_total",
-                    )?.row.value ??
-                    "—",
-                )}
-                {" · "}
-                Disc {String(
-                  numberingRows.find(
-                    ({ row }) =>
-                      row.path ===
-                      "track.numbering.disc_number",
-                  )?.row.value ?? "—",
-                )} of {String(
-                  numberingRows.find(
-                    ({ row }) =>
-                      row.path ===
-                      "track.numbering.disc_total",
-                  )?.row.value ??
-                    numberingRows.find(
-                      ({ row }) =>
-                        row.path ===
-                        "release.numbering.disc_total",
-                    )?.row.value ??
-                    "—",
-                )}
-              </span>
+              {!isReleaseNumbering && (
+                <span className="metadata-numbering-summary">
+                  Track {String(
+                    numberingDisplayValue(
+                      trackNumberItem,
+                    ),
+                  )} of {String(
+                    numberingDisplayValue(
+                      trackTotalItem,
+                    ),
+                  )}
+                  {" · "}
+                  Disc {String(
+                    numberingDisplayValue(
+                      discNumberItem,
+                    ),
+                  )} of {String(
+                    numberingDisplayValue(
+                      discTotalItem,
+                    ),
+                  )}
+                </span>
+              )}
             </summary>
 
-            <div className="metadata-numbering-grid">
-              {numberingRows.map(
-                ({
-                  row,
-                  fieldDefinition,
-                }) => (
-                  <div
-                    key={row.path}
-                    className="metadata-numbering-card"
-                  >
-                    <div className="metadata-key">
-                      <div className="metadata-key-heading">
-                        <strong>
-                          {fieldDefinition
-                            ?.label ??
-                            row.path}
-                        </strong>
+            <div className="metadata-numbering-pairs">
+              <div className="metadata-numbering-pair">
+                <div className="metadata-numbering-pair-label">
+                  <strong>
+                    {isReleaseNumbering
+                      ? "Tracks"
+                      : "Track"}
+                  </strong>
 
-                        <MetadataFieldControls
-                          field={fieldDefinition}
-                          path={row.path}
-                          valueType={
-                            row.valueType
-                          }
-                        />
-                      </div>
-                    </div>
+                </div>
 
+                <div className="metadata-numbering-fraction">
+                  {!isReleaseNumbering &&
+                    trackNumberItem && (
+                      <MetadataValueCell
+                        document={document}
+                        row={
+                          trackNumberItem.row
+                        }
+                        editMode={editMode}
+                        draft={draft}
+                        onDraftValueChange={
+                          onDraftValueChange
+                        }
+                      />
+                    )}
+
+                  {!isReleaseNumbering && (
+                    <span
+                      className="metadata-numbering-divider"
+                      aria-hidden="true"
+                    >
+                      /
+                    </span>
+                  )}
+
+                  {trackTotalItem && (
                     <MetadataValueCell
                       document={document}
-                      row={row}
+                      row={trackTotalItem.row}
                       editMode={editMode}
                       draft={draft}
                       onDraftValueChange={
                         onDraftValueChange
                       }
                     />
-                  </div>
-                ),
-              )}
+                  )}
+
+                  {isReleaseNumbering && (
+                    <small>total</small>
+                  )}
+                </div>
+              </div>
+
+              <div className="metadata-numbering-pair">
+                <div className="metadata-numbering-pair-label">
+                  <strong>
+                    {isReleaseNumbering
+                      ? "Discs"
+                      : "Disc"}
+                  </strong>
+
+                </div>
+
+                <div className="metadata-numbering-fraction">
+                  {!isReleaseNumbering &&
+                    discNumberItem && (
+                      <MetadataValueCell
+                        document={document}
+                        row={discNumberItem.row}
+                        editMode={editMode}
+                        draft={draft}
+                        onDraftValueChange={
+                          onDraftValueChange
+                        }
+                      />
+                    )}
+
+                  {!isReleaseNumbering && (
+                    <span
+                      className="metadata-numbering-divider"
+                      aria-hidden="true"
+                    >
+                      /
+                    </span>
+                  )}
+
+                  {discTotalItem && (
+                    <MetadataValueCell
+                      document={document}
+                      row={discTotalItem.row}
+                      editMode={editMode}
+                      draft={draft}
+                      onDraftValueChange={
+                        onDraftValueChange
+                      }
+                    />
+                  )}
+
+                  {isReleaseNumbering && (
+                    <small>total</small>
+                  )}
+                </div>
+              </div>
             </div>
           </details>
         )}
@@ -5633,9 +7596,19 @@ function MetadataDocumentTable({
                       <div className="metadata-key">
                         <div className="metadata-key-heading">
                           <strong>
-                            {fieldDefinition
-                              ?.label ??
-                              row.path}
+                            <MetadataFieldLabel
+
+                              label={
+
+                                fieldDefinition
+
+                                  ?.label
+
+                              }
+
+                              path={row.path}
+
+                            />
                           </strong>
 
                           <MetadataFieldControls
@@ -5668,12 +7641,6 @@ function MetadataDocumentTable({
         )}
       </div>
 
-      <details className="raw-toml">
-        <summary>View raw TOML</summary>
-        <pre>
-          <code>{document.content}</code>
-        </pre>
-      </details>
     </article>
   );
 }
