@@ -2241,3 +2241,86 @@ button,
     width: 100%;
   }
 }
+
+
+.export-validation-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.export-validation-controls span {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.export-validation-results {
+  margin-top: 1.25rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.export-validation-results > header,
+.export-validation-item > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.export-validation-overall,
+.export-validation-item > header span {
+  border-radius: 999px;
+  padding: 0.3rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.export-validation-item {
+  border: 1px solid var(--border-color);
+  border-radius: 0.75rem;
+  padding: 1rem;
+}
+
+.export-validation-item ul {
+  list-style: none;
+  margin: 0.8rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.export-validation-item li {
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.35fr) 1fr;
+  gap: 0.8rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.export-validation-item li strong {
+  text-transform: capitalize;
+}
+
+.export-validation-results .status-ready,
+.export-validation-results .status-pass {
+  color: var(--success-color, #7bd88f);
+}
+
+.export-validation-results .status-warning {
+  color: var(--warning-color, #f4c66a);
+}
+
+.export-validation-results .status-blocked {
+  color: var(--error-color, #ff8a8a);
+}
+
+@media (max-width: 720px) {
+  .export-validation-item li {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}

@@ -288,6 +288,37 @@ type FfmpegCapabilities = {
   error?: string;
 };
 
+
+type ExportDryRunCheck = {
+  code: string;
+  status:
+    | "pass"
+    | "warning"
+    | "blocked";
+  message: string;
+};
+
+type ExportDryRunValidation = {
+  releaseId: string;
+  container: ExportContainer;
+  outputRoot: string;
+  checkedAt: string;
+  items: Array<{
+    trackId: string;
+    status:
+      | "ready"
+      | "warning"
+      | "blocked";
+    checks: ExportDryRunCheck[];
+  }>;
+  summary: {
+    readyCount: number;
+    warningCount: number;
+    blockedCount: number;
+  };
+  canExport: boolean;
+};
+
 const exportContainerLabels:
   Record<ExportContainer, string> = {
     mp3: "MP3 / ID3",
@@ -920,6 +951,21 @@ function MetadataCompatibilityView({
     exportPlanError,
     setExportPlanError,
   ] = useState<string | null>(null);
+  const [
+    exportValidation,
+    setExportValidation,
+  ] = useState<ExportDryRunValidation | null>(
+    null,
+  );
+  const [
+    exportValidationLoading,
+    setExportValidationLoading,
+  ] = useState(false);
+  const [
+    exportValidationError,
+    setExportValidationError,
+  ] = useState<string | null>(null);
+
 
   const [
     ffmpegCapabilities,
@@ -1032,6 +1078,8 @@ function MetadataCompatibilityView({
 
     setExportPlanLoading(true);
     setExportPlanError(null);
+    setExportValidation(null);
+    setExportValidationError(null);
 
     try {
       const query = new URLSearchParams({
@@ -1081,6 +1129,67 @@ function MetadataCompatibilityView({
       setExportPlanLoading(false);
     }
   };
+
+  const requestExportValidation =
+    async () => {
+      if (!selectedExportReleaseId) {
+        setExportValidationError(
+          "Select a release before validating the export plan.",
+        );
+        return;
+      }
+
+      setExportValidationLoading(true);
+      setExportValidationError(null);
+
+      try {
+        const query = new URLSearchParams({
+          release: selectedExportReleaseId,
+          container: exportContainer,
+          output: exportOutputDirectory,
+        });
+
+        if (
+          selectedExportTrackId !== "all"
+        ) {
+          query.set(
+            "track",
+            selectedExportTrackId,
+          );
+        }
+
+        const response = await fetch(
+          `/api/export/validate?${query.toString()}`,
+        );
+
+        const result =
+          (await response.json()) as
+            | ExportDryRunValidation
+            | { error?: string };
+
+        if (!response.ok) {
+          throw new Error(
+            "error" in result
+              ? result.error ??
+                  `Export validation failed: HTTP ${response.status}`
+              : `Export validation failed: HTTP ${response.status}`,
+          );
+        }
+
+        setExportValidation(
+          result as ExportDryRunValidation,
+        );
+      } catch (error) {
+        setExportValidation(null);
+        setExportValidationError(
+          error instanceof Error
+            ? error.message
+            : "Unknown export validation error",
+        );
+      } finally {
+        setExportValidationLoading(false);
+      }
+    };
 
   const scopes = useMemo(
     () =>
@@ -1756,6 +1865,117 @@ function MetadataCompatibilityView({
               ),
             )}
           </div>
+        )}
+
+        {exportPlan && (
+          <div className="export-validation-controls">
+            <button
+              type="button"
+              disabled={exportValidationLoading}
+              onClick={() =>
+                void requestExportValidation()
+              }
+            >
+              {exportValidationLoading
+                ? "Validating dry run…"
+                : "Validate dry run"}
+            </button>
+
+            <span>
+              Checks filesystem paths and encoder
+              readiness without running FFmpeg.
+            </span>
+          </div>
+        )}
+
+        {exportValidationError && (
+          <p className="message error">
+            {exportValidationError}
+          </p>
+        )}
+
+        {exportValidation && (
+          <section className="export-validation-results">
+            <header>
+              <div>
+                <p className="card-type">
+                  Read-only dry run
+                </p>
+                <h3>Export validation</h3>
+                <code>
+                  {exportValidation.outputRoot}
+                </code>
+              </div>
+
+              <span
+                className={`export-validation-overall ${
+                  exportValidation.canExport
+                    ? "status-ready"
+                    : "status-blocked"
+                }`}
+              >
+                {exportValidation.canExport
+                  ? "Validation passed"
+                  : "Export blocked"}
+              </span>
+            </header>
+
+            <div className="export-plan-summary">
+              <span>
+                {exportValidation.summary.readyCount}
+                {" ready"}
+              </span>
+              <span>
+                {
+                  exportValidation.summary
+                    .warningCount
+                }
+                {" warnings"}
+              </span>
+              <span>
+                {
+                  exportValidation.summary
+                    .blockedCount
+                }
+                {" blocked"}
+              </span>
+            </div>
+
+            {exportValidation.items.map(
+              (item) => (
+                <article
+                  key={item.trackId}
+                  className={`export-validation-item status-${item.status}`}
+                >
+                  <header>
+                    <strong>{item.trackId}</strong>
+                    <span>{item.status}</span>
+                  </header>
+
+                  <ul>
+                    {item.checks.map(
+                      (itemCheck) => (
+                        <li
+                          key={`${item.trackId}:${itemCheck.code}`}
+                          className={`status-${itemCheck.status}`}
+                        >
+                          <strong>
+                            {itemCheck.code.replaceAll(
+                              "-",
+                              " ",
+                            )}
+                          </strong>
+                          <span>
+                            {itemCheck.message}
+                          </span>
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </article>
+              ),
+            )}
+          </section>
         )}
       </section>
 

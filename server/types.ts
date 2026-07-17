@@ -259,6 +259,42 @@ export type FfmpegCapabilities = {
   error?: string;
 };
 
+
+
+export type ExportDryRunCheckStatus =
+  | "pass"
+  | "warning"
+  | "blocked";
+
+export type ExportDryRunCheck = {
+  code: string;
+  status: ExportDryRunCheckStatus;
+  message: string;
+};
+
+export type ExportDryRunItem = {
+  trackId: string;
+  status:
+    | "ready"
+    | "warning"
+    | "blocked";
+  checks: ExportDryRunCheck[];
+};
+
+export type ExportDryRunValidation = {
+  releaseId: string;
+  container: ExportContainer;
+  outputRoot: string;
+  checkedAt: string;
+  items: ExportDryRunItem[];
+  summary: {
+    readyCount: number;
+    warningCount: number;
+    blockedCount: number;
+  };
+  canExport: boolean;
+};
+
 export type MetadataValueType =
   | "string"
   | "integer"

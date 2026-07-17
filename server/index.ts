@@ -5,6 +5,10 @@ import {
 
 import { buildMetadataExportPlan } from "./export-plan.js";
 import {
+  resolveExportOutputRoot,
+  validateMetadataExportPlan,
+} from "./export-validator.js";
+import {
   detectFfmpegCapabilities,
 } from "./ffmpeg-capabilities.js";
 import { buildMetadataGenerationPlan } from "./generation-plan.js";
@@ -190,6 +194,124 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown export-plan error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/export/validate"
+    ) {
+      try {
+        const releaseId =
+          requestUrl.searchParams.get(
+            "release",
+          );
+        const container =
+          requestUrl.searchParams.get(
+            "container",
+          );
+        const trackId =
+          requestUrl.searchParams.get(
+            "track",
+          ) ?? undefined;
+        const outputDirectory =
+          requestUrl.searchParams.get(
+            "output",
+          ) ?? undefined;
+
+        if (!releaseId) {
+          sendJson(response, 400, {
+            error:
+              "Missing release query parameter",
+          });
+          return;
+        }
+
+        const allowedContainers =
+          new Set([
+            "mp3",
+            "flac",
+            "m4a",
+            "ogg-vorbis",
+            "opus",
+            "wav",
+          ]);
+
+        if (
+          !container ||
+          !allowedContainers.has(container)
+        ) {
+          sendJson(response, 400, {
+            error:
+              "container must be mp3, flac, m4a, ogg-vorbis, opus, or wav",
+          });
+          return;
+        }
+
+        const mediaRoot =
+          await resolveMediaRoot();
+        const release =
+          await scanReleaseById(
+            mediaRoot,
+            releaseId,
+          );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        const detail =
+          await readReleaseMetadataDetail(
+            mediaRoot,
+            release,
+          );
+        const plan =
+          buildMetadataExportPlan(
+            release,
+            detail,
+            metadataFieldRegistry,
+            {
+              container:
+                container as
+                  | "mp3"
+                  | "flac"
+                  | "m4a"
+                  | "ogg-vorbis"
+                  | "opus"
+                  | "wav",
+              scope: trackId
+                ? "track"
+                : "all",
+              trackId,
+              outputDirectory,
+            },
+          );
+        const capabilities =
+          await detectFfmpegCapabilities();
+
+        sendJson(
+          response,
+          200,
+          await validateMetadataExportPlan(
+            plan,
+            mediaRoot,
+            capabilities,
+            resolveExportOutputRoot(),
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown export validation error",
         });
       }
 
