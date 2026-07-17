@@ -182,7 +182,7 @@ test(
     assert.equal(
       plan.items[0]
         .destinationRelativePath,
-      "exports/test-release/mp3/master.mp3",
+      "exports/test-release/mp3/artist_01_test-track.mp3",
     );
 
     assert.deepEqual(
@@ -194,6 +194,56 @@ test(
       [
         "First Composer",
         "Second Composer",
+      ],
+    );
+  },
+);
+
+test(
+  "uses unique track ids when audio masters share a filename",
+  () => {
+    const secondTrack = {
+      ...release.tracks[0],
+      id: "artist_02_second-track",
+      relativePath:
+        "releases/2026-07-16_test-release/tracks/artist_02_second-track",
+      audioMasters: [
+        {
+          filename: "master.wav",
+          relativePath:
+            "releases/2026-07-16_test-release/tracks/artist_02_second-track/master.wav",
+          extension: ".wav",
+        },
+      ],
+    };
+
+    const multiTrackRelease = {
+      ...release,
+      tracks: [
+        release.tracks[0],
+        secondTrack,
+      ],
+    };
+
+    const plan = buildMetadataExportPlan(
+      multiTrackRelease,
+      detail,
+      registry,
+      {
+        container: "mp3",
+        outputDirectory:
+          "exports/test-release/mp3",
+      },
+    );
+
+    assert.deepEqual(
+      plan.items.map(
+        (item) =>
+          item.destinationRelativePath,
+      ),
+      [
+        "exports/test-release/mp3/artist_01_test-track.mp3",
+        "exports/test-release/mp3/artist_02_second-track.mp3",
       ],
     );
   },

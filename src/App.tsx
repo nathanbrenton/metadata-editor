@@ -911,6 +911,10 @@ function MetadataCompatibilityView({
 }) {
   const [searchText, setSearchText] =
     useState("");
+  const [
+    referenceMenuOpen,
+    setReferenceMenuOpen,
+  ] = useState(false);
   const [scopeFilter, setScopeFilter] =
     useState("all");
   const [playerFilter, setPlayerFilter] =
@@ -981,6 +985,38 @@ function MetadataCompatibilityView({
     ffmpegCapabilitiesError,
     setFfmpegCapabilitiesError,
   ] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!referenceMenuOpen) {
+      return;
+    }
+
+    const previousOverflow =
+      document.body.style.overflow;
+
+    const closeOnEscape = (
+      event: KeyboardEvent,
+    ) => {
+      if (event.key === "Escape") {
+        setReferenceMenuOpen(false);
+      }
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener(
+      "keydown",
+      closeOnEscape,
+    );
+
+    return () => {
+      document.body.style.overflow =
+        previousOverflow;
+      window.removeEventListener(
+        "keydown",
+        closeOnEscape,
+      );
+    };
+  }, [referenceMenuOpen]);
 
   const refreshFfmpegCapabilities =
     useCallback(async () => {
@@ -1338,10 +1374,25 @@ function MetadataCompatibilityView({
           </p>
         </div>
 
-        <strong>
-          {visibleFields.length} of{" "}
-          {fields.length} fields
-        </strong>
+        <div className="compatibility-header-actions">
+          <strong>
+            {visibleFields.length} of{" "}
+            {fields.length} fields
+          </strong>
+
+          <button
+            type="button"
+            className="reference-menu-button"
+            aria-label="Open compatibility reference menu"
+            aria-expanded={referenceMenuOpen}
+            onClick={() =>
+              setReferenceMenuOpen(true)
+            }
+          >
+            <span aria-hidden="true">☰</span>
+            <span>Reference</span>
+          </button>
+        </div>
       </header>
 
       <section
@@ -1521,7 +1572,7 @@ function MetadataCompatibilityView({
             <p className="eyebrow">
               Read-only preview
             </p>
-            <h3>Metadata export plan</h3>
+            <h3>Export plan</h3>
             <p>
               Preview source files,
               destination names, and
@@ -1797,70 +1848,85 @@ function MetadataCompatibilityView({
                     ),
                   )}
 
-                  <div className="export-plan-field-table-wrap">
-                    <table className="export-plan-field-table">
-                      <thead>
-                        <tr>
-                          <th>
-                            Canonical field
-                          </th>
-                          <th>Target tag</th>
-                          <th>Value</th>
-                          <th>Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {item.fields.map(
-                          (field) => (
-                            <tr
-                              key={[
-                                field.canonicalPath,
-                                field.sourceDocument,
-                              ].join(":")}
-                            >
-                              <th scope="row">
-                                <strong>
-                                  {field.label}
-                                </strong>
-                                <code>
-                                  {
-                                    field.canonicalPath
-                                  }
-                                </code>
-                              </th>
-                              <td>
-                                <code>
-                                  {field.targetTags
-                                    .length > 0
-                                    ? field.targetTags.join(
-                                        ", ",
-                                      )
-                                    : "—"}
-                                </code>
-                              </td>
-                              <td>
-                                {formatMetadataValue(
-                                  field.value,
-                                )}
-                              </td>
-                              <td>
-                                <span
-                                  className={`export-plan-field-status status-${field.status}`}
-                                  title={
-                                    field.note
-                                  }
-                                >
-                                  {
-                                    field.status
-                                  }
-                                </span>
-                              </td>
-                            </tr>
-                          ),
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                  <details className="export-plan-field-disclosure">
+                    <summary>
+                      <span
+                        className="export-plan-field-disclosure-triangle"
+                        aria-hidden="true"
+                      />
+                      <strong>
+                        Field mappings
+                      </strong>
+                      <span>
+                        {item.fields.length}
+                      </span>
+                    </summary>
+
+                    <div className="export-plan-field-table-wrap">
+                      <table className="export-plan-field-table">
+                        <thead>
+                          <tr>
+                            <th>
+                              Canonical field
+                            </th>
+                            <th>Target tag</th>
+                            <th>Value</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {item.fields.map(
+                            (field) => (
+                              <tr
+                                key={[
+                                  field.canonicalPath,
+                                  field.sourceDocument,
+                                ].join(":")}
+                              >
+                                <th scope="row">
+                                  <strong>
+                                    {field.label}
+                                  </strong>
+                                  <code>
+                                    {
+                                      field.canonicalPath
+                                    }
+                                  </code>
+                                </th>
+                                <td>
+                                  <code>
+                                    {field.targetTags
+                                      .length > 0
+                                      ? field.targetTags.join(
+                                          ", ",
+                                        )
+                                      : "—"}
+                                  </code>
+                                </td>
+                                <td>
+                                  {formatMetadataValue(
+                                    field.value,
+                                  )}
+                                </td>
+                                <td>
+                                  <span
+                                    className={`export-plan-field-status status-${field.status}`}
+                                    title={
+                                      field.note
+                                    }
+                                  >
+                                    {
+                                      field.status
+                                    }
+                                  </span>
+                                </td>
+                              </tr>
+                            ),
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
                 </article>
               ),
             )}
@@ -1942,170 +2008,282 @@ function MetadataCompatibilityView({
             </div>
 
             {exportValidation.items.map(
-              (item) => (
-                <article
-                  key={item.trackId}
-                  className={`export-validation-item status-${item.status}`}
-                >
-                  <header>
-                    <strong>{item.trackId}</strong>
-                    <span>{item.status}</span>
-                  </header>
+              (item) => {
+                const plannedItem =
+                  exportPlan?.items.find(
+                    (planItem) =>
+                      planItem.trackId ===
+                      item.trackId,
+                  );
 
-                  <ul>
-                    {item.checks.map(
-                      (itemCheck) => (
-                        <li
-                          key={`${item.trackId}:${itemCheck.code}`}
-                          className={`status-${itemCheck.status}`}
-                        >
-                          <strong>
-                            {itemCheck.code.replaceAll(
-                              "-",
-                              " ",
-                            )}
-                          </strong>
-                          <span>
-                            {itemCheck.message}
-                          </span>
-                        </li>
-                      ),
-                    )}
-                  </ul>
-                </article>
-              ),
+                return (
+                  <details
+                    key={item.trackId}
+                    className={`export-validation-item status-${item.status}`}
+                  >
+                    <summary>
+                      <span className="export-validation-summary-main">
+                        <span
+                          className="export-validation-disclosure"
+                          aria-hidden="true"
+                        />
+                        <strong>{item.trackId}</strong>
+                      </span>
+
+                      <span className="export-validation-item-status">
+                        {item.status}
+                      </span>
+                    </summary>
+
+                    <div className="export-validation-item-details">
+                      <div className="export-validation-paths">
+                        <div>
+                          <strong>Source audio</strong>
+                          <code>
+                            {plannedItem?.sourceAudioRelativePath ??
+                              "No source audio selected"}
+                          </code>
+                        </div>
+
+                        <div>
+                          <strong>Destination file</strong>
+                          <code>
+                            {plannedItem?.destinationRelativePath ??
+                              "No destination selected"}
+                          </code>
+                        </div>
+                      </div>
+
+                      <ul>
+                        {item.checks.map(
+                          (itemCheck) => (
+                            <li
+                              key={`${item.trackId}:${itemCheck.code}`}
+                              className={`status-${itemCheck.status}`}
+                            >
+                              <strong>
+                                {itemCheck.code.replaceAll(
+                                  "-",
+                                  " ",
+                                )}
+                              </strong>
+                              <span>
+                                {itemCheck.message}
+                              </span>
+                            </li>
+                          ),
+                        )}
+                      </ul>
+                    </div>
+                  </details>
+                );
+              },
             )}
           </section>
         )}
       </section>
 
+      {referenceMenuOpen && (
+        <div
+          className="reference-menu-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (
+              event.target ===
+              event.currentTarget
+            ) {
+              setReferenceMenuOpen(false);
+            }
+          }}
+        >
+          <aside
+            className="reference-menu-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reference-menu-title"
+          >
+            <header className="reference-menu-header">
+              <div>
+                <p className="eyebrow">
+                  Compatibility reference
+                </p>
+                <h2 id="reference-menu-title">
+                  Legend and media players
+                </h2>
+                <p>
+                  Detailed tag mappings are kept
+                  here so the export workflow stays
+                  focused.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="reference-menu-close"
+                aria-label="Close compatibility reference menu"
+                onClick={() =>
+                  setReferenceMenuOpen(false)
+                }
+              >
+                ×
+              </button>
+            </header>
+
+            <section
+              className="reference-status-legend"
+              aria-label="Compatibility status legend"
+            >
+              <span className="compatibility-status status-verified">
+                Verified
+              </span>
+              <span className="compatibility-status status-partial">
+                Partial
+              </span>
+              <span className="compatibility-status status-not-visible">
+                Not visible
+              </span>
+              <span className="compatibility-status status-unverified">
+                Unverified
+              </span>
+            </section>
+
+            <p className="reference-menu-count">
+              Showing {visibleFields.length} of{" "}
+              {fields.length} fields using the
+              current filters.
+            </p>
+
       {visibleFields.length === 0 ? (
-        <p className="empty-state">
-          No registry fields match these
-          filters.
-        </p>
-      ) : (
-        <div className="compatibility-table-wrap">
-          <table className="compatibility-table">
-            <thead>
-              <tr>
-                <th>Canonical field</th>
-                <th>FFmpeg</th>
-                <th>ID3</th>
-                <th>Vorbis</th>
-                <th>MP4</th>
-                <th>RIFF</th>
-                <th>
-                  Export guidance
-                </th>
-                <th>VLC</th>
-                <th>Apple Music</th>
-                <th>
-                  Windows Media Player
-                </th>
-                <th>
-                  Windows Media Player Legacy
-                </th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {visibleFields.map((field) => {
-                const status =
-                  getCompatibilityStatus(
-                    field,
-                  );
-
-                return (
-                  <tr key={field.id}>
-                    <th scope="row">
-                      <div className="compatibility-field">
-                        <strong>
-                          {field.label}
-                        </strong>
-                        <code>
-                          {field.tomlPath}
-                        </code>
-                        <span>
-                          {field.scope}
-                          {" · "}
-                          {field.valueType}
-                        </span>
-                        <small>
-                          {field.description}
-                        </small>
-                        <span
-                          className={`compatibility-status status-${status}`}
-                        >
-                          {status.replace(
-                            "-",
-                            " ",
-                          )}
-                        </span>
-                      </div>
-                    </th>
-                    <td>
-                      {formatAliasValues(
-                        field.aliases?.ffmpeg,
-                      )}
-                    </td>
-                    <td>
-                      {formatAliasValues(
-                        field.aliases?.id3,
-                      )}
-                    </td>
-                    <td>
-                      {formatAliasValues(
-                        field.aliases?.vorbis,
-                      )}
-                    </td>
-                    <td>
-                      {formatAliasValues(
-                        field.aliases?.mp4,
-                      )}
-                    </td>
-                    <td>
-                      {formatAliasValues(
-                        field.aliases?.riff,
-                      )}
-                    </td>
-                    <td>
-                      <ExportGuidanceCell
-                        field={field}
-                        container={
-                          exportContainer
-                        }
-                      />
-                    </td>
-                    <td>
-                      <CompatibilityPlayerCell
-                        field={field}
-                        player="vlc"
-                      />
-                    </td>
-                    <td>
-                      <CompatibilityPlayerCell
-                        field={field}
-                        player="appleMusic"
-                      />
-                    </td>
-                    <td>
-                      <CompatibilityPlayerCell
-                        field={field}
-                        player="windowsMediaPlayer"
-                      />
-                    </td>
-                    <td>
-                      <CompatibilityPlayerCell
-                        field={field}
-                        player="windowsMediaPlayerLegacy"
-                      />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                    <p className="empty-state">
+                      No registry fields match these
+                      filters.
+                    </p>
+                  ) : (
+                    <div className="compatibility-table-wrap">
+                      <table className="compatibility-table">
+                        <thead>
+                          <tr>
+                            <th>Canonical field</th>
+                            <th>FFmpeg</th>
+                            <th>ID3</th>
+                            <th>Vorbis</th>
+                            <th>MP4</th>
+                            <th>RIFF</th>
+                            <th>
+                              Export guidance
+                            </th>
+                            <th>VLC</th>
+                            <th>Apple Music</th>
+                            <th>
+                              Windows Media Player
+                            </th>
+                            <th>
+                              Windows Media Player Legacy
+                            </th>
+                          </tr>
+                        </thead>
+            
+                        <tbody>
+                          {visibleFields.map((field) => {
+                            const status =
+                              getCompatibilityStatus(
+                                field,
+                              );
+            
+                            return (
+                              <tr key={field.id}>
+                                <th scope="row">
+                                  <div className="compatibility-field">
+                                    <strong>
+                                      {field.label}
+                                    </strong>
+                                    <code>
+                                      {field.tomlPath}
+                                    </code>
+                                    <span>
+                                      {field.scope}
+                                      {" · "}
+                                      {field.valueType}
+                                    </span>
+                                    <small>
+                                      {field.description}
+                                    </small>
+                                    <span
+                                      className={`compatibility-status status-${status}`}
+                                    >
+                                      {status.replace(
+                                        "-",
+                                        " ",
+                                      )}
+                                    </span>
+                                  </div>
+                                </th>
+                                <td>
+                                  {formatAliasValues(
+                                    field.aliases?.ffmpeg,
+                                  )}
+                                </td>
+                                <td>
+                                  {formatAliasValues(
+                                    field.aliases?.id3,
+                                  )}
+                                </td>
+                                <td>
+                                  {formatAliasValues(
+                                    field.aliases?.vorbis,
+                                  )}
+                                </td>
+                                <td>
+                                  {formatAliasValues(
+                                    field.aliases?.mp4,
+                                  )}
+                                </td>
+                                <td>
+                                  {formatAliasValues(
+                                    field.aliases?.riff,
+                                  )}
+                                </td>
+                                <td>
+                                  <ExportGuidanceCell
+                                    field={field}
+                                    container={
+                                      exportContainer
+                                    }
+                                  />
+                                </td>
+                                <td>
+                                  <CompatibilityPlayerCell
+                                    field={field}
+                                    player="vlc"
+                                  />
+                                </td>
+                                <td>
+                                  <CompatibilityPlayerCell
+                                    field={field}
+                                    player="appleMusic"
+                                  />
+                                </td>
+                                <td>
+                                  <CompatibilityPlayerCell
+                                    field={field}
+                                    player="windowsMediaPlayer"
+                                  />
+                                </td>
+                                <td>
+                                  <CompatibilityPlayerCell
+                                    field={field}
+                                    player="windowsMediaPlayerLegacy"
+                                  />
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+            
+          </aside>
         </div>
       )}
     </section>

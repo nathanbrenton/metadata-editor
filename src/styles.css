@@ -2101,6 +2101,51 @@ button,
   text-transform: uppercase;
 }
 
+.export-plan-field-disclosure {
+  margin-top: 0.9rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.65rem;
+  overflow: hidden;
+}
+
+.export-plan-field-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0.8rem 0.9rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.export-plan-field-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.export-plan-field-disclosure > summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -3px;
+}
+
+.export-plan-field-disclosure > summary > span:last-child {
+  margin-left: auto;
+  font-size: 0.8rem;
+  opacity: 0.72;
+}
+
+.export-plan-field-disclosure-triangle {
+  width: 0;
+  height: 0;
+  border-top: 0.38rem solid transparent;
+  border-bottom: 0.38rem solid transparent;
+  border-left: 0.52rem solid currentColor;
+  transition: transform 120ms ease;
+}
+
+.export-plan-field-disclosure[open]
+  .export-plan-field-disclosure-triangle {
+  transform: rotate(90deg);
+}
+
 .export-plan-field-table-wrap {
   overflow-x: auto;
 }
@@ -2262,8 +2307,7 @@ button,
   gap: 1rem;
 }
 
-.export-validation-results > header,
-.export-validation-item > header {
+.export-validation-results > header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -2271,7 +2315,7 @@ button,
 }
 
 .export-validation-overall,
-.export-validation-item > header span {
+.export-validation-item-status {
   border-radius: 999px;
   padding: 0.3rem 0.65rem;
   font-size: 0.78rem;
@@ -2282,7 +2326,67 @@ button,
 .export-validation-item {
   border: 1px solid var(--border-color);
   border-radius: 0.75rem;
+  overflow: hidden;
+}
+
+.export-validation-item > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   padding: 1rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.export-validation-item > summary::-webkit-details-marker {
+  display: none;
+}
+
+.export-validation-item > summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: -3px;
+}
+
+.export-validation-summary-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.export-validation-disclosure {
+  width: 0;
+  height: 0;
+  border-top: 0.38rem solid transparent;
+  border-bottom: 0.38rem solid transparent;
+  border-left: 0.52rem solid currentColor;
+  transition: transform 120ms ease;
+}
+
+.export-validation-item[open]
+  .export-validation-disclosure {
+  transform: rotate(90deg);
+}
+
+.export-validation-item-details {
+  padding: 0 1rem 1rem;
+}
+
+.export-validation-paths {
+  display: grid;
+  gap: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.export-validation-paths > div {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.export-validation-paths code {
+  overflow-wrap: anywhere;
 }
 
 .export-validation-item ul {
@@ -2322,5 +2426,123 @@ button,
   .export-validation-item li {
     grid-template-columns: 1fr;
     gap: 0.2rem;
+  }
+}
+
+
+/* Compatibility reference drawer keeps dense mappings out of the workflow. */
+.compatibility-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.compatibility-header-actions > strong {
+  color: #aeb8c2;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+.reference-menu-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+}
+
+.reference-menu-button [aria-hidden="true"] {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.reference-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  justify-content: flex-end;
+  background: rgb(0 0 0 / 72%);
+}
+
+.reference-menu-drawer {
+  width: min(78rem, 94vw);
+  height: 100%;
+  overflow: auto;
+  border-left: 1px solid #48525c;
+  padding: 1rem;
+  background: #171c21;
+  box-shadow: -1rem 0 2.5rem rgb(0 0 0 / 45%);
+}
+
+.reference-menu-header {
+  position: sticky;
+  top: -1rem;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: -1rem -1rem 1rem;
+  border-bottom: 1px solid #3b444d;
+  padding: 1rem;
+  background: #20262c;
+}
+
+.reference-menu-header h2,
+.reference-menu-header p {
+  margin-bottom: 0;
+}
+
+.reference-menu-header p:last-child {
+  margin-top: 0.35rem;
+  color: #98a4af;
+}
+
+.reference-menu-close {
+  flex: 0 0 auto;
+  min-width: 2.6rem;
+  padding: 0.45rem 0.7rem;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.reference-status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.reference-menu-count {
+  margin-bottom: 0.75rem;
+  color: #9aa6b1;
+  font-size: 0.8rem;
+}
+
+.reference-menu-drawer .compatibility-table-wrap {
+  max-height: none;
+}
+
+@media (max-width: 64rem) {
+  .compatibility-header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 40rem) {
+  .reference-menu-drawer {
+    width: 100%;
+    padding: 0.75rem;
+  }
+
+  .reference-menu-header {
+    top: -0.75rem;
+    margin: -0.75rem -0.75rem 0.75rem;
+    padding: 0.75rem;
+  }
+
+  .reference-menu-button span:last-child {
+    display: none;
   }
 }

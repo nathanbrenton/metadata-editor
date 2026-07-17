@@ -113,6 +113,90 @@ test(
 );
 
 test(
+  "does not flag different filenames in the same directory as duplicates",
+  async () => {
+    const root = await mkdtemp(
+      path.join(os.tmpdir(), "export-validator-"),
+    );
+    const mediaRoot = path.join(root, "media");
+    const outputRoot = path.join(
+      root,
+      "deployment-output",
+    );
+
+    const firstSource =
+      "releases/2026-01-01_test/tracks/01_up/master.wav";
+    const secondSource =
+      "releases/2026-01-01_test/tracks/02_down/master.wav";
+
+    for (const source of [
+      firstSource,
+      secondSource,
+    ]) {
+      const absoluteSource = path.join(
+        mediaRoot,
+        source,
+      );
+      await mkdir(
+        path.dirname(absoluteSource),
+        { recursive: true },
+      );
+      await writeFile(
+        absoluteSource,
+        "audio",
+      );
+    }
+
+    await mkdir(outputRoot, {
+      recursive: true,
+    });
+
+    const twoTrackPlan = plan();
+    twoTrackPlan.items = [
+      {
+        ...twoTrackPlan.items[0],
+        trackId: "01_up",
+        sourceAudioRelativePath:
+          firstSource,
+        destinationRelativePath:
+          "deployment-output/metadata-export/01_up.mp3",
+      },
+      {
+        ...twoTrackPlan.items[0],
+        trackId: "02_down",
+        sourceAudioRelativePath:
+          secondSource,
+        destinationRelativePath:
+          "deployment-output/metadata-export/02_down.mp3",
+      },
+    ];
+    twoTrackPlan.summary.readyCount = 2;
+
+    const result =
+      await validateMetadataExportPlan(
+        twoTrackPlan,
+        mediaRoot,
+        capabilities(),
+        outputRoot,
+      );
+
+    assert.equal(result.canExport, true);
+    assert.equal(
+      result.items.every(
+        (item) =>
+          item.checks.some(
+            (itemCheck) =>
+              itemCheck.code ===
+                "duplicate-destination" &&
+              itemCheck.status === "pass",
+          ),
+      ),
+      true,
+    );
+  },
+);
+
+test(
   "blocks an existing destination",
   async () => {
     const root = await mkdtemp(

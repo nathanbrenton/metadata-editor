@@ -332,14 +332,15 @@ function normalizeExtractedValue(
 }
 
 function destinationFilename(
-  sourceFilename: string,
+  trackId: string,
   container: ExportContainer,
 ): string {
-  const parsed = path.posix.parse(
-    sourceFilename,
-  );
-
-  return `${parsed.name}${extensionByContainer[container]}`;
+  /*
+   * Audio masters commonly share a generic filename such as
+   * "audio-master.wav". Use the unique track directory id so
+   * sibling tracks cannot resolve to the same export filename.
+   */
+  return `${trackId}${extensionByContainer[container]}`;
 }
 
 export function buildMetadataExportPlan(
@@ -472,7 +473,7 @@ export function buildMetadataExportPlan(
                 path.posix.join(
                   outputDirectory,
                   destinationFilename(
-                    source.filename,
+                    track.id,
                     options.container,
                   ),
                 ),
