@@ -172,3 +172,102 @@ export function replaceMetadataValueAtPath(
 
   return replaceAt(document, 0);
 }
+
+
+/*
+ * Creates one previously missing object-path value. Array creation is
+ * intentionally excluded from this first milestone.
+ */
+export function createMetadataValueAtPath(
+  document: unknown,
+  metadataPath:
+    | string
+    | readonly MetadataPathSegment[],
+  nextValue: unknown,
+): unknown {
+  const segments =
+    typeof metadataPath === "string"
+      ? parseMetadataPath(metadataPath)
+      : [...metadataPath];
+
+  if (
+    segments.length === 0 ||
+    segments.some(
+      (segment) =>
+        typeof segment === "number",
+    )
+  ) {
+    throw new Error(
+      "Metadata field creation requires a non-array object path.",
+    );
+  }
+
+  if (!isRecord(document)) {
+    throw new Error(
+      "Expected a metadata document object.",
+    );
+  }
+
+  const createAt = (
+    current: Record<string, unknown>,
+    segmentIndex: number,
+  ): Record<string, unknown> => {
+    const segment =
+      segments[segmentIndex];
+
+    if (typeof segment !== "string") {
+      throw new Error(
+        "Metadata creation supports object paths only.",
+      );
+    }
+
+    const isLeaf =
+      segmentIndex ===
+      segments.length - 1;
+
+    if (isLeaf) {
+      if (
+        Object.prototype.hasOwnProperty.call(
+          current,
+          segment,
+        )
+      ) {
+        throw new Error(
+          `Metadata path already exists: "${metadataPath}".`,
+        );
+      }
+
+      return {
+        ...current,
+        [segment]: nextValue,
+      };
+    }
+
+    const existing =
+      Object.prototype.hasOwnProperty.call(
+        current,
+        segment,
+      )
+        ? current[segment]
+        : undefined;
+
+    if (
+      existing !== undefined &&
+      !isRecord(existing)
+    ) {
+      throw new Error(
+        `Cannot create metadata below scalar path segment "${segment}".`,
+      );
+    }
+
+    return {
+      ...current,
+      [segment]: createAt(
+        existing ?? {},
+        segmentIndex + 1,
+      ),
+    };
+  };
+
+  return createAt(document, 0);
+}

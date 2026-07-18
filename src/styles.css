@@ -36,8 +36,13 @@ button:hover:not(:disabled) {
 }
 
 button:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.6;
+}
+
+/* Reserve the wait cursor for operations that are actively running. */
+button.is-loading:disabled {
+  cursor: wait;
 }
 
 main {
@@ -46,7 +51,11 @@ main {
   width: min(76rem, 100%);
   min-height: 100vh;
   margin: 0 auto;
-  padding: 2rem 1rem 1.5rem;
+  /*
+   * Reserve space for the viewport-fixed footer so the final page
+   * content is never hidden behind it.
+   */
+  padding: 2rem 1rem 5.25rem;
 }
 
 h1,
@@ -531,16 +540,25 @@ summary {
 }
 
 .app-footer {
+  position: fixed;
+  z-index: 60;
+  right: auto;
+  bottom: 0;
+  left: 50%;
   display: flex;
-  width: 100%;
+  width: min(76rem, 100%);
+  min-height: 3.5rem;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-top: auto;
+  margin: 0;
   border-top: 1px solid #353b42;
-  padding-top: 1rem;
+  padding: 0.75rem 1rem;
+  background: #111315;
+  box-shadow: 0 -0.4rem 0.9rem rgb(0 0 0 / 30%);
   color: #929ca6;
   font-size: 0.75rem;
+  transform: translateX(-50%);
 }
 
 .app-footer p {
@@ -557,6 +575,18 @@ summary {
 }
 
 @media (max-width: 40rem) {
+  main {
+    padding-bottom: 6.5rem;
+  }
+
+  .app-footer {
+    min-height: 4.75rem;
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.35rem;
+  }
+
   .library-release-header,
   .release-status-actions {
     align-items: stretch;
@@ -2262,6 +2292,9 @@ summary:not(:has(.metadata-numbering-summary)) {
 }
 
 .draft-status {
+  position: sticky;
+  z-index: 40;
+  top: 0;
   display: grid;
   grid-template-columns:
     minmax(0, 1fr)
@@ -2273,6 +2306,7 @@ summary:not(:has(.metadata-numbering-summary)) {
   border-radius: 0.25rem;
   padding: 0.65rem 0.9rem;
   background: #171b20;
+  box-shadow: 0 0.4rem 0.9rem rgb(0 0 0 / 30%);
   color: #aaa;
   font-size: 0.8rem;
 }
@@ -4126,4 +4160,268 @@ textarea:disabled {
     opacity: 1;
     transform: translate(-50%, 0);
   }
+}
+
+.metadata-detail-back-button {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 2.4rem;
+  height: 2.4rem;
+  place-items: center;
+  align-self: center;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.metadata-detail-back-button span {
+  transform: translateX(-0.03rem);
+}
+
+/* Keep the numbering category heading consistent with other section headings. */
+.metadata-numbering-title h4 {
+  color: #8f99a4;
+}
+
+/* Match Track & Disc Numbering to the other metadata category headings. */
+.metadata-numbering-title h4 {
+  color: #8f99a4;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.metadata-field-guidance {
+  margin-top: 1rem;
+}
+
+.metadata-field-guidance h4 {
+  margin: 0 0 0.45rem;
+  color: #aeb7c1;
+  font-size: 0.76rem;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.metadata-field-guidance p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.metadata-field-guidance-note {
+  margin-top: 0.55rem !important;
+  color: #8f99a4;
+  font-size: 0.78rem;
+}
+
+
+.release-contributor-list {
+  display: grid;
+  gap: 0.85rem;
+  padding: 0.85rem;
+}
+
+.release-contributor-card {
+  overflow: hidden;
+  border: 1px solid #3a424b;
+  border-radius: 0.65rem;
+  background: #181d21;
+}
+
+.release-contributor-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid #333b43;
+  padding: 0.8rem 0.9rem;
+  background: #20262c;
+}
+
+.release-contributor-card h5,
+.release-contributor-card .eyebrow {
+  margin: 0;
+}
+
+.release-contributor-card h5 {
+  font-size: 0.95rem;
+}
+
+.release-contributor-fields {
+  display: grid;
+}
+
+.release-contributor-field {
+  display: grid;
+  grid-template-columns:
+    minmax(10rem, 0.72fr)
+    minmax(12rem, 1fr);
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+  border-top: 1px solid #30373e;
+  padding: 0.8rem 0.9rem;
+}
+
+.release-contributor-fields
+.release-contributor-field:first-child {
+  border-top: 0;
+}
+
+.release-contributor-field-label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.release-contributor-field-label strong {
+  color: #d8dde2;
+}
+
+.release-contributor-advanced {
+  border-top: 1px solid #333b43;
+}
+
+.release-contributor-advanced > summary {
+  padding: 0.75rem 0.9rem;
+  color: #98a2ad;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.release-contributor-advanced > p {
+  margin: 0;
+  padding: 0 0.9rem 0.75rem;
+  color: #929ca6;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 52rem) {
+  .release-contributor-field {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+}
+
+
+.metadata-related-tags {
+  border-top: 1px solid #303840;
+  background: #151a1e;
+}
+
+.metadata-related-tags > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.7rem 0.9rem;
+  color: #8f99a4;
+  cursor: pointer;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.metadata-related-tags > summary::-webkit-details-marker {
+  display: none;
+}
+
+.metadata-related-tags[open] > summary {
+  border-bottom: 1px solid #303840;
+}
+
+.metadata-related-tags-body {
+  background: #14181c;
+}
+
+.metadata-numbering-related-tags {
+  margin-top: 0.25rem;
+}
+
+
+.metadata-value:has(.metadata-inherited-note) {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.metadata-inherited-note {
+  color: #7f9aaf;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+}
+
+.metadata-editor-field
+.metadata-inherited-note {
+  align-self: flex-start;
+}
+
+
+.missing-metadata-fields {
+  border-bottom: 1px solid #3a424b;
+  padding: 1rem;
+  background: #171c21;
+}
+
+.missing-metadata-fields header h3 {
+  margin: 0.15rem 0 0.35rem;
+}
+
+.missing-metadata-fields header p {
+  margin: 0;
+  color: #98a2ad;
+}
+
+.missing-metadata-field-list {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(16rem, 1fr)
+    );
+  gap: 0.65rem;
+  margin-top: 0.9rem;
+}
+
+.missing-metadata-field-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  border: 1px solid #39434d;
+  border-radius: 0.4rem;
+  padding: 0.75rem;
+  background: #12171b;
+  cursor: pointer;
+}
+
+.missing-metadata-field-option input {
+  margin-top: 0.2rem;
+}
+
+.missing-metadata-field-option span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.missing-metadata-field-option small {
+  color: #8f99a4;
+  line-height: 1.4;
+}
+
+.missing-metadata-field-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.85rem;
 }

@@ -1,4 +1,5 @@
 import {
+  createMetadataValueAtPath,
   readMetadataValueAtPath,
   replaceMetadataValueAtPath,
 } from "./metadata-document.js";
@@ -174,6 +175,106 @@ export function applyMetadataChanges(
 
     updatedDocument =
       replaceMetadataValueAtPath(
+        updatedDocument,
+        change.segments,
+        change.value,
+      );
+  }
+
+  return updatedDocument;
+}
+
+
+/*
+ * Creates missing scalar or string-array fields without permitting
+ * overwrites, arrays, overlapping paths, or unsafe values.
+ */
+export function applyMetadataCreations(
+  document: unknown,
+  changes: readonly MetadataValueChange[],
+): unknown {
+  if (changes.length === 0) {
+    throw new Error(
+      "At least one metadata field creation is required.",
+    );
+  }
+
+  const normalizedChanges = changes.map(
+    (change) => {
+      const segments =
+        parseMetadataPath(
+          change.path,
+        );
+
+      if (
+        segments.some(
+          (segment) =>
+            typeof segment === "number",
+        )
+      ) {
+        throw new Error(
+          `Creating array metadata is not supported: ${change.path}`,
+        );
+      }
+
+      if (
+        !isEditableMetadataValue(
+          change.value,
+        )
+      ) {
+        throw new Error(
+          `Only scalar values and string arrays may be created: ${change.path}`,
+        );
+      }
+
+      return {
+        ...change,
+        segments,
+        normalizedPath:
+          formatMetadataPath(segments),
+      };
+    },
+  );
+
+  const paths = new Set<string>();
+
+  for (const change of normalizedChanges) {
+    if (
+      paths.has(change.normalizedPath)
+    ) {
+      throw new Error(
+        `Duplicate metadata creation path "${change.normalizedPath}".`,
+      );
+    }
+
+    paths.add(change.normalizedPath);
+  }
+
+  let updatedDocument = document;
+
+  for (const change of normalizedChanges) {
+    try {
+      readMetadataValueAtPath(
+        updatedDocument,
+        change.segments,
+      );
+
+      throw new Error(
+        `Metadata path already exists: ${change.normalizedPath}`,
+      );
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        !error.message.includes(
+          "does not exist",
+        )
+      ) {
+        throw error;
+      }
+    }
+
+    updatedDocument =
+      createMetadataValueAtPath(
         updatedDocument,
         change.segments,
         change.value,

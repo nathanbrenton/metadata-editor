@@ -24,6 +24,7 @@ import {
 } from "./media-root.js";
 import {
   applyMetadataChanges,
+  applyMetadataCreations,
 } from "./metadata-change-set.js";
 import type {
   ReleaseScanResult,
@@ -78,6 +79,7 @@ export async function saveScalarMetadataChanges(
   relativePath: string,
   originalSha256: string,
   changes: MetadataValueChange[],
+  createMissing = false,
 ): Promise<ScalarMetadataSaveReceipt> {
   if (!/^[a-f0-9]{64}$/.test(originalSha256)) {
     throw new Error(
@@ -149,10 +151,15 @@ export async function saveScalarMetadataChanges(
   }
 
   const updatedDocument =
-    applyMetadataChanges(
-      parsed,
-      changes,
-    );
+    createMissing
+      ? applyMetadataCreations(
+          parsed,
+          changes,
+        )
+      : applyMetadataChanges(
+          parsed,
+          changes,
+        );
 
   const updatedContent =
     `${stringify(updatedDocument).trimEnd()}\n`;

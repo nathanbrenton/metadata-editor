@@ -80,6 +80,249 @@ export const metadataFieldRegistry:
       displayPolicy: "always",
     },
     {
+      id: "release.identifiers.upc",
+      canonicalName:
+        "release.identifiers.upc",
+      label: "UPC",
+      description:
+        "Universal Product Code assigned to the commercial release.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath:
+        "release.identifiers.upc",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 40,
+        examples: [
+          "012345678905",
+        ],
+        help:
+          "Use this as the authoritative commercial identifier when the release has a UPC. Store digits only and preserve leading zeroes.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.identifiers.ean",
+      canonicalName:
+        "release.identifiers.ean",
+      label: "EAN",
+      description:
+        "European Article Number assigned to the commercial release.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath:
+        "release.identifiers.ean",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 50,
+        examples: [
+          "4012345678901",
+        ],
+        help:
+          "Use this as the authoritative commercial identifier when the release has an EAN. Store digits only and preserve leading zeroes.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.identifiers.barcode",
+      canonicalName:
+        "release.identifiers.barcode",
+      label: "Barcode",
+      description:
+        "Generic imported or compatibility barcode value that may mirror a UPC or EAN.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath:
+        "release.identifiers.barcode",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 90,
+        examples: [
+          "012345678905",
+          "4012345678901",
+        ],
+        help:
+          "Prefer release.identifiers.upc or release.identifiers.ean as authoritative. Use this generic field only to preserve an imported value or satisfy a compatibility workflow.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.primary_artist.sort_name",
+      canonicalName:
+        "release.primary_artist.sort_name",
+      label: "Artist Sort Name",
+      description:
+        "Optional alternate form used to alphabetize the release artist without changing the displayed artist name.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath:
+        "release.primary_artist.sort_name",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Artists",
+        order: 20,
+        examples: [
+          "First Last → Last, First",
+          "The Example Band → Example Band, The",
+          "SingleName → SingleName",
+        ],
+        help:
+          "For a conventional personal name written as First Last, enter Last, First. Leave this blank when the display name already sorts correctly. Do not automatically reverse stage names, group names, or names whose cultural ordering is uncertain.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.type",
+      canonicalName: "release.type",
+      label: "Release Type",
+      description:
+        "Editorial or commercial format used to classify the release.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.type",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Release & Track Identity",
+        order: 25,
+        commonValues: [
+          "album",
+          "single",
+          "ep",
+          "compilation",
+          "soundtrack",
+          "live",
+          "demo",
+          "mixtape",
+          "remix",
+          "other",
+        ],
+        examples: [
+          "album",
+          "single",
+          "demo",
+        ],
+        help:
+          "Choose one concise lowercase value and use it consistently across the library. These values are project recommendations rather than a universal embedded-tag standard.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.credits.contributors[].name",
+      canonicalName:
+        "release.credits.contributors[].name",
+      label: "Contributor Name",
+      description:
+        "Display name of a person, group, or organization credited on the release.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath:
+        "release.credits.contributors[].name",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: false,
+      presentation: {
+        group: "Artists",
+        order: 10,
+        examples: [
+          "David Bowie",
+          "The Chemical Brothers",
+          "Björk",
+        ],
+        help:
+          "Use the public display name exactly as it should appear in credits. This is the authoritative human-readable name within the contributor record.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.credits.contributors[].role",
+      canonicalName:
+        "release.credits.contributors[].role",
+      label: "Contributor Role",
+      description:
+        "Credit role performed by this contributor for the release.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath:
+        "release.credits.contributors[].role",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: false,
+      presentation: {
+        group: "Artists",
+        order: 20,
+        commonValues: [
+          "primary artist",
+          "featured artist",
+          "producer",
+          "executive producer",
+          "composer",
+          "songwriter",
+          "lyricist",
+          "arranger",
+          "recording engineer",
+          "mixing engineer",
+          "mastering engineer",
+          "art director",
+        ],
+        examples: [
+          "producer",
+          "executive producer",
+          "composer",
+        ],
+        help:
+          "Describe the contributor's release-level credit. Prefer one concise role per contributor record when possible.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.credits.contributors[].sort_name",
+      canonicalName:
+        "release.credits.contributors[].sort_name",
+      label: "Contributor Sort Name",
+      description:
+        "Optional normalized form used to alphabetize the contributor name.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath:
+        "release.credits.contributors[].sort_name",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: false,
+      presentation: {
+        group: "Artists",
+        order: 30,
+        examples: [
+          "Bowie, David",
+          "Chemical Brothers, The",
+          "Björk",
+        ],
+        help:
+          "Use only when the display name needs a different alphabetical form. Do not automatically invert unfamiliar personal names, stage names, or group names.",
+      },
+      displayPolicy: "auto",
+    },
+    {
       id: "release.primary_artist.name",
       canonicalName:
         "release.primary_artist.name",
@@ -253,6 +496,155 @@ export const metadataFieldRegistry:
           "Enter the base public track title without redundant artist or album text.",
       },
       displayPolicy: "always",
+    },
+    {
+      id: "track.identifiers.discogs_track_position",
+      canonicalName:
+        "track.identifiers.discogs_track_position",
+      label: "Discogs Track Position",
+      description:
+        "Discogs-specific sequence label for sides, discs, and multi-part media.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.identifiers.discogs_track_position",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Track & Disc Numbering",
+        order: 90,
+        examples: [
+          "A1",
+          "B2",
+          "1-03",
+          "CD1-4",
+        ],
+        help:
+          "Use this only for a Discogs-style position. It supplements but does not replace the authoritative numeric Track Number, Track Total, Disc Number, and Disc Total fields.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.text.lyrics_copyright",
+      canonicalName:
+        "track.text.lyrics_copyright",
+      label: "Lyrics Copyright Notice",
+      description:
+        "Copyright notice specifically covering the lyrical text.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.text.lyrics_copyright",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 70,
+        examples: [
+          "© 2026 Example Music Publishing",
+          "Lyrics © 2026 Jane Doe",
+        ],
+        help:
+          "This notice applies specifically to lyrics. It does not replace lyricist or songwriter credits, publishing ownership, release-level copyright, or the sound-recording ℗ notice.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.identifiers.isrc",
+      canonicalName:
+        "track.identifiers.isrc",
+      label: "ISRC",
+      description:
+        "International Standard Recording Code identifying this specific sound recording.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.identifiers.isrc",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 20,
+        examples: [
+          "USABC2600001",
+        ],
+        help:
+          "Use the ISRC assigned to this specific recording. Different mixes, edits, remasters, or recordings may require different ISRCs.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.identifiers.iswc",
+      canonicalName:
+        "track.identifiers.iswc",
+      label: "ISWC",
+      description:
+        "International Standard Musical Work Code identifying the underlying composition.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.identifiers.iswc",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 30,
+        examples: [
+          "T-123.456.789-0",
+        ],
+        help:
+          "Use the ISWC for the underlying musical work, not for the particular recording. Multiple recordings may share the same ISWC.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.version",
+      canonicalName: "track.version",
+      label: "Track Version",
+      description:
+        "Version, mix, edit, performance, or edition label that distinguishes this track from other versions of the same title.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.version",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Release & Track Identity",
+        order: 25,
+        commonValues: [
+          "Original Mix",
+          "Radio Edit",
+          "Extended Mix",
+          "Instrumental",
+          "Acoustic",
+          "Live",
+          "Demo",
+          "Remix",
+          "Remaster",
+          "Clean",
+          "Explicit",
+          "Mono",
+          "Stereo",
+        ],
+        examples: [
+          "Original Mix",
+          "Radio Edit",
+          "Demo",
+        ],
+        help:
+          "Use a concise version label only when it distinguishes this recording from another version of the same track. Preserve established capitalization used by the artist or label.",
+      },
+      displayPolicy: "auto",
     },
     {
       id: "track.primary_artist.name",
