@@ -95,6 +95,7 @@ export async function saveScalarMetadataChanges(
     | "release.credits.contributors" =
       "track.contributors",
   deletePaths: string[] = [],
+  createChanges: MetadataValueChange[] = [],
 ): Promise<ScalarMetadataSaveReceipt> {
   if (!/^[a-f0-9]{64}$/.test(originalSha256)) {
     throw new Error(
@@ -107,7 +108,8 @@ export async function saveScalarMetadataChanges(
     performerRecords === undefined &&
     technicalContributorRecords ===
       undefined &&
-    deletePaths.length === 0
+    deletePaths.length === 0 &&
+    createChanges.length === 0
   ) {
     throw new Error(
       "At least one metadata change is required",
@@ -128,10 +130,30 @@ export async function saveScalarMetadataChanges(
   }
 
   if (
+    createChanges.length > 0 &&
+    (performerRecords !== undefined || technicalContributorRecords !== undefined)
+  ) {
+    throw new Error(
+      "Derived field creation and record replacement cannot be combined.",
+    );
+  }
+
+  const changedPaths = new Set(changes.map((change) => change.path));
+  const overlappingCreatedPath = createChanges.find((change) =>
+    changedPaths.has(change.path),
+  );
+  if (overlappingCreatedPath) {
+    throw new Error(
+      `Metadata path cannot be created and updated in one operation: ${overlappingCreatedPath.path}`,
+    );
+  }
+
+  if (
     deletePaths.length > 0 &&
     (
       createMissing ||
       changes.length > 0 ||
+      createChanges.length > 0 ||
       performerRecords !== undefined ||
       technicalContributorRecords !==
         undefined
@@ -263,6 +285,10 @@ export async function saveScalarMetadataChanges(
 
   let updatedDocument: unknown =
     parsed;
+
+  if (createChanges.length > 0) {
+    updatedDocument = applyMetadataCreations(updatedDocument, createChanges);
+  }
 
   if (changes.length > 0) {
     updatedDocument =

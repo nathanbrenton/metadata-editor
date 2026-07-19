@@ -8,6 +8,8 @@ import {
 } from "node:http";
 import path from "node:path";
 
+import { isValidTuningReference } from "../shared/musical-analysis.js";
+
 import { buildMetadataExportPlan } from "./export-plan.js";
 import {
   executeValidatedExportPlan,
@@ -96,6 +98,26 @@ function assertMetadataFieldMayBeRemoved(
   }
 }
 
+
+function assertMetadataFieldMayBeCreated(
+  relativePath: string,
+  metadataPath: string,
+): void {
+  const field = findMetadataField(metadataPath);
+  if (!field || field.repeatable || field.tomlPath.includes("[]")) {
+    throw new Error(`Only registered scalar metadata fields may be created: ${metadataPath}`);
+  }
+  const expectedFilename = metadataStorageFilenames[field.storageFileRole];
+  if (!expectedFilename || path.basename(relativePath) !== expectedFilename) {
+    throw new Error(`Metadata field ${metadataPath} does not belong in ${path.basename(relativePath)}.`);
+  }
+}
+
+function assertCanonicalMetadataValue(pathValue: string, value: unknown): void {
+  if (pathValue === "track.audio.tuning_hz" && (typeof value !== "number" || !isValidTuningReference(value))) {
+    throw new Error("track.audio.tuning_hz must be a number from 100 through 999.");
+  }
+}
 
 function parseGenerationScope(
   value: unknown,
@@ -1076,10 +1098,9 @@ const server = createServer(
               );
             }
 
-            return {
-              path: change.path,
-              value: change.value,
-            };
+            assertMetadataFieldMayBeCreated(relativePath, change.path);
+            assertCanonicalMetadataValue(change.path, change.value);
+            return { path: change.path, value: change.value };
           });
 
         const mediaRoot =
@@ -1298,6 +1319,11 @@ const server = createServer(
             ? body.changes
             : null;
 
+        const createChanges =
+          "createChanges" in body && Array.isArray(body.createChanges)
+            ? body.createChanges
+            : [];
+
         const performers =
           "performers" in body
             ? body.performers
@@ -1389,11 +1415,18 @@ const server = createServer(
               );
             }
 
-            return {
-              path: change.path,
-              value: change.value,
-            };
+            assertCanonicalMetadataValue(change.path, change.value);
+            return { path: change.path, value: change.value };
           });
+
+        const normalizedCreateChanges = createChanges.map((change) => {
+          if (typeof change !== "object" || change === null || !("path" in change) || typeof change.path !== "string" || !("value" in change) || !(typeof change.value === "string" || typeof change.value === "number" || typeof change.value === "boolean" || (Array.isArray(change.value) && change.value.every((entry: unknown) => typeof entry === "string")))) {
+            throw new Error("Each createChanges entry requires an editable metadata path and value");
+          }
+          assertMetadataFieldMayBeCreated(relativePath, change.path);
+          assertCanonicalMetadataValue(change.path, change.value);
+          return { path: change.path, value: change.value };
+        });
 
         const normalizedPerformers =
           performers === undefined
@@ -1524,6 +1557,8 @@ const server = createServer(
             technicalContributorPath as
               | "track.contributors"
               | "release.credits.contributors",
+            [],
+            normalizedCreateChanges,
           );
 
         const totals =

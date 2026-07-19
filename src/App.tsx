@@ -42,6 +42,21 @@ import {
 } from "./release-inheritance.js";
 
 import {
+  getMissingTrackOverviewFieldPresentation,
+  isDefaultTrackOverviewFieldPath,
+  shouldShowDefaultTrackOverviewFields,
+} from "./default-track-overview-fields.js";
+
+import {
+  camelotKeyForMusicalKey,
+  isValidTuningReference,
+} from "../shared/musical-analysis.js";
+
+import {
+  deriveTrackSaveChanges,
+} from "./track-derived-metadata.js";
+
+import {
   formatTrackDisplayTitle,
   inferTrackTitleMetadata,
   recommendedTrackVersionOptions,
@@ -4352,6 +4367,27 @@ function getDocumentDraftChanges(
     }));
 }
 
+function getDocumentSaveChanges(
+  document: ParsedMetadataDocument,
+  draft: MetadataDraft,
+): {
+  changes: MetadataValueChange[];
+  createChanges: MetadataValueChange[];
+} {
+  const authoredChanges = getDocumentDraftChanges(document, draft);
+
+  if (document.scope !== "track" || document.filename !== "track.toml") {
+    return { changes: authoredChanges, createChanges: [] };
+  }
+
+  const existing = new Map<string, EditableMetadataValue>();
+  for (const row of flattenMetadata(document.parsed)) {
+    if (isEditableMetadataValue(row.value)) existing.set(row.path, row.value);
+  }
+
+  return deriveTrackSaveChanges(existing, authoredChanges);
+}
+
 function removeDocumentDraftChanges(
   document: ParsedMetadataDocument,
   draft: MetadataDraft,
@@ -4656,7 +4692,7 @@ function isRelatedMetadataTagPath(
     /^(track\.classification\.(instrumental|cover|live|remix|remaster))$/.test(
       normalizedPath,
     ) ||
-    /^track\.(?:audio\.)?(?:tempo|initial_key|musical_key|camelot_key|time_signature|tuning_hz)$/.test(
+    /^track\.(?:audio\.)?(?:tempo|initial_key|musical_key)$/.test(
       normalizedPath,
     ) ||
     normalizedPath ===
@@ -6634,7 +6670,7 @@ function ReleaseMetadataDetailView({
   const saveDocumentDraft = async (
     document: ParsedMetadataDocument,
   ) => {
-    const changes = getDocumentDraftChanges(
+    const { changes, createChanges } = getDocumentSaveChanges(
       document,
       draft,
     );
@@ -6649,6 +6685,7 @@ function ReleaseMetadataDetailView({
 
     if (
       changes.length === 0 &&
+      createChanges.length === 0 &&
       performerRecords === undefined &&
       technicalContributorRecords ===
         undefined
@@ -6681,6 +6718,7 @@ function ReleaseMetadataDetailView({
             originalSha256:
               document.sha256,
             changes,
+            createChanges,
             performers:
               serializePerformerRecords(
                 performerRecords,
@@ -6868,8 +6906,8 @@ function ReleaseMetadataDetailView({
     try {
       for (const document of changedDocuments) {
         activeSaveDocument = document;
-        const changes =
-          getDocumentDraftChanges(
+        const { changes, createChanges } =
+          getDocumentSaveChanges(
             document,
             draft,
           );
@@ -6897,6 +6935,7 @@ function ReleaseMetadataDetailView({
               originalSha256:
                 document.sha256,
               changes,
+              createChanges,
               performers:
                 serializePerformerRecords(
                   performerRecords,
@@ -7084,7 +7123,9 @@ function ReleaseMetadataDetailView({
                 path: field.tomlPath,
                 value:
                   getInitialMetadataFieldValue(
-                    field.valueType,
+                    field,
+                    document,
+                    draft,
                   ),
               }),
             ),
@@ -9188,7 +9229,7 @@ function MetadataDocumentSection({
                           {credit.roles.join(", ")}
                         </strong>
                         <span>{credit.name}</span>
-                        <small>
+                        <small className="metadata-provenance-note metadata-inherited-note">
                           Inherited from release
                         </small>
                       </div>
@@ -9776,9 +9817,27 @@ function MetadataValueCell({
     inheritedValue !== undefined &&
     isBlankMetadataValue(originalValue);
 
-  const effectiveValue =
-    usingInheritedValue
-      ? inheritedValue
+  const generatedValue =
+    row.path === "track.display_title" &&
+    typeof originalValue === "string" &&
+    !originalValue.trim()
+      ? formatTrackDisplayTitle(
+          readDocumentDraftString(document, "track.title", draft),
+          readDocumentDraftString(document, "track.version", draft),
+        )
+      : row.path === "track.audio.camelot_key" &&
+          typeof originalValue === "string" &&
+          !originalValue.trim()
+        ? camelotKeyForMusicalKey(
+            readDocumentDraftString(document, "track.audio.key", draft),
+          ) ?? ""
+        : "";
+  const usingGeneratedValue = Boolean(generatedValue);
+
+  const effectiveValue = usingInheritedValue
+    ? inheritedValue
+    : usingGeneratedValue
+      ? generatedValue
       : originalValue;
 
   const draftKey = buildDocumentDraftKey(
@@ -9799,7 +9858,7 @@ function MetadataValueCell({
     return (
       <span
         className={[
-          row.value === ""
+          isBlankMetadataValue(currentValue)
             ? "metadata-value blank"
             : "metadata-value",
           changed ? "draft-changed" : "",
@@ -9811,12 +9870,22 @@ function MetadataValueCell({
           .join(" ")}
       >
         <span>
-          {formatMetadataValue(currentValue)}
+          {row.path === "track.audio.tuning_hz" && typeof currentValue === "number"
+            ? `${formatMetadataValue(currentValue)} Hz`
+            : formatMetadataValue(currentValue)}
         </span>
+
+        {usingGeneratedValue && (
+          <small className="metadata-provenance-note metadata-derived-note">
+            {row.path === "track.audio.camelot_key"
+              ? "Generated from Key"
+              : "Generated from Track Title"}
+          </small>
+        )}
 
         {usingInheritedValue && (
           <small
-            className="metadata-inherited-note"
+            className="metadata-provenance-note metadata-inherited-note"
             title={
               inheritedSourcePath
                 ? `Inherited from ${inheritedSourcePath}`
@@ -9871,7 +9940,7 @@ function MetadataValueCell({
 
         {usingInheritedValue &&
           !changed && (
-          <span className="metadata-inherited-note">
+          <span className="metadata-provenance-note metadata-inherited-note">
             Inherited from release
           </span>
         )}
@@ -9908,7 +9977,7 @@ function MetadataValueCell({
 
         {usingInheritedValue &&
           !changed && (
-          <span className="metadata-inherited-note">
+          <span className="metadata-provenance-note metadata-inherited-note">
             Inherited from release
           </span>
         )}
@@ -9928,22 +9997,12 @@ function MetadataValueCell({
   ) {
     return (
       <label className="metadata-editor-field">
+        <span className={row.path === "track.audio.tuning_hz" ? "metadata-number-with-unit" : undefined}>
         <input
           type="number"
-          min={
-            isTrackDiscNumberingPath(
-              row.path,
-            )
-              ? 1
-              : undefined
-          }
-          step={
-            isTrackDiscNumberingPath(
-              row.path,
-            )
-              ? 1
-              : "any"
-          }
+          min={row.path === "track.audio.tuning_hz" ? 100 : isTrackDiscNumberingPath(row.path) ? 1 : undefined}
+          max={row.path === "track.audio.tuning_hz" ? 999 : undefined}
+          step={isTrackDiscNumberingPath(row.path) ? 1 : row.path === "track.audio.tuning_hz" ? 0.1 : "any"}
           value={String(currentValue)}
           onChange={(event) => {
             const parsed =
@@ -9951,7 +10010,10 @@ function MetadataValueCell({
                 event.target.value,
               );
 
-            if (parsed !== null) {
+            if (
+              parsed !== null &&
+              (row.path !== "track.audio.tuning_hz" || isValidTuningReference(parsed))
+            ) {
               onDraftValueChange(
                 document,
                 row.path,
@@ -9961,10 +10023,12 @@ function MetadataValueCell({
             }
           }}
         />
+        {row.path === "track.audio.tuning_hz" && <span className="metadata-value-unit">Hz</span>}
+        </span>
 
         {usingInheritedValue &&
           !changed && (
-          <span className="metadata-inherited-note">
+          <span className="metadata-provenance-note metadata-inherited-note">
             Inherited from release
           </span>
         )}
@@ -10045,7 +10109,7 @@ function MetadataValueCell({
 
         {usingInheritedValue &&
           !changed && (
-          <span className="metadata-inherited-note">
+          <span className="metadata-provenance-note metadata-inherited-note">
             Inherited from release
           </span>
         )}
@@ -10098,7 +10162,7 @@ function MetadataValueCell({
 
         {usingInheritedValue &&
           !changed && (
-          <span className="metadata-inherited-note">
+          <span className="metadata-provenance-note metadata-inherited-note">
             Inherited from release
           </span>
         )}
@@ -10179,7 +10243,7 @@ function MetadataValueCell({
           </span>
         )}
 
-        <small className="track-display-title-help">
+        <small className="metadata-provenance-note metadata-derived-note track-display-title-help">
           Generated from Track Title plus the local Track Version. Existing custom wording is preserved until you choose the suggestion.
         </small>
 
@@ -10209,7 +10273,7 @@ function MetadataValueCell({
 
       {usingInheritedValue &&
         !changed && (
-        <span className="metadata-inherited-note">
+        <span className="metadata-provenance-note metadata-inherited-note">
           Inherited from release
         </span>
       )}
@@ -10432,9 +10496,25 @@ function getContributorFieldLabel(
 }
 
 function getInitialMetadataFieldValue(
-  valueType: string,
+  field: MetadataFieldDefinition,
+  document: ParsedMetadataDocument,
+  draft: MetadataDraft,
 ): EditableMetadataValue {
-  switch (valueType) {
+  if (field.tomlPath === "track.audio.time_signature") return "4/4";
+  if (field.tomlPath === "track.audio.tuning_hz") return 440;
+  if (field.tomlPath === "track.audio.camelot_key") {
+    return camelotKeyForMusicalKey(
+      readDocumentDraftString(document, "track.audio.key", draft),
+    ) ?? "";
+  }
+  if (field.tomlPath === "track.display_title") {
+    return formatTrackDisplayTitle(
+      readDocumentDraftString(document, "track.title", draft),
+      readDocumentDraftString(document, "track.version", draft),
+    );
+  }
+
+  switch (field.valueType) {
     case "boolean":
       return false;
     case "integer":
@@ -11188,7 +11268,7 @@ function TechnicalCreditRecordEditor({
         {record.name ||
           "(name not entered)"}
         {inherited && (
-          <small className="metadata-inherited-note technical-credit-inherited-note">
+          <small className="metadata-provenance-note metadata-inherited-note technical-credit-inherited-note">
             Inherited from release
           </small>
         )}
@@ -11904,7 +11984,7 @@ function MetadataDocumentTable({
     new Set(
       rows.map((row) => row.path),
     );
-  const missingCategoryFields =
+  const allMissingCategoryFields =
     metadataRegistry
       .filter(
         (field) =>
@@ -11939,6 +12019,37 @@ function MetadataDocumentTable({
             Number.MAX_SAFE_INTEGER
           ),
       );
+
+  /*
+   * Musical-analysis fields are important track metadata, so keep them
+   * visible in Overview even before optional TOML paths have been created.
+   */
+  const defaultTrackOverviewMissingFields =
+    shouldShowDefaultTrackOverviewFields({
+      scope: document.scope,
+      filename: document.filename,
+      activeTab: activeMetadataTab,
+    })
+      ? allMissingCategoryFields.filter(
+          (field) =>
+            isDefaultTrackOverviewFieldPath(
+              field.tomlPath,
+            ),
+        )
+      : [];
+
+  const missingCategoryFields =
+    allMissingCategoryFields.filter(
+      (field) =>
+        !isDefaultTrackOverviewFieldPath(
+          field.tomlPath,
+        ) ||
+        !shouldShowDefaultTrackOverviewFields({
+          scope: document.scope,
+          filename: document.filename,
+          activeTab: activeMetadataTab,
+        }),
+    );
 
   const supportsPerformerRecords =
     document.scope === "track" &&
@@ -12350,6 +12461,50 @@ function MetadataDocumentTable({
       : visibleStandardSections;
 
   if (
+    defaultTrackOverviewMissingFields.length >
+      0 &&
+    !displayStandardSections.some(
+      (section) =>
+        section.group ===
+          "Musical Analysis",
+    )
+  ) {
+    const musicalAnalysisRank =
+      metadataGroupRank.get(
+        "Musical Analysis",
+      ) ?? Number.MAX_SAFE_INTEGER;
+    const insertionIndex =
+      displayStandardSections.findIndex(
+        (section) =>
+          (
+            metadataGroupRank.get(
+              section.group as
+                typeof metadataGroupOrder[number],
+            ) ??
+            Number.MAX_SAFE_INTEGER
+          ) > musicalAnalysisRank,
+      );
+    const normalizedInsertionIndex =
+      insertionIndex >= 0
+        ? insertionIndex
+        : displayStandardSections.length;
+
+    displayStandardSections = [
+      ...displayStandardSections.slice(
+        0,
+        normalizedInsertionIndex,
+      ),
+      {
+        group: "Musical Analysis",
+        rows: [],
+      },
+      ...displayStandardSections.slice(
+        normalizedInsertionIndex,
+      ),
+    ];
+  }
+
+  if (
     supportsTechnicalCreditRecords
   ) {
     const summarySection = {
@@ -12475,7 +12630,7 @@ function MetadataDocumentTable({
               )}
             </span>
             <small
-              className="metadata-inherited-note"
+              className="metadata-provenance-note metadata-inherited-note"
               title={`Inherited from ${inherited.sourcePath}`}
             >
               Inherited from release
@@ -12546,6 +12701,8 @@ function MetadataDocumentTable({
   if (
     activeMetadataTab !== "raw" &&
     groupedRows.length === 0 &&
+    defaultTrackOverviewMissingFields.length ===
+      0 &&
     !(
       editMode &&
       missingCategoryFields.length > 0
@@ -12771,31 +12928,33 @@ function MetadataDocumentTable({
 
               </div>
 
-              {!isReleaseNumbering && (
-                <span className="metadata-numbering-summary">
-                  Track {String(
-                    numberingDisplayValue(
-                      trackNumberItem,
-                    ),
-                  )} of {String(
-                    numberingDisplayValue(
-                      trackTotalItem,
-                    ),
-                  )}
-                  {" · "}
-                  Disc {String(
-                    numberingDisplayValue(
-                      discNumberItem,
-                    ),
-                  )} of {String(
-                    numberingDisplayValue(
-                      discTotalItem,
-                    ),
-                  )}
-                </span>
-              )}
+              <span className="metadata-section-summary-actions">
+                {!isReleaseNumbering && (
+                  <span className="metadata-numbering-summary">
+                    Track {String(
+                      numberingDisplayValue(
+                        trackNumberItem,
+                      ),
+                    )} of {String(
+                      numberingDisplayValue(
+                        trackTotalItem,
+                      ),
+                    )}
+                    {" · "}
+                    Disc {String(
+                      numberingDisplayValue(
+                        discNumberItem,
+                      ),
+                    )} of {String(
+                      numberingDisplayValue(
+                        discTotalItem,
+                      ),
+                    )}
+                  </span>
+                )}
 
-              {renderSectionEditButton()}
+                {renderSectionEditButton()}
+              </span>
             </summary>
 
             <div className="metadata-numbering-pairs">
@@ -12972,41 +13131,51 @@ function MetadataDocumentTable({
                   {section.group}
                 </strong>
 
-                <small>
-                  {section.group ===
-                  "Performers"
-                    ? editMode
-                      ? `${performerRecords.length} ${
-                          performerRecords.length === 1
-                            ? "credit"
-                            : "credits"
-                        }`
-                      : `${groupedPerformerRecords.length} ${
-                          groupedPerformerRecords.length === 1
-                            ? "performer"
-                            : "performers"
-                        }`
-                    : section.group ===
-                        engineeringCreditSummaryGroup
+                <span className="metadata-section-summary-actions">
+                  <small>
+                    {section.group ===
+                    "Performers"
                       ? editMode
-                        ? `${technicalCreditRecords.length} ${
-                            technicalCreditRecords.length === 1
+                        ? `${performerRecords.length} ${
+                            performerRecords.length === 1
                               ? "credit"
                               : "credits"
                           }`
-                        : `${groupedEngineeringCredits.length} ${
-                            groupedEngineeringCredits.length === 1
-                              ? "person"
-                              : "people"
+                        : `${groupedPerformerRecords.length} ${
+                            groupedPerformerRecords.length === 1
+                              ? "performer"
+                              : "performers"
                           }`
-                      : `${section.rows.length} ${
-                          section.rows.length === 1
-                            ? "field"
-                            : "fields"
-                        }`}
-                </small>
+                      : section.group ===
+                          engineeringCreditSummaryGroup
+                        ? editMode
+                          ? `${technicalCreditRecords.length} ${
+                              technicalCreditRecords.length === 1
+                                ? "credit"
+                                : "credits"
+                            }`
+                          : `${groupedEngineeringCredits.length} ${
+                              groupedEngineeringCredits.length === 1
+                                ? "person"
+                                : "people"
+                            }`
+                        : section.group ===
+                            "Musical Analysis" &&
+                          defaultTrackOverviewMissingFields.length >
+                            0
+                          ? `${section.rows.length} of ${
+                              section.rows.length +
+                              defaultTrackOverviewMissingFields.length
+                            } fields`
+                          : `${section.rows.length} ${
+                              section.rows.length === 1
+                                ? "field"
+                                : "fields"
+                            }`}
+                  </small>
 
-                {renderSectionEditButton()}
+                  {renderSectionEditButton()}
+                </span>
               </summary>
 
               <div className="metadata-section-rows">
@@ -13086,6 +13255,99 @@ function MetadataDocumentTable({
                       ),
                   )
                   .map(renderMetadataRow)}
+
+                {section.group ===
+                  "Musical Analysis" &&
+                  defaultTrackOverviewMissingFields.map(
+                    (field) => {
+                      const initialValue =
+                        getInitialMetadataFieldValue(
+                          field,
+                          document,
+                          draft,
+                        );
+                      const presentation =
+                        getMissingTrackOverviewFieldPresentation({
+                          path: field.tomlPath,
+                          label: field.label,
+                          initialValue,
+                        });
+
+                      return (
+                        <div
+                          key={field.tomlPath}
+                          className="metadata-table-row metadata-default-missing-row"
+                        >
+                          <div className="metadata-key">
+                            <div className="metadata-key-heading">
+                              <strong>
+                                {field.label}
+                              </strong>
+
+                              <MetadataFieldControls
+                                field={field}
+                                path={field.tomlPath}
+                                valueType={
+                                  field.valueType
+                                }
+                              />
+                            </div>
+                          </div>
+
+                          <div
+                            className={[
+                              "metadata-default-missing-value",
+                              presentation.generatedValue
+                                ? "has-derived-value"
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                          >
+                            {presentation.generatedValue && (
+                              <span className="metadata-value metadata-derived-default-value">
+                                <span>
+                                  {
+                                    presentation.generatedValue
+                                  }
+                                </span>
+                                <small className="metadata-provenance-note metadata-derived-note">
+                                  {
+                                    presentation.generatedNote
+                                  }
+                                </small>
+                              </span>
+                            )}
+
+                            {editMode ? (
+                              <button
+                                type="button"
+                                className="metadata-default-field-add-button"
+                                disabled={
+                                  saving ||
+                                  addingFields
+                                }
+                                onClick={() =>
+                                  onAddFields(
+                                    document,
+                                    [field],
+                                  )
+                                }
+                              >
+                                {addingFields
+                                  ? "Adding field…"
+                                  : presentation.actionLabel}
+                              </button>
+                            ) : !presentation.generatedValue ? (
+                              <span className="metadata-default-missing-placeholder">
+                                (not set)
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    },
+                  )}
 
                 {section.rows.some(
                   ({ row }) =>

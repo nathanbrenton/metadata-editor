@@ -1998,7 +1998,7 @@ export const metadataFieldRegistry:
           "11A",
         ],
         help:
-          "Optional DJ compatibility value. Keep the ordinary Key field authoritative and use this only when a Camelot designation is available or useful.",
+          "Automatically synchronized from a recognized ordinary Key while the Camelot value remains blank or generated. Enter a custom value only when the ordinary key notation cannot be mapped safely.",
       },
       displayPolicy: "auto",
     },
@@ -2059,7 +2059,7 @@ export const metadataFieldRegistry:
           "442",
         ],
         help:
-          "Enter the reference pitch in hertz only when it is known and musically relevant. Do not infer a value from ordinary pitch detection alone.",
+          "Enter the numeric reference pitch from 100 through 999. The editor displays Hz, while TOML stores only the number because the canonical field name already defines the unit. New fields begin at 440.",
       },
       displayPolicy: "auto",
     },

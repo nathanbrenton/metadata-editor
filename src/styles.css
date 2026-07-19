@@ -1921,11 +1921,20 @@ button,
   text-transform: uppercase;
 }
 
-.metadata-section > summary > small {
+.metadata-section-summary-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  min-width: 0;
   margin-left: auto;
+}
+
+.metadata-section-summary-actions > small {
   color: #818d98;
   font-size: 0.68rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 /* Expanded sections provide the contextual entry point into global edit mode. */
@@ -1985,10 +1994,6 @@ button,
 
 .metadata-numbering-group > summary > div {
   min-width: 0;
-}
-
-.metadata-numbering-summary {
-  margin-left: auto;
 }
 
 .metadata-numbering-group h4,
@@ -2111,9 +2116,15 @@ button,
   text-transform: uppercase;
 }
 
-.metadata-numbering-group >
-summary:not(:has(.metadata-numbering-summary)) {
-  grid-template-columns: auto 1fr;
+@media (max-width: 42rem) {
+  .metadata-section > summary {
+    flex-wrap: wrap;
+  }
+
+  .metadata-section-summary-actions {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
 }
 
 @media (max-width: 48rem) {
@@ -2181,10 +2192,6 @@ summary:not(:has(.metadata-numbering-summary)) {
 }
 
 @media (max-width: 42rem) {
-  .metadata-numbering-group > summary {
-    display: grid;
-  }
-
   .metadata-numbering-summary {
     width: fit-content;
     white-space: normal;
@@ -4605,23 +4612,25 @@ textarea:disabled {
 }
 
 
-.metadata-value:has(.metadata-inherited-note) {
+/* Shared provenance styling keeps inherited and generated sources consistent. */
+.metadata-value:has(.metadata-provenance-note) {
   display: flex;
   align-items: flex-start;
   flex-direction: column;
   gap: 0.18rem;
 }
 
-.metadata-inherited-note {
+.metadata-provenance-note {
   color: #7f9aaf;
   font-size: 0.68rem;
   font-style: normal;
   font-weight: 600;
   letter-spacing: 0.015em;
+  line-height: 1.3;
 }
 
 .metadata-editor-field
-.metadata-inherited-note {
+.metadata-provenance-note {
   align-self: flex-start;
 }
 
@@ -5422,4 +5431,69 @@ input[aria-invalid="true"] {
   .metadata-inherited-override-button {
     align-self: flex-start;
   }
+}
+
+/* Keep core track analysis fields visible before optional TOML paths exist. */
+.metadata-default-missing-value {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.metadata-default-missing-value.has-derived-value {
+  flex-wrap: wrap;
+  gap: 0.85rem;
+}
+
+/* Keep generated values and their provenance visually distinct. */
+.metadata-value:has(.metadata-derived-note),
+.metadata-derived-default-value {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.18rem;
+}
+
+.metadata-derived-default-value {
+  min-width: 7rem;
+}
+
+.metadata-default-missing-value.has-derived-value
+.metadata-default-field-add-button {
+  flex: 0 0 auto;
+}
+
+.metadata-default-missing-placeholder {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.metadata-default-field-add-button {
+  min-height: 2.25rem;
+}
+
+
+@media (max-width: 42rem) {
+  .metadata-default-missing-value.has-derived-value {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .metadata-default-missing-value.has-derived-value
+  .metadata-default-field-add-button {
+    align-self: flex-start;
+  }
+}
+
+/* Keep canonical units visible without storing them inside numeric TOML values. */
+.metadata-number-with-unit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+}
+.metadata-value-unit {
+  color: var(--text-muted);
+  font-size: 0.78rem;
 }

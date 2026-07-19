@@ -1364,3 +1364,47 @@ test(
     );
   },
 );
+
+
+test("saves derived field creation with an ordinary edit atomically", async () => {
+  await withTemporaryLibrary(async (mediaRoot) => {
+    const relativePath = "releases/test-release/tracks/track-1/track.toml";
+    const targetPath = path.join(mediaRoot, relativePath);
+    await mkdir(path.dirname(targetPath), { recursive: true });
+    const original = '[track]\nid = "track-1"\ntitle = "Original"\n';
+    await writeFile(targetPath, original);
+    const release: ReleaseScanResult = {
+      id: "test-release",
+      relativePath: "releases/test-release",
+      metadataFiles: [],
+      artworkMasters: [],
+      tracks: [{
+        id: "track-1",
+        relativePath: "releases/test-release/tracks/track-1",
+        metadataFiles: [{ filename: "track.toml", relativePath, exists: true }],
+        audioMasters: [],
+        artworkMasters: [],
+      }],
+    };
+    const receipt = await saveScalarMetadataChanges(
+      mediaRoot,
+      release,
+      relativePath,
+      sha256(original),
+      [{ path: "track.title", value: "Updated" }],
+      false,
+      undefined,
+      undefined,
+      [],
+      "track.contributors",
+      [],
+      [{ path: "track.display_title", value: "Updated" }],
+    );
+    assert.ok(receipt.savedSha256);
+    const parsed = parse(await readFile(targetPath, "utf8")) as {
+      track: { title: string; display_title: string };
+    };
+    assert.equal(parsed.track.title, "Updated");
+    assert.equal(parsed.track.display_title, "Updated");
+  });
+});
