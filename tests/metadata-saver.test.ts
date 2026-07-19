@@ -693,3 +693,674 @@ test(
     );
   },
 );
+
+
+test(
+  "saves paired performer additions, edits, and removals atomically",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const releaseDirectory =
+          path.join(
+            mediaRoot,
+            "releases",
+            "test-release",
+          );
+
+        await mkdir(releaseDirectory, {
+          recursive: true,
+        });
+
+        const relativePath =
+          "releases/test-release/track-credits.toml";
+
+        const originalContent = [
+          "[[track.performers]]",
+          'name = "First Artist"',
+          'role = "guitar"',
+          'credit_id = "keep-first"',
+          "",
+          "[[track.performers]]",
+          'name = "Second Artist"',
+          'role = "vocals"',
+          'credit_id = "keep-second"',
+          "",
+        ].join("\n");
+
+        await writeFile(
+          path.join(
+            mediaRoot,
+            relativePath,
+          ),
+          originalContent,
+        );
+
+        const receipt =
+          await saveScalarMetadataChanges(
+            mediaRoot,
+            buildRelease(relativePath),
+            relativePath,
+            sha256(originalContent),
+            [],
+            false,
+            [
+              {
+                sourceIndex: 1,
+                name: "Second Artist",
+                role: "lead vocals",
+                sortName:
+                  "Artist, Second",
+              },
+              {
+                sourceIndex: null,
+                name: "New Artist",
+                role: "drums",
+                sortName: "",
+              },
+            ],
+          );
+
+        const parsed = parse(
+          await readFile(
+            path.join(
+              mediaRoot,
+              relativePath,
+            ),
+            "utf8",
+          ),
+        ) as {
+          track: {
+            performers: Array<{
+              name: string;
+              role: string;
+              sort_name?: string;
+              credit_id?: string;
+            }>;
+          };
+        };
+
+        assert.equal(
+          parsed.track.performers.length,
+          2,
+        );
+        assert.equal(
+          parsed.track.performers[0]
+            ?.credit_id,
+          "keep-second",
+        );
+        assert.equal(
+          parsed.track.performers[0]
+            ?.role,
+          "lead vocals",
+        );
+        assert.equal(
+          parsed.track.performers[1]
+            ?.name,
+          "New Artist",
+        );
+        assert.match(
+          receipt.backupRelativePath,
+          /track-credits\.toml/,
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects performer replacement outside track-credits.toml",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const releaseDirectory =
+          path.join(
+            mediaRoot,
+            "releases",
+            "test-release",
+          );
+
+        await mkdir(releaseDirectory, {
+          recursive: true,
+        });
+
+        const relativePath =
+          "releases/test-release/release.toml";
+        const originalContent =
+          '[release]\\ntitle = "Test"\\n';
+
+        await writeFile(
+          path.join(
+            mediaRoot,
+            relativePath,
+          ),
+          originalContent,
+        );
+
+        await assert.rejects(
+          saveScalarMetadataChanges(
+            mediaRoot,
+            buildRelease(relativePath),
+            relativePath,
+            sha256(originalContent),
+            [],
+            false,
+            [],
+          ),
+          /only be saved in track-credits\.toml/,
+        );
+      },
+    );
+  },
+);
+
+test(
+  "saves technical contributor edits while preserving nontechnical credits",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const releaseDirectory =
+          path.join(
+            mediaRoot,
+            "releases",
+            "test-release",
+          );
+
+        await mkdir(releaseDirectory, {
+          recursive: true,
+        });
+
+        const relativePath =
+          "releases/test-release/track-credits.toml";
+        const originalContent = [
+          "[[track.contributors]]",
+          'name = "Producer Person"',
+          'role = "producer"',
+          'credit_id = "keep-production"',
+          "",
+          "[[track.contributors]]",
+          'name = "Engineer Person"',
+          'role = "recording engineer"',
+          'credit_id = "keep-recording"',
+          "",
+          "[[track.contributors]]",
+          'name = "Mix Person"',
+          'role = "mix engineer"',
+          'credit_id = "remove-mix"',
+          "",
+        ].join("\n");
+
+        await writeFile(
+          path.join(
+            mediaRoot,
+            relativePath,
+          ),
+          originalContent,
+        );
+
+        const receipt =
+          await saveScalarMetadataChanges(
+            mediaRoot,
+            buildRelease(relativePath),
+            relativePath,
+            sha256(originalContent),
+            [],
+            false,
+            undefined,
+            [
+              {
+                sourceIndex: 1,
+                name: "Engineer Person",
+                role:
+                  "recording and mix engineer",
+                sortName:
+                  "Person, Engineer",
+              },
+              {
+                sourceIndex: null,
+                name: "Master Person",
+                role:
+                  "mastering engineer",
+                sortName: "",
+              },
+            ],
+            [1, 2],
+          );
+
+        const parsed = parse(
+          await readFile(
+            path.join(
+              mediaRoot,
+              relativePath,
+            ),
+            "utf8",
+          ),
+        ) as {
+          track: {
+            contributors: Array<{
+              name: string;
+              role: string;
+              sort_name?: string;
+              credit_id?: string;
+            }>;
+          };
+        };
+
+        assert.equal(
+          parsed.track.contributors.length,
+          3,
+        );
+        assert.equal(
+          parsed.track.contributors[0]
+            ?.credit_id,
+          "keep-production",
+        );
+        assert.equal(
+          parsed.track.contributors[1]
+            ?.credit_id,
+          "keep-recording",
+        );
+        assert.equal(
+          parsed.track.contributors[1]
+            ?.role,
+          "recording and mix engineer",
+        );
+        assert.equal(
+          parsed.track.contributors[2]
+            ?.name,
+          "Master Person",
+        );
+        assert.equal(
+          parsed.track.contributors.some(
+            (record) =>
+              record.credit_id ===
+                "remove-mix",
+          ),
+          false,
+        );
+        assert.match(
+          receipt.backupRelativePath,
+          /track-credits\.toml/,
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects technical contributor replacement outside track-credits.toml",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const releaseDirectory =
+          path.join(
+            mediaRoot,
+            "releases",
+            "test-release",
+          );
+
+        await mkdir(releaseDirectory, {
+          recursive: true,
+        });
+
+        const relativePath =
+          "releases/test-release/release.toml";
+        const originalContent =
+          '[release]\ntitle = "Test"\n';
+
+        await writeFile(
+          path.join(
+            mediaRoot,
+            relativePath,
+          ),
+          originalContent,
+        );
+
+        await assert.rejects(
+          saveScalarMetadataChanges(
+            mediaRoot,
+            buildRelease(relativePath),
+            relativePath,
+            sha256(originalContent),
+            [],
+            false,
+            undefined,
+            [],
+            [],
+          ),
+          /only be saved in track-credits\.toml/,
+        );
+      },
+    );
+  },
+);
+
+test(
+  "saves release-level technical credits while preserving other contributors",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const releaseDirectory =
+          path.join(
+            mediaRoot,
+            "releases",
+            "test-release",
+          );
+
+        await mkdir(releaseDirectory, {
+          recursive: true,
+        });
+
+        const relativePath =
+          "releases/test-release/release.toml";
+        const originalContent = [
+          "[release]",
+          'title = "Test Release"',
+          "",
+          "[[release.credits.contributors]]",
+          'name = "Producer Person"',
+          'role = "producer"',
+          'credit_id = "keep-production"',
+          "",
+        ].join("\n");
+
+        await writeFile(
+          path.join(
+            mediaRoot,
+            relativePath,
+          ),
+          originalContent,
+        );
+
+        const receipt =
+          await saveScalarMetadataChanges(
+            mediaRoot,
+            buildRelease(relativePath),
+            relativePath,
+            sha256(originalContent),
+            [],
+            false,
+            undefined,
+            [
+              {
+                sourceIndex: null,
+                name: "Nathan Brenton",
+                role: "Recorded By",
+                sortName: "Brenton, Nathan",
+              },
+              {
+                sourceIndex: null,
+                name: "Kateri Lirio",
+                role: "Mixed By",
+                sortName: "",
+              },
+            ],
+            [],
+            "release.credits.contributors",
+          );
+
+        const parsed = parse(
+          await readFile(
+            path.join(
+              mediaRoot,
+              relativePath,
+            ),
+            "utf8",
+          ),
+        ) as {
+          release: {
+            credits: {
+              contributors: Array<{
+                name: string;
+                role: string;
+                sort_name?: string;
+                credit_id?: string;
+              }>;
+            };
+          };
+        };
+
+        assert.equal(
+          parsed.release.credits.contributors.length,
+          3,
+        );
+        assert.equal(
+          parsed.release.credits.contributors[0]
+            ?.credit_id,
+          "keep-production",
+        );
+        assert.equal(
+          parsed.release.credits.contributors[1]
+            ?.name,
+          "Nathan Brenton",
+        );
+        assert.equal(
+          parsed.release.credits.contributors[2]
+            ?.role,
+          "Mixed By",
+        );
+        assert.match(
+          receipt.backupRelativePath,
+          /release\.toml/,
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects release technical credits outside release.toml",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const trackDirectory =
+          path.join(
+            mediaRoot,
+            "releases",
+            "test-release",
+            "tracks",
+            "track-1",
+          );
+
+        await mkdir(trackDirectory, {
+          recursive: true,
+        });
+
+        const relativePath =
+          "releases/test-release/tracks/track-1/track-credits.toml";
+        const originalContent =
+          "[track]\ncontributors = []\n";
+
+        await writeFile(
+          path.join(
+            mediaRoot,
+            relativePath,
+          ),
+          originalContent,
+        );
+
+        const release: ReleaseScanResult = {
+          id: "test-release",
+          relativePath:
+            "releases/test-release",
+          metadataFiles: [],
+          artworkMasters: [],
+          tracks: [
+            {
+              id: "track-1",
+              relativePath:
+                "releases/test-release/tracks/track-1",
+              metadataFiles: [
+                {
+                  filename:
+                    "track-credits.toml",
+                  relativePath,
+                  exists: true,
+                },
+              ],
+              audioMasters: [],
+              artworkMasters: [],
+            },
+          ],
+        };
+
+        await assert.rejects(
+          saveScalarMetadataChanges(
+            mediaRoot,
+            release,
+            relativePath,
+            sha256(originalContent),
+            [],
+            false,
+            undefined,
+            [],
+            [],
+            "release.credits.contributors",
+          ),
+          /only be saved in release\.toml/,
+        );
+      },
+    );
+  },
+);
+
+
+test(
+  "removes a metadata field atomically and preserves unknown sibling keys",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const releaseDirectory =
+          path.join(
+            mediaRoot,
+            "releases",
+            "test-release",
+          );
+
+        await mkdir(releaseDirectory, {
+          recursive: true,
+        });
+
+        const relativePath =
+          "releases/test-release/release.toml";
+        const originalContent = [
+          "[release]",
+          'title = "Test Release"',
+          'script = "Latn"',
+          'custom_key = "preserve me"',
+          "",
+        ].join("\n");
+
+        await writeFile(
+          path.join(
+            mediaRoot,
+            relativePath,
+          ),
+          originalContent,
+        );
+
+        const receipt =
+          await saveScalarMetadataChanges(
+            mediaRoot,
+            buildRelease(relativePath),
+            relativePath,
+            sha256(originalContent),
+            [],
+            false,
+            undefined,
+            undefined,
+            [],
+            "track.contributors",
+            ["release.script"],
+          );
+
+        const parsed = parse(
+          await readFile(
+            path.join(
+              mediaRoot,
+              relativePath,
+            ),
+            "utf8",
+          ),
+        ) as {
+          release: {
+            title: string;
+            custom_key: string;
+            script?: string;
+          };
+        };
+
+        assert.equal(
+          parsed.release.script,
+          undefined,
+        );
+        assert.equal(
+          parsed.release.custom_key,
+          "preserve me",
+        );
+        assert.match(
+          receipt.backupRelativePath,
+          /release\.toml/,
+        );
+      },
+    );
+  },
+);
+
+test(
+  "rejects combining metadata field removal with ordinary edits",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const releaseDirectory =
+          path.join(
+            mediaRoot,
+            "releases",
+            "test-release",
+          );
+
+        await mkdir(releaseDirectory, {
+          recursive: true,
+        });
+
+        const relativePath =
+          "releases/test-release/release.toml";
+        const originalContent = [
+          "[release]",
+          'title = "Test Release"',
+          'script = "Latn"',
+          "",
+        ].join("\n");
+
+        await writeFile(
+          path.join(
+            mediaRoot,
+            relativePath,
+          ),
+          originalContent,
+        );
+
+        await assert.rejects(
+          saveScalarMetadataChanges(
+            mediaRoot,
+            buildRelease(relativePath),
+            relativePath,
+            sha256(originalContent),
+            [
+              {
+                path: "release.title",
+                value: "Updated",
+              },
+            ],
+            false,
+            undefined,
+            undefined,
+            [],
+            "track.contributors",
+            ["release.script"],
+          ),
+          /separate metadata operation/,
+        );
+      },
+    );
+  },
+);

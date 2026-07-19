@@ -11,6 +11,42 @@ import {
   type FlattenedMetadataRow,
 } from "./metadata-flattener.js";
 
+import {
+  isTechnicalContributorRoleValue,
+} from "./technical-credit-role.js";
+
+import {
+  getTechnicalCreditDisplayPriority,
+  sortTechnicalCreditDisplayRecords,
+} from "./technical-credit-role.js";
+
+import {
+  formatGuidedRightsStatement,
+  getRightsStatementSymbol,
+  parseGuidedRightsStatement,
+  type RightsStatementSymbol,
+} from "./rights-statement.js";
+
+import {
+  clearMetadataActivityLog,
+  prependMetadataActivityEntry,
+  readMetadataActivityLog,
+  writeMetadataActivityLog,
+  type MetadataActivityEntry,
+} from "./activity-log.js";
+
+import {
+  buildMissingInheritedMetadataRows,
+  isBlankMetadataValue,
+  resolveInheritedReleaseValue,
+} from "./release-inheritance.js";
+
+import {
+  formatTrackDisplayTitle,
+  inferTrackTitleMetadata,
+  recommendedTrackVersionOptions,
+} from "../shared/track-title.js";
+
 type MetadataFileStatus = {
   filename: string;
   relativePath: string;
@@ -62,6 +98,8 @@ type TrackMetadataPreview = {
   artistName?: InferredValue<string>;
   trackNumber?: InferredValue<number>;
   trackTitle?: InferredValue<string>;
+  trackVersion?: InferredValue<string>;
+  trackDisplayTitle?: InferredValue<string>;
   audioMasterPath?: InferredValue<string>;
   artworkMasterPath?: InferredValue<string>;
 };
@@ -77,6 +115,8 @@ type StarterTrackDraft = {
   trackNumber: number;
   artist: string;
   title: string;
+  version: string;
+  displayTitle: string;
 };
 
 type StarterMetadataDraft = {
@@ -201,6 +241,7 @@ type MetadataFieldDefinition = {
       | "Artists"
       | "Music Business & Rights"
       | "Dates"
+      | "Musical Analysis"
       | "Track & Disc Numbering"
       | "Movement & Work"
       | "Performers"
@@ -210,6 +251,9 @@ type MetadataFieldDefinition = {
       | "Mixing"
       | "Mastering"
       | "Writing, Lyrics & Language"
+      | "Language & Writing System"
+      | "Lyrics"
+      | "Lyrics Rights & Source"
       | "Identifiers"
       | "Text and Notes"
       | "Artwork"
@@ -220,6 +264,13 @@ type MetadataFieldDefinition = {
     commonValues?: string[];
     examples?: string[];
     help?: string;
+  };
+
+  editor?: {
+    control: "select-or-custom";
+    options: string[];
+    customLabel?: string;
+    customPlaceholder?: string;
   };
 
   displayPolicy: string;
@@ -771,7 +822,7 @@ export function App() {
             setSelectedReleaseDetail(null)
           }
           onRefresh={() =>
-            void openReleaseDetail(
+            openReleaseDetail(
               selectedReleaseDetail.releaseId,
             )
           }
@@ -3647,6 +3698,24 @@ type MetadataDraft = Record<
   EditableMetadataValue
 >;
 
+type PerformerRecordDraft = {
+  key: string;
+  sourceIndex: number | null;
+  name: string;
+  role: string;
+  sortName: string;
+};
+
+type PerformerDraftMap = Record<
+  string,
+  PerformerRecordDraft[]
+>;
+
+type TechnicalCreditDraftMap = Record<
+  string,
+  PerformerRecordDraft[]
+>;
+
 
 type MetadataValueChange = {
   path: string;
@@ -3663,6 +3732,61 @@ type ScalarMetadataSaveReceipt = {
   synchronizedTrackFiles?: number;
   skippedTrackFiles?: number;
 };
+
+function createMetadataActivityEntry({
+  releaseId,
+  document,
+  action,
+  status,
+  message,
+  receipt,
+}: {
+  releaseId: string;
+  document: ParsedMetadataDocument;
+  action: MetadataActivityEntry["action"];
+  status: MetadataActivityEntry["status"];
+  message: string;
+  receipt?: ScalarMetadataSaveReceipt;
+}): MetadataActivityEntry {
+  const occurredAt =
+    receipt?.savedAt ??
+    new Date().toISOString();
+
+  return {
+    id: [
+      occurredAt,
+      document.relativePath,
+      action,
+      status,
+      Math.random().toString(36).slice(2),
+    ].join(":"),
+    occurredAt,
+    releaseId,
+    documentRelativePath:
+      document.relativePath,
+    documentFilename: document.filename,
+    scope: document.scope,
+    trackId: document.trackId,
+    action,
+    status,
+    message,
+    receipt: receipt
+      ? {
+          backupRelativePath:
+            receipt.backupRelativePath,
+          previousSha256:
+            receipt.previousSha256,
+          savedSha256:
+            receipt.savedSha256,
+          bytes: receipt.bytes,
+          synchronizedTrackFiles:
+            receipt.synchronizedTrackFiles,
+          skippedTrackFiles:
+            receipt.skippedTrackFiles,
+        }
+      : undefined,
+  };
+}
 
 function isEditableMetadataValue(
   value: unknown,
@@ -3715,124 +3839,467 @@ function editorTextToStringArray(
     .filter((entry) => entry.length > 0);
 }
 
-const trackReleaseInheritancePaths =
-  new Map<string, string>([
-    [
-      "track.primary_artist.name",
-      "release.primary_artist.name",
-    ],
-    [
-      "track.language",
-      "release.language",
-    ],
-    [
-      "track.classification.genres",
-      "release.genres",
-    ],
-    [
-      "track.classification.styles",
-      "release.styles",
-    ],
-    [
-      "track.classification.moods",
-      "release.moods",
-    ],
-    [
-      "track.classification.tags",
-      "release.tags",
-    ],
-    [
-      "track.explicit",
-      "release.explicit",
-    ],
-    [
-      "track.rights.copyright",
-      "release.rights.copyright",
-    ],
-    [
-      "track.rights.publisher",
-      "release.rights.publisher",
-    ],
-    [
-      "track.dates.release",
-      "release.dates.release",
-    ],
-  ]);
 
-function isBlankMetadataValue(
-  value: unknown,
+function isPerformerRecordPath(
+  metadataPath: string,
 ): boolean {
   return (
-    value === "" ||
-    value === null ||
-    value === undefined ||
-    (
-      Array.isArray(value) &&
-      value.length === 0
+    metadataPath ===
+      "track.performers" ||
+    /^track\.performers\[\d+\]\.(name|role|sort_name)$/.test(
+      metadataPath,
     )
   );
 }
 
-function findMetadataValueAcrossDocuments(
-  documents: ParsedMetadataDocument[],
-  metadataPath: string,
-): EditableMetadataValue | undefined {
-  for (const candidateDocument of documents) {
-    const row = flattenMetadata(
-      candidateDocument.parsed,
-    ).find(
-      (candidate) =>
-        candidate.path === metadataPath,
-    );
+function readPerformerRecords(
+  document: ParsedMetadataDocument,
+): PerformerRecordDraft[] {
+  const track =
+    document.parsed.track;
 
-    if (
-      row &&
-      isEditableMetadataValue(row.value) &&
-      !isBlankMetadataValue(row.value)
-    ) {
-      return row.value;
-    }
+  if (
+    typeof track !== "object" ||
+    track === null ||
+    Array.isArray(track) ||
+    !("performers" in track) ||
+    !Array.isArray(track.performers)
+  ) {
+    return [];
   }
 
-  return undefined;
+  return track.performers.flatMap(
+    (value, sourceIndex) => {
+      if (
+        typeof value !== "object" ||
+        value === null ||
+        Array.isArray(value)
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          key:
+            `existing-${sourceIndex}`,
+          sourceIndex,
+          name:
+            "name" in value &&
+            typeof value.name === "string"
+              ? value.name
+              : "",
+          role:
+            "role" in value &&
+            typeof value.role === "string"
+              ? value.role
+              : "",
+          sortName:
+            "sort_name" in value &&
+            typeof value.sort_name ===
+              "string"
+              ? value.sort_name
+              : "",
+        },
+      ];
+    },
+  );
 }
 
-function resolveInheritedReleaseValue(
+function performerRecordsEqual(
+  left: readonly PerformerRecordDraft[],
+  right: readonly PerformerRecordDraft[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (record, index) => {
+        const comparison =
+          right[index];
+
+        return (
+          comparison !== undefined &&
+          record.sourceIndex ===
+            comparison.sourceIndex &&
+          record.name ===
+            comparison.name &&
+          record.role ===
+            comparison.role &&
+          record.sortName ===
+            comparison.sortName
+        );
+      },
+    )
+  );
+}
+
+function serializePerformerRecords(
+  records:
+    | readonly PerformerRecordDraft[]
+    | undefined,
+): Array<{
+  sourceIndex: number | null;
+  name: string;
+  role: string;
+  sortName: string;
+}> | undefined {
+  return records?.map(
+    ({
+      sourceIndex,
+      name,
+      role,
+      sortName,
+    }) => ({
+      sourceIndex,
+      name,
+      role,
+      sortName,
+    }),
+  );
+}
+
+
+type TechnicalContributorPath =
+  | "track.contributors"
+  | "release.credits.contributors";
+
+function getTechnicalContributorPath(
   document: ParsedMetadataDocument,
-  row: FlattenedMetadataRow,
-  releaseDocuments: ParsedMetadataDocument[],
-): {
-  sourcePath: string;
-  value: EditableMetadataValue;
-} | null {
+): TechnicalContributorPath {
+  return document.scope === "release"
+    ? "release.credits.contributors"
+    : "track.contributors";
+}
+
+function readTechnicalContributorArray(
+  document: ParsedMetadataDocument,
+): unknown[] {
+  if (document.scope === "release") {
+    const release =
+      document.parsed.release;
+
+    if (
+      typeof release !== "object" ||
+      release === null ||
+      Array.isArray(release) ||
+      !("credits" in release)
+    ) {
+      return [];
+    }
+
+    const credits = release.credits;
+
+    if (
+      typeof credits !== "object" ||
+      credits === null ||
+      Array.isArray(credits) ||
+      !("contributors" in credits) ||
+      !Array.isArray(
+        credits.contributors,
+      )
+    ) {
+      return [];
+    }
+
+    return credits.contributors;
+  }
+
+  const track =
+    document.parsed.track;
+
   if (
-    document.scope !== "track" ||
-    !isBlankMetadataValue(row.value)
+    typeof track !== "object" ||
+    track === null ||
+    Array.isArray(track) ||
+    !("contributors" in track) ||
+    !Array.isArray(track.contributors)
   ) {
-    return null;
+    return [];
   }
 
-  const sourcePath =
-    trackReleaseInheritancePaths.get(
-      row.path,
-    );
+  return track.contributors;
+}
 
-  if (!sourcePath) {
-    return null;
+function readTechnicalCreditRecords(
+  document: ParsedMetadataDocument,
+): PerformerRecordDraft[] {
+  return readTechnicalContributorArray(
+    document,
+  ).flatMap(
+    (value, sourceIndex) => {
+      if (
+        typeof value !== "object" ||
+        value === null ||
+        Array.isArray(value)
+      ) {
+        return [];
+      }
+
+      const role =
+        "role" in value &&
+        typeof value.role === "string"
+          ? value.role
+          : "";
+
+      if (
+        !isTechnicalContributorRoleValue(
+          role,
+        )
+      ) {
+        return [];
+      }
+
+      return [
+        {
+          key: [
+            "existing-technical",
+            document.scope,
+            sourceIndex,
+          ].join("-"),
+          sourceIndex,
+          name:
+            "name" in value &&
+            typeof value.name === "string"
+              ? value.name
+              : "",
+          role,
+          sortName:
+            "sort_name" in value &&
+            typeof value.sort_name ===
+              "string"
+              ? value.sort_name
+              : "",
+        },
+      ];
+    },
+  );
+}
+
+function readManagedTechnicalCreditSourceIndexes(
+  document: ParsedMetadataDocument,
+): number[] {
+  return readTechnicalCreditRecords(
+    document,
+  ).flatMap((record) =>
+    record.sourceIndex === null
+      ? []
+      : [record.sourceIndex],
+  );
+}
+
+function normalizeTechnicalCreditRole(
+  role: string,
+): string {
+  return role
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[._-]+/g, " ")
+    .replace(/\s+/g, " ");
+}
+
+/*
+ * Primary liner-note variants share one override key so a track-level
+ * "Recorded By" credit can replace a release-level "Recording Engineer"
+ * credit without affecting assistant or additional engineering credits.
+ */
+function technicalCreditOverrideKey(
+  role: string,
+): string {
+  const normalized =
+    normalizeTechnicalCreditRole(role);
+
+  if (
+    /^(recorded by|recording engineer|tracking engineer)$/.test(
+      normalized,
+    )
+  ) {
+    return "recording:primary";
   }
 
-  const value =
-    findMetadataValueAcrossDocuments(
-      releaseDocuments,
-      sourcePath,
+  if (
+    /^(mixed by|mix engineer|mixing engineer|mixer)$/.test(
+      normalized,
+    )
+  ) {
+    return "mixing:primary";
+  }
+
+  if (
+    /^(mastered by|mastering engineer|remastering engineer)$/.test(
+      normalized,
+    )
+  ) {
+    return "mastering:primary";
+  }
+
+  return normalized;
+}
+
+function mergeInheritedTechnicalCredits(
+  releaseRecords: readonly PerformerRecordDraft[],
+  trackRecords: readonly PerformerRecordDraft[],
+): {
+  effective: PerformerRecordDraft[];
+  inherited: PerformerRecordDraft[];
+} {
+  const trackOverrideKeys =
+    new Set(
+      trackRecords.map((record) =>
+        technicalCreditOverrideKey(
+          record.role,
+        ),
+      ),
     );
 
-  return value === undefined
-    ? null
-    : {
-        sourcePath,
-        value,
-      };
+  const inherited =
+    releaseRecords
+      .filter(
+        (record) =>
+          !trackOverrideKeys.has(
+            technicalCreditOverrideKey(
+              record.role,
+            ),
+          ),
+      )
+      .map((record, index) => ({
+        ...record,
+        key: [
+          "inherited-release-technical",
+          index,
+          record.key,
+        ].join("-"),
+        sourceIndex: null,
+      }));
+
+  return {
+    effective: [
+      ...trackRecords,
+      ...inherited,
+    ],
+    inherited,
+  };
+}
+
+function serializeTechnicalCreditRecords(
+  records:
+    | readonly PerformerRecordDraft[]
+    | undefined,
+): Array<{
+  sourceIndex: number | null;
+  name: string;
+  role: string;
+  sortName: string;
+}> | undefined {
+  return serializePerformerRecords(
+    records,
+  );
+}
+
+type PersonRoleDisplayRecord = {
+  key: string;
+  name: string;
+  role: string;
+  sortName?: string;
+};
+
+type GroupedPersonRoleDisplay = {
+  key: string;
+  name: string;
+  roles: string[];
+  sortNames: string[];
+  sourceCount: number;
+};
+
+function normalizePersonCreditValue(
+  value: string,
+): string {
+  return value
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function appendDistinctCreditValue(
+  values: string[],
+  value: string,
+) {
+  const normalized =
+    normalizePersonCreditValue(value);
+
+  if (!normalized) {
+    return;
+  }
+
+  const comparison =
+    normalized.toLocaleLowerCase();
+
+  if (
+    values.some(
+      (existingValue) =>
+        existingValue.toLocaleLowerCase() ===
+        comparison,
+    )
+  ) {
+    return;
+  }
+
+  values.push(normalized);
+}
+
+/*
+ * Read-only credit views collapse repeated names while preserving the
+ * authored record-per-role structure used by edit mode and TOML saves.
+ */
+function groupPersonRoleDisplayRecords(
+  records: readonly PersonRoleDisplayRecord[],
+): GroupedPersonRoleDisplay[] {
+  const grouped = new Map<
+    string,
+    GroupedPersonRoleDisplay
+  >();
+
+  records.forEach((record) => {
+    const name =
+      normalizePersonCreditValue(
+        record.name,
+      );
+    const groupKey = name
+      ? name.toLocaleLowerCase()
+      : `missing-name:${record.key}`;
+    const existing =
+      grouped.get(groupKey);
+
+    if (existing) {
+      appendDistinctCreditValue(
+        existing.roles,
+        record.role,
+      );
+      appendDistinctCreditValue(
+        existing.sortNames,
+        record.sortName ?? "",
+      );
+      existing.sourceCount += 1;
+      return;
+    }
+
+    const nextGroup: GroupedPersonRoleDisplay = {
+      key: groupKey,
+      name,
+      roles: [],
+      sortNames: [],
+      sourceCount: 1,
+    };
+
+    appendDistinctCreditValue(
+      nextGroup.roles,
+      record.role,
+    );
+    appendDistinctCreditValue(
+      nextGroup.sortNames,
+      record.sortName ?? "",
+    );
+    grouped.set(groupKey, nextGroup);
+  });
+
+  return Array.from(grouped.values());
 }
 
 function buildDocumentDraftKey(
@@ -3840,6 +4307,33 @@ function buildDocumentDraftKey(
   metadataPath: string,
 ): string {
   return `${document.relativePath}::${metadataPath}`;
+}
+
+function readDocumentDraftString(
+  document: ParsedMetadataDocument,
+  metadataPath: string,
+  draft: MetadataDraft,
+): string {
+  const draftKey = buildDocumentDraftKey(
+    document,
+    metadataPath,
+  );
+  const draftValue = draft[draftKey];
+
+  if (typeof draftValue === "string") {
+    return draftValue;
+  }
+
+  const row = flattenMetadata(
+    document.parsed,
+  ).find(
+    (candidate) =>
+      candidate.path === metadataPath,
+  );
+
+  return typeof row?.value === "string"
+    ? row.value
+    : "";
 }
 
 function getDocumentDraftChanges(
@@ -4008,17 +4502,17 @@ const contributorRoleGroups: Array<{
 }> = [
   {
     pattern:
-      /\b(mix|mixer|mixing)\b/i,
+      /\b(mix(?:ed|er|ing)?|mixdown)\b/i,
     group: "Mixing",
   },
   {
     pattern:
-      /\b(master|mastering|remaster)\b/i,
+      /\b(master(?:ed|ing)?|remaster(?:ed|ing)?)\b/i,
     group: "Mastering",
   },
   {
     pattern:
-      /\b(record|recording|engineer|editor|editing|transfer|restoration)\b/i,
+      /\b(record(?:ed|ing)?|tracking|engineer(?:ed|ing)?|edit(?:ed|ing|or)?|transfer(?:red|ring)?|restor(?:ation|ed|ing)?|tape operator)\b/i,
     group: "Recording and Editing",
   },
   {
@@ -4048,10 +4542,14 @@ const metadataGroupOrder = [
   "Artists",
   "Music Business & Rights",
   "Dates",
+  "Musical Analysis",
   "Track & Disc Numbering",
   "Movement & Work",
   "Performers",
   "Writing, Lyrics & Language",
+  "Language & Writing System",
+  "Lyrics",
+  "Lyrics Rights & Source",
   "Arrangement",
   "Production",
   "Recording and Editing",
@@ -4152,7 +4650,13 @@ function isRelatedMetadataTagPath(
   return (
     normalizedPath ===
       "track.identifiers.discogs_track_position" ||
+    /^track\.album_artists\[\]\.(name|sort_name)$/.test(
+      normalizedPath,
+    ) ||
     /^(track\.classification\.(instrumental|cover|live|remix|remaster))$/.test(
+      normalizedPath,
+    ) ||
+    /^track\.(?:audio\.)?(?:tempo|initial_key|musical_key|camelot_key|time_signature|tuning_hz)$/.test(
       normalizedPath,
     ) ||
     normalizedPath ===
@@ -4315,24 +4819,33 @@ function resolveMetadataRowGroup(
   }
 
   if (
-    path ===
-      "track.text.lyrics_copyright"
-  ) {
-    return "Music Business & Rights";
-  }
-
-  if (
     /^track\.(language|script)(\.|$)/.test(
       path,
     ) ||
     /^release\.(language|script)(\.|$)/.test(
       path,
     ) ||
-    /^track\.text\.(lyrics|lyrics_language|lyrics_script|lyrics_source|synchronized_lyrics|unsynchronized_lyrics|translation)(\.|$)/.test(
+    /^track\.text\.(lyrics_language|lyrics_script)(\.|$)/.test(
       path,
     )
   ) {
-    return "Writing, Lyrics & Language";
+    return "Language & Writing System";
+  }
+
+  if (
+    /^track\.text\.(lyrics|synchronized_lyrics|unsynchronized_lyrics|translation)(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Lyrics";
+  }
+
+  if (
+    /^track\.text\.(lyrics_copyright|lyrics_source)(\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Lyrics Rights & Source";
   }
 
   if (
@@ -4451,8 +4964,16 @@ function resolveMetadataRowGroup(
   }
 
   if (
+    /^track\.(?:audio\.)?(?:bpm|tempo|key|initial_key|musical_key|camelot_key|time_signature|tuning_hz)(?:\.|$)/.test(
+      path,
+    )
+  ) {
+    return "Musical Analysis";
+  }
+
+  if (
     /^track\.audio(\.|$)/.test(path) ||
-    /\.(sample_rate|bit_depth|channels|channel_layout|codec|bpm|key|camelot_key|time_signature|tuning_hz|duration)(\.|$)/.test(
+    /\.(sample_rate|bit_depth|channels|channel_layout|codec|duration)(\.|$)/.test(
       path,
     )
   ) {
@@ -4527,10 +5048,6 @@ function resolveMetadataRowGroup(
    */
   return "Release & Track Identity";
 }
-
-type MetadataFieldModalView =
-  | "help"
-  | "information";
 
 function MetadataFieldModal({
   title,
@@ -4618,6 +5135,143 @@ function MetadataFieldModal({
   );
 }
 
+function MetadataActivityLogModal({
+  entries,
+  onClose,
+  onClear,
+}: {
+  entries: MetadataActivityEntry[];
+  onClose: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <MetadataFieldModal
+      title="Metadata Activity Log"
+      onClose={onClose}
+    >
+      <section className="metadata-activity-log-intro">
+        <div>
+          <h4>Current browser session</h4>
+          <p>
+            Verified save receipts and failed metadata-write attempts are
+            retained only in this tab&apos;s session storage. No additional
+            filesystem log is created.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          disabled={entries.length === 0}
+          onClick={onClear}
+        >
+          Clear activity
+        </button>
+      </section>
+
+      {entries.length === 0 ? (
+        <p className="metadata-activity-empty">
+          No metadata save activity has been recorded in this browser
+          session.
+        </p>
+      ) : (
+        <ol className="metadata-activity-list">
+          {entries.map((entry) => (
+            <li
+              key={entry.id}
+              className={`metadata-activity-entry ${entry.status}`}
+            >
+              <header>
+                <div>
+                  <span
+                    className={`badge ${
+                      entry.status === "verified"
+                        ? "complete"
+                        : "missing"
+                    }`}
+                  >
+                    {entry.status === "verified"
+                      ? "Saved and verified"
+                      : "Write failed"}
+                  </span>
+                  <strong>
+                    {entry.documentFilename}
+                  </strong>
+                </div>
+
+                <time dateTime={entry.occurredAt}>
+                  {new Date(
+                    entry.occurredAt,
+                  ).toLocaleString()}
+                </time>
+              </header>
+
+              <p className="metadata-activity-context">
+                <span>{entry.releaseId}</span>
+                {entry.trackId && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>{entry.trackId}</span>
+                  </>
+                )}
+                <span aria-hidden="true">·</span>
+                <span>
+                  {entry.action === "add-fields"
+                    ? "Added fields"
+                    : "Saved metadata"}
+                </span>
+              </p>
+
+              <code className="metadata-activity-path">
+                {entry.documentRelativePath}
+              </code>
+              <p>{entry.message}</p>
+
+              {entry.receipt && (
+                <details className="metadata-activity-receipt">
+                  <summary>
+                    View verification receipt
+                  </summary>
+                  <dl>
+                    <div>
+                      <dt>Backup</dt>
+                      <dd>
+                        <code>
+                          {entry.receipt.backupRelativePath}
+                        </code>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>SHA-256</dt>
+                      <dd>
+                        <code>
+                          {entry.receipt.savedSha256}
+                        </code>
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Bytes</dt>
+                      <dd>{entry.receipt.bytes}</dd>
+                    </div>
+                    {(entry.receipt.synchronizedTrackFiles ?? 0) > 0 && (
+                      <div>
+                        <dt>Track files synchronized</dt>
+                        <dd>
+                          {entry.receipt.synchronizedTrackFiles}
+                        </dd>
+                      </div>
+                    )}
+                  </dl>
+                </details>
+              )}
+            </li>
+          ))}
+        </ol>
+      )}
+    </MetadataFieldModal>
+  );
+}
+
+
 function describeMetadataValueGuidance(
   valueType: FlattenedMetadataRow["valueType"],
 ): string {
@@ -4664,6 +5318,74 @@ function getSupplementalFieldGuidance(
 
   const exactGuidance:
     Record<string, SupplementalFieldGuidance> = {
+      "track.album_artists[].name": {
+        help:
+          "Compatibility album-artist value stored on this track. It normally mirrors release.primary_artist.name and does not replace the authoritative Track Artist field.",
+        examples: [
+          "Album Artist",
+          "Various Artists",
+        ],
+      },
+      "track.album_artists[].sort_name": {
+        help:
+          "Optional alphabetical sort form for the compatibility Album Artist value. It normally mirrors release.primary_artist.sort_name.",
+        examples: [
+          "First Last → Last, First",
+          "The Example Band → Example Band, The",
+        ],
+      },
+      "track.subtitle": {
+        help:
+          "Optional secondary track title. A blank track subtitle inherits release.subtitle when one is present; enter a track-specific value only when this track differs.",
+        examples: [
+          "Part I",
+          "Live Session",
+        ],
+      },
+      "track.dates.release": {
+        help:
+          "Release date for this track. A blank value inherits release.dates.release; override it only when this track has a different release date.",
+        examples: [
+          "2009-05-01",
+          "2026-07-18",
+        ],
+      },
+      "track.dates.original_release": {
+        help:
+          "Earliest known release date for this recording or track version. A blank value inherits release.dates.original_release.",
+        examples: [
+          "2009-05-01",
+          "1998",
+        ],
+      },
+      "track.rights.copyright": {
+        help:
+          "Track-level copyright notice. Leave it blank when the release-level notice applies; use an override only when this track has distinct copyright ownership or wording.",
+        examples: [
+          "© 2009 Example Publishing",
+        ],
+      },
+      "track.rights.phonographic_copyright": {
+        help:
+          "Track-level ℗ notice covering the sound recording. This is distinct from the composition or lyrics copyright.",
+        examples: [
+          "℗ 2009 Example Records",
+        ],
+      },
+      "track.rights.publisher": {
+        help:
+          "Publisher associated with the underlying musical work. Leave blank when the release-level publisher applies.",
+        examples: [
+          "Example Music Publishing",
+        ],
+      },
+      "track.rights.license": {
+        help:
+          "Optional track-specific license or usage statement. Use only when this track differs from the release-level licensing terms.",
+        examples: [
+          "All rights reserved",
+        ],
+      },
       "track.version": {
         help:
           "Use a concise version label only when it distinguishes this recording from another version of the same track.",
@@ -5114,6 +5836,106 @@ function getSupplementalFieldGuidance(
   };
 }
 
+type MetadataFieldHelpSpec = {
+  label: string;
+  field:
+    | MetadataFieldDefinition
+    | undefined;
+  path: string;
+  valueType:
+    FlattenedMetadataRow["valueType"];
+};
+
+type EffectiveMetadataFieldGuidance = {
+  help: string;
+  commonValues: string[];
+  examples: string[];
+};
+
+function resolveEffectiveMetadataFieldGuidance(
+  spec: MetadataFieldHelpSpec,
+): EffectiveMetadataFieldGuidance {
+  const supplementalGuidance =
+    getSupplementalFieldGuidance(
+      spec.path,
+      spec.valueType,
+    );
+  const presentation =
+    spec.field?.presentation;
+
+  return {
+    help:
+      presentation?.help ??
+      supplementalGuidance.help ??
+      describeMetadataValueGuidance(
+        spec.valueType,
+      ),
+    commonValues:
+      presentation?.commonValues ??
+      supplementalGuidance.commonValues ??
+      [],
+    examples:
+      presentation?.examples ??
+      supplementalGuidance.examples ??
+      [],
+  };
+}
+
+function MetadataFieldFacts({
+  spec,
+}: {
+  spec: MetadataFieldHelpSpec;
+}) {
+  return (
+    <dl className="metadata-field-facts">
+      <div>
+        <dt>Canonical path</dt>
+        <dd>
+          <code>{spec.path}</code>
+        </dd>
+      </div>
+
+      <div>
+        <dt>Data type</dt>
+        <dd>
+          <code>{spec.valueType}</code>
+        </dd>
+      </div>
+
+      {spec.field && (
+        <>
+          <div>
+            <dt>Required</dt>
+            <dd>
+              {spec.field.required
+                ? "Yes"
+                : "No"}
+            </dd>
+          </div>
+
+          <div>
+            <dt>Repeatable</dt>
+            <dd>
+              {spec.field.repeatable
+                ? "Yes"
+                : "No"}
+            </dd>
+          </div>
+
+          <div>
+            <dt>Inherited</dt>
+            <dd>
+              {spec.field.inherited
+                ? "Yes"
+                : "No"}
+            </dd>
+          </div>
+        </>
+      )}
+    </dl>
+  );
+}
+
 function MetadataFieldControls({
   field,
   path,
@@ -5126,35 +5948,19 @@ function MetadataFieldControls({
   valueType:
     FlattenedMetadataRow["valueType"];
 }) {
-  const [
-    modalView,
-    setModalView,
-  ] =
-    useState<MetadataFieldModalView | null>(
-      null,
+  const [modalOpen, setModalOpen] =
+    useState(false);
+  const label = field?.label ?? path;
+  const spec: MetadataFieldHelpSpec = {
+    label,
+    field,
+    path,
+    valueType,
+  };
+  const guidance =
+    resolveEffectiveMetadataFieldGuidance(
+      spec,
     );
-
-  const presentation =
-    field?.presentation;
-  const supplementalGuidance =
-    getSupplementalFieldGuidance(
-      path,
-      valueType,
-    );
-  const effectiveHelp =
-    presentation?.help ??
-    supplementalGuidance.help;
-  const effectiveCommonValues =
-    presentation?.commonValues ??
-    supplementalGuidance.commonValues;
-  const effectiveExamples =
-    presentation?.examples ??
-    supplementalGuidance.examples;
-  const hasHelp = Boolean(
-    effectiveHelp ||
-      effectiveCommonValues?.length ||
-      effectiveExamples?.length,
-  );
   const groups = field
     ? buildMetadataAliasGroups(field)
     : [];
@@ -5162,150 +5968,73 @@ function MetadataFieldControls({
   return (
     <>
       <span className="metadata-field-controls">
-        {hasHelp && (
-          <button
-            type="button"
-            className="metadata-field-control"
-            aria-label={`Help for ${
-              field?.label ?? path
-            }`}
-            title="Usage help"
-            onClick={() =>
-              setModalView("help")
-            }
-          >
-            ?
-          </button>
-        )}
-
         <button
           type="button"
           className="metadata-field-control"
-          aria-label={`Information for ${
-            field?.label ?? path
-          }`}
-          title="Field information"
-          onClick={() =>
-            setModalView("information")
-          }
+          aria-label={`Help and field information for ${label}`}
+          title="Help and field information"
+          onClick={() => setModalOpen(true)}
         >
-          i
+          ?
         </button>
       </span>
 
-      {modalView === "help" &&
-        field &&
-        presentation && (
-          <MetadataFieldModal
-            title={`${field.label} — Help`}
-            onClose={() =>
-              setModalView(null)
-            }
-          >
-            {effectiveHelp && (
-              <p>{effectiveHelp}</p>
-            )}
-
-            {effectiveCommonValues &&
-              effectiveCommonValues.length >
-                0 && (
-                <section>
-                  <h4>Common values</h4>
-                  <ul className="metadata-field-modal-values">
-                    {effectiveCommonValues.map(
-                      (value) => (
-                        <li key={value}>
-                          <code>{value}</code>
-                        </li>
-                      ),
-                    )}
-                  </ul>
-                </section>
-              )}
-
-            {effectiveExamples &&
-              effectiveExamples.length > 0 && (
-                <section>
-                  <h4>Examples</h4>
-                  <ul className="metadata-field-modal-values">
-                    {effectiveExamples.map(
-                      (value) => (
-                        <li key={value}>
-                          <code>{value}</code>
-                        </li>
-                      ),
-                    )}
-                  </ul>
-                </section>
-              )}
-          </MetadataFieldModal>
-        )}
-
-      {modalView === "information" && (
+      {modalOpen && (
         <MetadataFieldModal
-          title={`${
-            field?.label ?? path
-          } — Field Information`}
-          onClose={() =>
-            setModalView(null)
-          }
+          title={`${label} — Help`}
+          onClose={() => setModalOpen(false)}
         >
-          {field && (
-            <section className="metadata-field-guidance">
-              <h4>About this field</h4>
-              <p>{field.description}</p>
+          {guidance.examples.length > 0 && (
+            <section className="metadata-field-guidance metadata-field-examples">
+              <h4>Example</h4>
+              <ul className="metadata-field-modal-values">
+                {guidance.examples.map(
+                  (value) => (
+                    <li key={value}>
+                      <code>{value}</code>
+                    </li>
+                  ),
+                )}
+              </ul>
             </section>
           )}
 
           <section className="metadata-field-guidance">
-            <h4>Value guidance</h4>
+            <h4>About this field</h4>
             <p>
-              {effectiveHelp ??
-                describeMetadataValueGuidance(
-                  valueType,
-                )}
+              {field?.description ??
+                "Metadata value stored at this canonical TOML path."}
             </p>
           </section>
 
-          {effectiveCommonValues &&
-            effectiveCommonValues.length > 0 && (
-              <section className="metadata-field-guidance">
-                <h4>Common values</h4>
-                <ul className="metadata-field-modal-values">
-                  {effectiveCommonValues.map(
-                    (value) => (
-                      <li key={value}>
-                        <code>{value}</code>
-                      </li>
-                    ),
-                  )}
-                </ul>
-                <p className="metadata-field-guidance-note">
-                  Suggested vocabulary; values are not
-                  restricted unless the field guidance
-                  explicitly says otherwise.
-                </p>
-              </section>
-            )}
+          <section className="metadata-field-guidance">
+            <h4>Value guidance</h4>
+            <p>{guidance.help}</p>
+          </section>
 
-          {effectiveExamples &&
-            effectiveExamples.length > 0 && (
-              <section className="metadata-field-guidance">
-                <h4>Examples</h4>
-                <ul className="metadata-field-modal-values">
-                  {effectiveExamples.map(
-                    (value) => (
-                      <li key={value}>
-                        <code>{value}</code>
-                      </li>
-                    ),
-                  )}
-                </ul>
-              </section>
-            )}
+          {guidance.commonValues.length > 0 && (
+            <section className="metadata-field-guidance metadata-field-common-values">
+              <h4>Common values</h4>
+              <ul className="metadata-field-modal-values">
+                {guidance.commonValues.map(
+                  (value) => (
+                    <li key={value}>
+                      <code>{value}</code>
+                    </li>
+                  ),
+                )}
+              </ul>
+              <p className="metadata-field-guidance-note">
+                {field?.editor?.control ===
+                "select-or-custom"
+                  ? "Choose a standard value in Edit mode, or select Other… to preserve a custom value from liner notes or another source."
+                  : "Suggested vocabulary; values are not restricted unless the field guidance explicitly says otherwise."}
+              </p>
+            </section>
+          )}
 
           {!field && (
-            <p className="metadata-field-guidance-note">
+            <p className="metadata-field-guidance-note metadata-field-full-width">
               This path uses supplemental guidance until
               a dedicated canonical registry entry is
               added.
@@ -5315,92 +6044,201 @@ function MetadataFieldControls({
           <section className="metadata-field-guidance metadata-field-technical-details">
             <h4>Technical details</h4>
 
-            <dl className="metadata-field-facts">
-              <div>
-                <dt>Canonical path</dt>
-                <dd>
-                  <code>{path}</code>
-                </dd>
-              </div>
+            <MetadataFieldFacts spec={spec} />
 
-              <div>
-                <dt>Data type</dt>
-                <dd>
-                  <code>{valueType}</code>
-                </dd>
-              </div>
+            {field && groups.length > 0 && (
+              <details className="metadata-tag-details metadata-tag-details-inline metadata-tag-disclosure">
+                <summary>
+                  <span>
+                    Player compatibility and tag mappings
+                  </span>
+                  <small>
+                    {groups.length} mapping
+                    {groups.length === 1 ? " group" : " groups"}
+                  </small>
+                </summary>
 
-              {field && (
-                <>
-                  <div>
-                    <dt>Required</dt>
-                    <dd>
-                      {field.required
-                        ? "Yes"
-                        : "No"}
-                    </dd>
+                <div className="metadata-tag-disclosure-content">
+                  <dl className="metadata-aliases">
+                    {groups.map((group) => (
+                      <div key={group.label}>
+                        <dt>{group.label}</dt>
+                        <dd
+                          className={
+                            group.verified === false
+                              ? "alias-unverified"
+                              : undefined
+                          }
+                        >
+                          {group.values.join(", ")}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+
+                  <MetadataCompatibilityNotes
+                    field={field}
+                  />
+                </div>
+              </details>
+            )}
+          </section>
+        </MetadataFieldModal>
+      )}
+    </>
+  );
+}
+
+function MetadataFieldPairControls({
+  title,
+  description,
+  nameField,
+  namePath,
+  roleField,
+  rolePath,
+  nameGuidance,
+  roleGuidance,
+  nameExample,
+  roleExample,
+  commonRoleValues,
+  fieldOrder = "name-role",
+}: {
+  title: string;
+  description: string;
+  nameField:
+    | MetadataFieldDefinition
+    | undefined;
+  namePath: string;
+  roleField:
+    | MetadataFieldDefinition
+    | undefined;
+  rolePath: string;
+  nameGuidance: string;
+  roleGuidance: string;
+  nameExample: string;
+  roleExample: string;
+  commonRoleValues: string[];
+  fieldOrder?: "name-role" | "role-name";
+}) {
+  const [modalOpen, setModalOpen] =
+    useState(false);
+  const nameSpec: MetadataFieldHelpSpec = {
+    label: nameField?.label ?? "Name",
+    field: nameField,
+    path: namePath,
+    valueType: "string",
+  };
+  const roleSpec: MetadataFieldHelpSpec = {
+    label: roleField?.label ?? "Role",
+    field: roleField,
+    path: rolePath,
+    valueType: "string",
+  };
+  const pairFields = {
+    name: {
+      key: "name",
+      label: "Name",
+      example: nameExample,
+      guidance: nameGuidance,
+      spec: nameSpec,
+    },
+    role: {
+      key: "role",
+      label: "Role",
+      example: roleExample,
+      guidance: roleGuidance,
+      spec: roleSpec,
+    },
+  } as const;
+  const orderedPairFields =
+    fieldOrder === "role-name"
+      ? [pairFields.role, pairFields.name]
+      : [pairFields.name, pairFields.role];
+
+  return (
+    <>
+      <button
+        type="button"
+        className="metadata-field-control"
+        aria-label={`Help and field information for ${title}`}
+        title={`Help for ${title}`}
+        onClick={() => setModalOpen(true)}
+      >
+        ?
+      </button>
+
+      {modalOpen && (
+        <MetadataFieldModal
+          title={`${title} — Help`}
+          onClose={() => setModalOpen(false)}
+        >
+          <section className="metadata-field-guidance metadata-field-examples">
+            <h4>Example</h4>
+            <div className="metadata-field-pair-example-grid">
+              {orderedPairFields.map(
+                (field) => (
+                  <div key={field.key}>
+                    <span>{field.label}</span>
+                    <code>{field.example}</code>
                   </div>
-
-                  <div>
-                    <dt>Repeatable</dt>
-                    <dd>
-                      {field.repeatable
-                        ? "Yes"
-                        : "No"}
-                    </dd>
-                  </div>
-
-                  <div>
-                    <dt>Inherited</dt>
-                    <dd>
-                      {field.inherited
-                        ? "Yes"
-                        : "No"}
-                    </dd>
-                  </div>
-                </>
+                ),
               )}
-            </dl>
+            </div>
           </section>
 
-          {field &&
-            groups.length > 0 && (
-              <section className="metadata-tag-details">
-                <h4>
-                  Player compatibility and
-                  tag mappings
-                </h4>
+          <section className="metadata-field-guidance metadata-field-pair-about">
+            <h4>About this pair</h4>
+            <p>{description}</p>
+          </section>
 
-                <dl className="metadata-aliases">
-                  {groups.map((group) => (
-                    <div
-                      key={group.label}
-                    >
-                      <dt>
-                        {group.label}
-                      </dt>
+          <section className="metadata-field-guidance metadata-field-pair-guidance">
+            <h4>Field guidance</h4>
+            <div className="metadata-field-pair-guidance-grid">
+              {orderedPairFields.map(
+                (field) => (
+                  <article key={field.key}>
+                    <h5>{field.label}</h5>
+                    <p>{field.guidance}</p>
+                  </article>
+                ),
+              )}
+            </div>
+          </section>
 
-                      <dd
-                        className={
-                          group.verified ===
-                          false
-                            ? "alias-unverified"
-                            : undefined
-                        }
-                      >
-                        {group.values.join(
-                          ", ",
-                        )}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
+          {commonRoleValues.length > 0 && (
+            <section className="metadata-field-guidance metadata-field-common-values">
+              <h4>Common role values</h4>
+              <ul className="metadata-field-modal-values">
+                {commonRoleValues.map(
+                  (value) => (
+                    <li key={value}>
+                      <code>{value}</code>
+                    </li>
+                  ),
+                )}
+              </ul>
+              <p className="metadata-field-guidance-note">
+                Choose a standard role when it matches the credit.
+                Select Other… to preserve custom liner-note wording.
+              </p>
+            </section>
+          )}
 
-                <MetadataCompatibilityNotes
-                  field={field}
-                />
-              </section>
-            )}
+          <section className="metadata-field-guidance metadata-field-technical-details">
+            <h4>Technical details</h4>
+            <div className="metadata-field-pair-facts-grid">
+              {orderedPairFields.map(
+                (field) => (
+                  <article key={field.key}>
+                    <h5>{field.label} field</h5>
+                    <MetadataFieldFacts
+                      spec={field.spec}
+                    />
+                  </article>
+                ),
+              )}
+            </div>
+          </section>
         </MetadataFieldModal>
       )}
     </>
@@ -5457,6 +6295,14 @@ function ReleaseMetadataDetailView({
   const [draft, setDraft] =
     useState<MetadataDraft>({});
   const [
+    performerDrafts,
+    setPerformerDrafts,
+  ] = useState<PerformerDraftMap>({});
+  const [
+    technicalCreditDrafts,
+    setTechnicalCreditDrafts,
+  ] = useState<TechnicalCreditDraftMap>({});
+  const [
     savingDocumentPath,
     setSavingDocumentPath,
   ] = useState<string | null>(null);
@@ -5466,11 +6312,27 @@ function ReleaseMetadataDetailView({
     addingFieldsPath,
     setAddingFieldsPath,
   ] = useState<string | null>(null);
+  const [
+    removingFieldKey,
+    setRemovingFieldKey,
+  ] = useState<string | null>(null);
+  const [
+    creatingTrackCreditsPath,
+    setCreatingTrackCreditsPath,
+  ] = useState<string | null>(null);
+  const [
+    pendingInitialTechnicalCreditPath,
+    setPendingInitialTechnicalCreditPath,
+  ] = useState<string | null>(null);
   const [saveError, setSaveError] =
     useState<string | null>(null);
-  const [saveReceipt, setSaveReceipt] =
-    useState<ScalarMetadataSaveReceipt | null>(
-      null,
+  const [activityLogOpen, setActivityLogOpen] =
+    useState(false);
+  const [metadataActivityEntries, setMetadataActivityEntries] =
+    useState<MetadataActivityEntry[]>(() =>
+      readMetadataActivityLog(
+        window.sessionStorage,
+      ),
     );
   const [
     activeDocumentGroup,
@@ -5489,15 +6351,96 @@ function ReleaseMetadataDetailView({
   const detailMenuRef =
     useRef<HTMLElement>(null);
 
+  const recordMetadataActivity = (
+    entry: MetadataActivityEntry,
+  ) => {
+    setMetadataActivityEntries(
+      (currentEntries) => {
+        const nextEntries =
+          prependMetadataActivityEntry(
+            currentEntries,
+            entry,
+          );
+
+        writeMetadataActivityLog(
+          window.sessionStorage,
+          nextEntries,
+        );
+
+        return nextEntries;
+      },
+    );
+  };
+
+  const clearActivityLog = () => {
+    clearMetadataActivityLog(
+      window.sessionStorage,
+    );
+    setMetadataActivityEntries([]);
+  };
+
   useEffect(() => {
     setActiveDocumentGroup("release");
     setActiveMetadataTab("overview");
     setDetailMenuOpen(false);
+    setActivityLogOpen(false);
     setSetupMode(false);
     setStarterDraft(null);
     setStarterReviewed(false);
     setStarterCreationError(null);
+    setPendingInitialTechnicalCreditPath(
+      null,
+    );
   }, [detail.releaseId]);
+
+  useEffect(() => {
+    if (
+      !pendingInitialTechnicalCreditPath
+    ) {
+      return;
+    }
+
+    const document =
+      detail.documents.find(
+        (candidate) =>
+          candidate.relativePath ===
+            pendingInitialTechnicalCreditPath &&
+          candidate.filename ===
+            "track-credits.toml",
+      );
+
+    if (!document) {
+      return;
+    }
+
+    setTechnicalCreditDrafts(
+      (currentDrafts) => ({
+        ...currentDrafts,
+        [document.relativePath]:
+          currentDrafts[
+            document.relativePath
+          ] ?? [
+            {
+              key: [
+                "new-technical",
+                Date.now(),
+                0,
+              ].join("-"),
+              sourceIndex: null,
+              name: "",
+              role: "",
+              sortName: "",
+            },
+          ],
+      }),
+    );
+    setPendingInitialTechnicalCreditPath(
+      null,
+    );
+  }, [
+    detail.documents,
+    pendingInitialTechnicalCreditPath,
+  ]);
 
   useEffect(() => {
     if (
@@ -5550,9 +6493,14 @@ function ReleaseMetadataDetailView({
       );
   }, [detailMenuOpen]);
 
-  const dirtyCount = Object.keys(
-    draft,
-  ).length;
+  const dirtyCount =
+    Object.keys(draft).length +
+    Object.keys(
+      performerDrafts,
+    ).length +
+    Object.keys(
+      technicalCreditDrafts,
+    ).length;
 
   useEffect(() => {
     if (dirtyCount === 0) {
@@ -5615,6 +6563,74 @@ function ReleaseMetadataDetailView({
     });
   };
 
+  const updatePerformerDraft = (
+    document: ParsedMetadataDocument,
+    nextRecords: PerformerRecordDraft[],
+  ) => {
+    const originalRecords =
+      readPerformerRecords(document);
+
+    setPerformerDrafts(
+      (currentDrafts) => {
+        const nextDrafts = {
+          ...currentDrafts,
+        };
+
+        if (
+          performerRecordsEqual(
+            originalRecords,
+            nextRecords,
+          )
+        ) {
+          delete nextDrafts[
+            document.relativePath
+          ];
+        } else {
+          nextDrafts[
+            document.relativePath
+          ] = nextRecords;
+        }
+
+        return nextDrafts;
+      },
+    );
+  };
+
+  const updateTechnicalCreditDraft = (
+    document: ParsedMetadataDocument,
+    nextRecords: PerformerRecordDraft[],
+  ) => {
+    const originalRecords =
+      readTechnicalCreditRecords(
+        document,
+      );
+
+    setTechnicalCreditDrafts(
+      (currentDrafts) => {
+        const nextDrafts = {
+          ...currentDrafts,
+        };
+
+        if (
+          performerRecordsEqual(
+            originalRecords,
+            nextRecords,
+          )
+        ) {
+          delete nextDrafts[
+            document.relativePath
+          ];
+        } else {
+          nextDrafts[
+            document.relativePath
+          ] = nextRecords;
+        }
+
+        return nextDrafts;
+      },
+    );
+  };
+
   const saveDocumentDraft = async (
     document: ParsedMetadataDocument,
   ) => {
@@ -5622,8 +6638,21 @@ function ReleaseMetadataDetailView({
       document,
       draft,
     );
+    const performerRecords =
+      performerDrafts[
+        document.relativePath
+      ];
+    const technicalContributorRecords =
+      technicalCreditDrafts[
+        document.relativePath
+      ];
 
-    if (changes.length === 0) {
+    if (
+      changes.length === 0 &&
+      performerRecords === undefined &&
+      technicalContributorRecords ===
+        undefined
+    ) {
       setSaveError(
         "This document has no metadata changes to save.",
       );
@@ -5634,7 +6663,8 @@ function ReleaseMetadataDetailView({
       document.relativePath,
     );
     setSaveError(null);
-    setSaveReceipt(null);
+
+    let writeVerified = false;
 
     try {
       const response = await fetch(
@@ -5651,6 +6681,28 @@ function ReleaseMetadataDetailView({
             originalSha256:
               document.sha256,
             changes,
+            performers:
+              serializePerformerRecords(
+                performerRecords,
+              ),
+            technicalContributors:
+              serializeTechnicalCreditRecords(
+                technicalContributorRecords,
+              ),
+            managedTechnicalContributorSourceIndexes:
+              technicalContributorRecords ===
+                undefined
+                ? undefined
+                : readManagedTechnicalCreditSourceIndexes(
+                    document,
+                  ),
+            technicalContributorPath:
+              technicalContributorRecords ===
+                undefined
+                ? undefined
+                : getTechnicalContributorPath(
+                    document,
+                  ),
           }),
         },
       );
@@ -5670,9 +6722,28 @@ function ReleaseMetadataDetailView({
         );
       }
 
-      setSaveReceipt(
-        result as ScalarMetadataSaveReceipt,
+      const receipt =
+        result as ScalarMetadataSaveReceipt;
+
+      recordMetadataActivity(
+        createMetadataActivityEntry({
+          releaseId: detail.releaseId,
+          document,
+          action: "save",
+          status: "verified",
+          message:
+            "Metadata saved and verified against the canonical TOML document.",
+          receipt,
+        }),
       );
+      writeVerified = true;
+
+      /*
+       * Refresh before clearing browser drafts. This keeps newly created
+       * record rows visible until the canonical TOML document and hash have
+       * been loaded from disk.
+       */
+      await onRefresh();
 
       setDraft((currentDraft) =>
         removeDocumentDraftChanges(
@@ -5680,12 +6751,32 @@ function ReleaseMetadataDetailView({
           currentDraft,
         ),
       );
+      setPerformerDrafts(
+        (currentDrafts) => {
+          const nextDrafts = {
+            ...currentDrafts,
+          };
 
-      /*
-       * Refresh immediately so the browser receives the new hash and
-       * canonical TOML representation from disk.
-       */
-      await onRefresh();
+          delete nextDrafts[
+            document.relativePath
+          ];
+
+          return nextDrafts;
+        },
+      );
+      setTechnicalCreditDrafts(
+        (currentDrafts) => {
+          const nextDrafts = {
+            ...currentDrafts,
+          };
+
+          delete nextDrafts[
+            document.relativePath
+          ];
+
+          return nextDrafts;
+        },
+      );
       const synchronizedTrackFiles =
         (
           result as
@@ -5694,20 +6785,32 @@ function ReleaseMetadataDetailView({
 
       onNotify(
         synchronizedTrackFiles > 0
-          ? `Metadata saved · ${synchronizedTrackFiles} track ${
+          ? `Metadata saved and verified · ${synchronizedTrackFiles} track ${
               synchronizedTrackFiles === 1
                 ? "file"
                 : "files"
             } synchronized`
-          : "Metadata saved",
+          : "Metadata saved and verified",
         "success",
       );
     } catch (error) {
-      setSaveError(
+      const message =
         error instanceof Error
           ? error.message
-          : "Unknown metadata save error",
-      );
+          : "Unknown metadata save error";
+
+      if (!writeVerified) {
+        recordMetadataActivity(
+          createMetadataActivityEntry({
+            releaseId: detail.releaseId,
+            document,
+            action: "save",
+            status: "failed",
+            message,
+          }),
+        );
+      }
+      setSaveError(message);
       onNotify(
         "Metadata save failed",
         "error",
@@ -5725,7 +6828,13 @@ function ReleaseMetadataDetailView({
             getDocumentDraftChanges(
               document,
               draft,
-            ).length > 0,
+            ).length > 0 ||
+            performerDrafts[
+              document.relativePath
+            ] !== undefined ||
+            technicalCreditDrafts[
+              document.relativePath
+            ] !== undefined,
         )
         /*
          * Save track documents before release.toml. A release save may
@@ -5749,18 +6858,29 @@ function ReleaseMetadataDetailView({
 
     setSavingAll(true);
     setSaveError(null);
-    setSaveReceipt(null);
 
     let savedCount = 0;
     let synchronizedTrackFiles = 0;
+    let activeSaveDocument:
+      | ParsedMetadataDocument
+      | null = null;
 
     try {
       for (const document of changedDocuments) {
+        activeSaveDocument = document;
         const changes =
           getDocumentDraftChanges(
             document,
             draft,
           );
+        const performerRecords =
+          performerDrafts[
+            document.relativePath
+          ];
+        const technicalContributorRecords =
+          technicalCreditDrafts[
+            document.relativePath
+          ];
 
         const response = await fetch(
           "/api/library/save-scalar-metadata",
@@ -5777,6 +6897,28 @@ function ReleaseMetadataDetailView({
               originalSha256:
                 document.sha256,
               changes,
+              performers:
+                serializePerformerRecords(
+                  performerRecords,
+                ),
+              technicalContributors:
+                serializeTechnicalCreditRecords(
+                  technicalContributorRecords,
+                ),
+              managedTechnicalContributorSourceIndexes:
+                technicalContributorRecords ===
+                  undefined
+                  ? undefined
+                  : readManagedTechnicalCreditSourceIndexes(
+                      document,
+                    ),
+              technicalContributorPath:
+                technicalContributorRecords ===
+                  undefined
+                  ? undefined
+                  : getTechnicalContributorPath(
+                      document,
+                    ),
             }),
           },
         );
@@ -5805,7 +6947,17 @@ function ReleaseMetadataDetailView({
           receipt.synchronizedTrackFiles ??
           0;
 
-        setSaveReceipt(receipt);
+        recordMetadataActivity(
+          createMetadataActivityEntry({
+            releaseId: detail.releaseId,
+            document,
+            action: "save",
+            status: "verified",
+            message:
+              "Metadata saved and verified against the canonical TOML document.",
+            receipt,
+          }),
+        );
 
         setDraft((currentDraft) =>
           removeDocumentDraftChanges(
@@ -5813,8 +6965,35 @@ function ReleaseMetadataDetailView({
             currentDraft,
           ),
         );
+        setPerformerDrafts(
+          (currentDrafts) => {
+            const nextDrafts = {
+              ...currentDrafts,
+            };
+
+            delete nextDrafts[
+              document.relativePath
+            ];
+
+            return nextDrafts;
+          },
+        );
+        setTechnicalCreditDrafts(
+          (currentDrafts) => {
+            const nextDrafts = {
+              ...currentDrafts,
+            };
+
+            delete nextDrafts[
+              document.relativePath
+            ];
+
+            return nextDrafts;
+          },
+        );
       }
 
+      activeSaveDocument = null;
       await onRefresh();
       setEditMode(false);
 
@@ -5825,12 +7004,12 @@ function ReleaseMetadataDetailView({
 
       onNotify(
         synchronizedTrackFiles > 0
-          ? `${savedCount} ${fileLabel} saved · ${synchronizedTrackFiles} track ${
+          ? `${savedCount} ${fileLabel} saved and verified · ${synchronizedTrackFiles} track ${
               synchronizedTrackFiles === 1
                 ? "file"
                 : "files"
             } synchronized`
-          : `${savedCount} ${fileLabel} saved`,
+          : `${savedCount} ${fileLabel} saved and verified`,
         "success",
       );
     } catch (error) {
@@ -5845,6 +7024,18 @@ function ReleaseMetadataDetailView({
         error instanceof Error
           ? error.message
           : "Unknown metadata save error";
+
+      if (activeSaveDocument) {
+        recordMetadataActivity(
+          createMetadataActivityEntry({
+            releaseId: detail.releaseId,
+            document: activeSaveDocument,
+            action: "save",
+            status: "failed",
+            message,
+          }),
+        );
+      }
 
       setSaveError(message);
       onNotify(
@@ -5870,6 +7061,8 @@ function ReleaseMetadataDetailView({
       document.relativePath,
     );
     setSaveError(null);
+
+    let writeVerified = false;
 
     try {
       const response = await fetch(
@@ -5915,6 +7108,25 @@ function ReleaseMetadataDetailView({
         );
       }
 
+      const receipt =
+        result as ScalarMetadataSaveReceipt;
+
+      recordMetadataActivity(
+        createMetadataActivityEntry({
+          releaseId: detail.releaseId,
+          document,
+          action: "add-fields",
+          status: "verified",
+          message: `${fields.length} ${
+            fields.length === 1
+              ? "metadata field was"
+              : "metadata fields were"
+          } added and verified.`,
+          receipt,
+        }),
+      );
+      writeVerified = true;
+
       await onRefresh();
       onNotify(
         `${fields.length} ${
@@ -5930,6 +7142,17 @@ function ReleaseMetadataDetailView({
           ? error.message
           : "Unknown metadata field creation error";
 
+      if (!writeVerified) {
+        recordMetadataActivity(
+          createMetadataActivityEntry({
+            releaseId: detail.releaseId,
+            document,
+            action: "add-fields",
+            status: "failed",
+            message,
+          }),
+        );
+      }
       setSaveError(message);
       onNotify(
         "Metadata fields could not be added",
@@ -5940,8 +7163,190 @@ function ReleaseMetadataDetailView({
     }
   };
 
+  const removeMetadataField = async (
+    document: ParsedMetadataDocument,
+    field: MetadataFieldDefinition,
+  ) => {
+    const removalKey = buildDocumentDraftKey(
+      document,
+      field.tomlPath,
+    );
+
+    setRemovingFieldKey(removalKey);
+    setSaveError(null);
+
+    let writeVerified = false;
+
+    try {
+      const response = await fetch(
+        "/api/library/delete-metadata-fields",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: detail.releaseId,
+            relativePath:
+              document.relativePath,
+            originalSha256:
+              document.sha256,
+            paths: [field.tomlPath],
+          }),
+        },
+      );
+
+      const result =
+        (await response.json()) as
+          | ScalarMetadataSaveReceipt
+          | {
+              error?: string;
+            };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error ??
+                `Field removal failed: HTTP ${response.status}`
+            : `Field removal failed: HTTP ${response.status}`,
+        );
+      }
+
+      const receipt =
+        result as ScalarMetadataSaveReceipt;
+
+      recordMetadataActivity(
+        createMetadataActivityEntry({
+          releaseId: detail.releaseId,
+          document,
+          action: "remove-fields",
+          status: "verified",
+          message: `${field.label} was removed and verified.`,
+          receipt,
+        }),
+      );
+      writeVerified = true;
+
+      // A deleted field must not leave a stale browser draft behind.
+      setDraft((currentDraft) => {
+        const nextDraft = {
+          ...currentDraft,
+        };
+
+        delete nextDraft[removalKey];
+        return nextDraft;
+      });
+
+      await onRefresh();
+      onNotify(
+        `${field.label} removed`,
+        "success",
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown metadata field removal error";
+
+      if (!writeVerified) {
+        recordMetadataActivity(
+          createMetadataActivityEntry({
+            releaseId: detail.releaseId,
+            document,
+            action: "remove-fields",
+            status: "failed",
+            message,
+          }),
+        );
+      }
+
+      setSaveError(message);
+      onNotify(
+        "Metadata field could not be removed",
+        "error",
+      );
+    } finally {
+      setRemovingFieldKey(null);
+    }
+  };
+
+  const createTrackCreditsDocument = async (
+    file: MetadataFileStatus,
+  ) => {
+    setCreatingTrackCreditsPath(
+      file.relativePath,
+    );
+    setSaveError(null);
+
+    try {
+      const response = await fetch(
+        "/api/library/create-track-credits-document",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: detail.releaseId,
+            relativePath:
+              file.relativePath,
+          }),
+        },
+      );
+
+      const result =
+        (await response.json()) as
+          | {
+              created?: string[];
+            }
+          | {
+              error?: string;
+            };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error ??
+                `Credits-file creation failed: HTTP ${response.status}`
+            : `Credits-file creation failed: HTTP ${response.status}`,
+        );
+      }
+
+      setPendingInitialTechnicalCreditPath(
+        file.relativePath,
+      );
+      await onRefresh();
+      onNotify(
+        "Technical credits are ready to edit",
+        "success",
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown track-credits document creation error";
+
+      setPendingInitialTechnicalCreditPath(
+        null,
+      );
+      setSaveError(message);
+      onNotify(
+        "Technical credits could not be initialized",
+        "error",
+      );
+    } finally {
+      setCreatingTrackCreditsPath(
+        null,
+      );
+    }
+  };
+
   const discardDraft = () => {
     setDraft({});
+    setPerformerDrafts({});
+    setTechnicalCreditDrafts({});
     setEditMode(false);
     onNotify(
       "Changes discarded",
@@ -5982,6 +7387,21 @@ function ReleaseMetadataDetailView({
     ]),
   );
 
+
+  const findMissingTrackCreditsFile = (
+    trackId: string,
+  ): MetadataFileStatus | undefined =>
+    release?.tracks
+      .find(
+        (track) =>
+          track.id === trackId,
+      )
+      ?.metadataFiles.find(
+        (file) =>
+          !file.exists &&
+          file.filename ===
+            "track-credits.toml",
+      );
 
   const metadataEntryIds = [
     "release",
@@ -6032,13 +7452,37 @@ function ReleaseMetadataDetailView({
           `${document.relativePath}::`,
       );
 
-    return Object.keys(draft).filter(
-      (draftKey) =>
-        documentPrefixes.some(
-          (prefix) =>
-            draftKey.startsWith(prefix),
-        ),
-    ).length;
+    const scalarCount =
+      Object.keys(draft).filter(
+        (draftKey) =>
+          documentPrefixes.some(
+            (prefix) =>
+              draftKey.startsWith(
+                prefix,
+              ),
+          ),
+      ).length;
+
+    const performerCount =
+      documents.filter(
+        (document) =>
+          performerDrafts[
+            document.relativePath
+          ] !== undefined,
+      ).length;
+    const technicalCreditCount =
+      documents.filter(
+        (document) =>
+          technicalCreditDrafts[
+            document.relativePath
+          ] !== undefined,
+      ).length;
+
+    return (
+      scalarCount +
+      performerCount +
+      technicalCreditCount
+    );
   };
 
   const releaseDraftCount =
@@ -6057,13 +7501,21 @@ function ReleaseMetadataDetailView({
 
   const inferredTracks = trackIds
     .map(inferTrackSummary)
-    .map((track) => ({
-      ...track,
-      title: formatInferredTrackTitle(
-        track.title,
-        inferredReleaseTitle,
-      ),
-    }));
+    .map((track) => {
+      const titleMetadata =
+        inferTrackTitleMetadata(
+          track.title,
+          inferredReleaseTitle,
+        );
+
+      return {
+        ...track,
+        title: titleMetadata.title,
+        version: titleMetadata.version,
+        displayTitle:
+          titleMetadata.displayTitle,
+      };
+    });
 
   const inferredReleaseArtist =
     inferCommonReleaseArtist(
@@ -6103,6 +7555,9 @@ function ReleaseMetadataDetailView({
             track.number ?? index + 1,
           artist: track.artist,
           title: track.title,
+          version: track.version,
+          displayTitle:
+            track.displayTitle,
         }),
       ),
     });
@@ -6116,7 +7571,9 @@ function ReleaseMetadataDetailView({
     field:
       | "trackNumber"
       | "artist"
-      | "title",
+      | "title"
+      | "version"
+      | "displayTitle",
     value: string,
   ) => {
     setStarterDraft((current) => {
@@ -6127,19 +7584,57 @@ function ReleaseMetadataDetailView({
       return {
         ...current,
         tracks: current.tracks.map(
-          (track) =>
-            track.trackId === trackId
-              ? {
-                  ...track,
-                  [field]:
-                    field === "trackNumber"
-                      ? Number.parseInt(
-                          value,
-                          10,
-                        ) || 0
-                      : value,
-                }
-              : track,
+          (track) => {
+            if (track.trackId !== trackId) {
+              return track;
+            }
+
+            if (field === "trackNumber") {
+              return {
+                ...track,
+                trackNumber:
+                  Number.parseInt(
+                    value,
+                    10,
+                  ) || 0,
+              };
+            }
+
+            if (
+              field === "title" ||
+              field === "version"
+            ) {
+              const previousGeneratedTitle =
+                formatTrackDisplayTitle(
+                  track.title,
+                  track.version,
+                );
+              const nextTrack = {
+                ...track,
+                [field]: value,
+              };
+              const nextGeneratedTitle =
+                formatTrackDisplayTitle(
+                  nextTrack.title,
+                  nextTrack.version,
+                );
+
+              return {
+                ...nextTrack,
+                displayTitle:
+                  !track.displayTitle.trim() ||
+                  track.displayTitle ===
+                    previousGeneratedTitle
+                    ? nextGeneratedTitle
+                    : track.displayTitle,
+              };
+            }
+
+            return {
+              ...track,
+              [field]: value,
+            };
+          },
         ),
       };
     });
@@ -6397,6 +7892,28 @@ function ReleaseMetadataDetailView({
             </section>
 
             <section className="menu-card">
+              <h2>Activity Log</h2>
+              <p>
+                {metadataActivityEntries.length === 0
+                  ? "No metadata writes recorded in this browser session."
+                  : `${metadataActivityEntries.length} recent metadata ${
+                      metadataActivityEntries.length === 1
+                        ? "event"
+                        : "events"
+                    } in this browser session.`}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setActivityLogOpen(true);
+                  setDetailMenuOpen(false);
+                }}
+              >
+                View activity log
+              </button>
+            </section>
+
+            <section className="menu-card">
               <h2>Admin</h2>
               <label className="admin-toggle">
                 <input
@@ -6420,6 +7937,16 @@ function ReleaseMetadataDetailView({
           </aside>
         )}
       </header>
+
+      {activityLogOpen && (
+        <MetadataActivityLogModal
+          entries={metadataActivityEntries}
+          onClose={() =>
+            setActivityLogOpen(false)
+          }
+          onClear={clearActivityLog}
+        />
+      )}
 
       <section
         className={[
@@ -6533,37 +8060,21 @@ function ReleaseMetadataDetailView({
                   : "Save edits"}
               </button>
 
-              <button
-                type="button"
-                disabled={
-                  savingAll ||
-                  savingDocumentPath !== null ||
-                  addingFieldsPath !== null
-                }
-                onClick={() => {
-                  if (dirtyCount === 0) {
-                    setEditMode(false);
-                    return;
+              {dirtyCount > 0 && (
+                <button
+                  type="button"
+                  disabled={
+                    savingAll ||
+                    savingDocumentPath !== null ||
+                    addingFieldsPath !== null
                   }
-
-                  discardDraft();
-                }}
-              >
-                {dirtyCount === 0
-                  ? "Done editing"
-                  : "Discard edits"}
-              </button>
+                  onClick={discardDraft}
+                >
+                  Discard edits
+                </button>
+              )}
             </>
-          ) : (
-            <button
-              type="button"
-              onClick={() =>
-                setEditMode(true)
-              }
-            >
-              Edit metadata
-            </button>
-          )}
+          ) : null}
         </div>
       </section>
 
@@ -6571,49 +8082,6 @@ function ReleaseMetadataDetailView({
         <p className="message error">
           {saveError}
         </p>
-      )}
-
-      {saveReceipt && (
-        <section className="save-receipt">
-          <div>
-            <strong>Metadata saved and verified</strong>
-            <code>{saveReceipt.relativePath}</code>
-          </div>
-
-          <dl>
-            <div>
-              <dt>Backup</dt>
-              <dd>
-                <code>
-                  {saveReceipt.backupRelativePath}
-                </code>
-              </dd>
-            </div>
-
-            <div>
-              <dt>SHA-256</dt>
-              <dd>
-                <code>
-                  {saveReceipt.savedSha256}
-                </code>
-              </dd>
-            </div>
-
-            <div>
-              <dt>Bytes</dt>
-              <dd>{saveReceipt.bytes}</dd>
-            </div>
-
-            <div>
-              <dt>Saved</dt>
-              <dd>
-                {new Date(
-                  saveReceipt.savedAt,
-                ).toLocaleString()}
-              </dd>
-            </div>
-          </dl>
-        </section>
       )}
 
       {isMetadataEmpty && (
@@ -6776,6 +8244,8 @@ function ReleaseMetadataDetailView({
                   <span>No.</span>
                   <span>Artist</span>
                   <span>Track title</span>
+                  <span>Track version</span>
+                  <span>Display title</span>
                 </div>
 
                 {starterDraft.tracks.map(
@@ -6821,6 +8291,57 @@ function ReleaseMetadataDetailView({
                           )
                         }
                       />
+                      <SelectOrCustomMetadataInput
+                        value={track.version}
+                        options={
+                          recommendedTrackVersionOptions
+                        }
+                        selectLabel={`${track.trackId} track version`}
+                        customPlaceholder="Custom track version"
+                        onChange={(value) =>
+                          updateStarterTrack(
+                            track.trackId,
+                            "version",
+                            value,
+                          )
+                        }
+                      />
+                      <label className="starter-display-title-field">
+                        <input
+                          aria-label={`${track.trackId} display title`}
+                          value={track.displayTitle}
+                          onChange={(event) =>
+                            updateStarterTrack(
+                              track.trackId,
+                              "displayTitle",
+                              event.target.value,
+                            )
+                          }
+                        />
+                        <button
+                          type="button"
+                          className="starter-use-generated-title"
+                          disabled={
+                            track.displayTitle ===
+                            formatTrackDisplayTitle(
+                              track.title,
+                              track.version,
+                            )
+                          }
+                          onClick={() =>
+                            updateStarterTrack(
+                              track.trackId,
+                              "displayTitle",
+                              formatTrackDisplayTitle(
+                                track.title,
+                                track.version,
+                              ),
+                            )
+                          }
+                        >
+                          Use generated
+                        </button>
+                      </label>
                     </div>
                   ),
                 )}
@@ -7015,7 +8536,7 @@ function ReleaseMetadataDetailView({
                     inferredTracks.find(
                       (track) =>
                         track.id === trackId,
-                    )?.title ??
+                    )?.displayTitle ??
                       formatReleaseTitle(trackId),
                   )}
                 </small>
@@ -7050,9 +8571,30 @@ function ReleaseMetadataDetailView({
             releaseDocuments
           }
           editMode={editMode}
+          canFinishEditing={
+            editMode && dirtyCount === 0
+          }
+          onBeginEdit={() =>
+            setEditMode(true)
+          }
+          onDoneEditing={() =>
+            setEditMode(false)
+          }
           draft={draft}
+          performerDrafts={
+            performerDrafts
+          }
+          technicalCreditDrafts={
+            technicalCreditDrafts
+          }
           onDraftValueChange={
             updateDraftValue
+          }
+          onPerformerDraftChange={
+            updatePerformerDraft
+          }
+          onTechnicalCreditDraftChange={
+            updateTechnicalCreditDraft
           }
           metadataRegistry={
             metadataRegistry
@@ -7066,8 +8608,27 @@ function ReleaseMetadataDetailView({
           addingFieldsPath={
             addingFieldsPath
           }
+          removingFieldKey={
+            removingFieldKey
+          }
+          creatingTrackCredits={
+            false
+          }
+          onCreateTrackCreditsDocument={(
+            file,
+          ) =>
+            void createTrackCreditsDocument(
+              file,
+            )
+          }
           onAddFields={
             addMetadataFields
+          }
+          onRemoveField={(document, field) =>
+            void removeMetadataField(
+              document,
+              field,
+            )
           }
           onSaveDocument={(document) =>
             void saveDocumentDraft(document)
@@ -7088,9 +8649,30 @@ function ReleaseMetadataDetailView({
               releaseDocuments
             }
             editMode={editMode}
+            canFinishEditing={
+              editMode && dirtyCount === 0
+            }
+            onBeginEdit={() =>
+              setEditMode(true)
+            }
+            onDoneEditing={() =>
+              setEditMode(false)
+            }
             draft={draft}
+            performerDrafts={
+              performerDrafts
+            }
+            technicalCreditDrafts={
+              technicalCreditDrafts
+            }
             onDraftValueChange={
               updateDraftValue
+            }
+            onPerformerDraftChange={
+              updatePerformerDraft
+            }
+            onTechnicalCreditDraftChange={
+              updateTechnicalCreditDraft
             }
             metadataRegistry={
               metadataRegistry
@@ -7104,8 +8686,35 @@ function ReleaseMetadataDetailView({
             addingFieldsPath={
               addingFieldsPath
             }
+            removingFieldKey={
+              removingFieldKey
+            }
+            missingTrackCreditsFile={
+              findMissingTrackCreditsFile(
+                trackId,
+              )
+            }
+            creatingTrackCredits={
+              creatingTrackCreditsPath ===
+              findMissingTrackCreditsFile(
+                trackId,
+              )?.relativePath
+            }
+            onCreateTrackCreditsDocument={(
+              file,
+            ) =>
+              void createTrackCreditsDocument(
+                file,
+              )
+            }
             onAddFields={
               addMetadataFields
+            }
+            onRemoveField={(document, field) =>
+              void removeMetadataField(
+                document,
+                field,
+              )
             }
             onSaveDocument={(document) =>
               void saveDocumentDraft(document)
@@ -7215,57 +8824,6 @@ function inferTrackSummary(
   };
 }
 
-function formatInferredTrackTitle(
-  title: string,
-  releaseTitle: string,
-): string {
-  /*
-   * Release folders commonly use names such as "Nebula Remixes"
-   * while track folders use "Nebula Original Mix" or
-   * "Nebula feat. Saiin". Use the shared release-title base to
-   * present the mix/version portion in parentheses.
-   */
-  const releaseBase = releaseTitle
-    .replace(
-      /\s+(?:Remixes|Remix Collection)$/i,
-      "",
-    )
-    .trim();
-
-  if (
-    releaseBase &&
-    title.toLowerCase().startsWith(
-      `${releaseBase.toLowerCase()} `,
-    )
-  ) {
-    const suffix = title
-      .slice(releaseBase.length)
-      .trim();
-
-    if (
-      /^(?:original mix|.+ remix|feat\.\s+.+)$/i.test(
-        suffix,
-      )
-    ) {
-      return `${releaseBase} (${suffix})`;
-    }
-  }
-
-  /*
-   * Preserve useful featured-artist punctuation even when the
-   * track title does not share the inferred release-title base.
-   */
-  const featuredArtistMatch = title.match(
-    /^(.*?)\s+(feat\.\s+.+)$/i,
-  );
-
-  if (featuredArtistMatch) {
-    return `${featuredArtistMatch[1]} (${featuredArtistMatch[2]})`;
-  }
-
-  return title;
-}
-
 function readTrackDisplayTitle(
   trackId: string,
   documents: ParsedMetadataDocument[],
@@ -7281,16 +8839,39 @@ function readTrackDisplayTitle(
     trackDocument?.parsed.track;
 
   if (
-    typeof trackValue === "object" &&
-    trackValue !== null &&
-    "title" in trackValue &&
-    typeof trackValue.title === "string" &&
-    trackValue.title.trim()
+    typeof trackValue !== "object" ||
+    trackValue === null
   ) {
-    return trackValue.title.trim();
+    return inferredTitle;
   }
 
-  return inferredTitle;
+  const trackRecord =
+    trackValue as Record<string, unknown>;
+  const displayTitle =
+    typeof trackRecord.display_title ===
+      "string"
+      ? trackRecord.display_title.trim()
+      : "";
+
+  if (displayTitle) {
+    return displayTitle;
+  }
+
+  const title =
+    typeof trackRecord.title === "string"
+      ? trackRecord.title
+      : "";
+  const version =
+    typeof trackRecord.version === "string"
+      ? trackRecord.version
+      : "";
+  const generatedTitle =
+    formatTrackDisplayTitle(
+      title,
+      version,
+    );
+
+  return generatedTitle || inferredTitle;
 }
 
 function inferCommonReleaseArtist(
@@ -7473,30 +9054,60 @@ function MetadataDocumentSection({
   documents,
   releaseDocuments,
   editMode,
+  canFinishEditing,
+  onBeginEdit,
+  onDoneEditing,
   draft,
+  performerDrafts,
+  technicalCreditDrafts,
   onDraftValueChange,
+  onPerformerDraftChange,
+  onTechnicalCreditDraftChange,
   metadataRegistry,
   activeMetadataTab,
   savingDocumentPath,
   addingFieldsPath,
+  removingFieldKey,
+  missingTrackCreditsFile,
+  creatingTrackCredits,
   onSaveDocument,
   onAddFields,
+  onRemoveField,
+  onCreateTrackCreditsDocument,
 }: {
   title: string;
   documents: ParsedMetadataDocument[];
   releaseDocuments: ParsedMetadataDocument[];
   editMode: boolean;
+  canFinishEditing: boolean;
+  onBeginEdit: () => void;
+  onDoneEditing: () => void;
   draft: MetadataDraft;
+  performerDrafts: PerformerDraftMap;
+  technicalCreditDrafts:
+    TechnicalCreditDraftMap;
   onDraftValueChange: (
     document: ParsedMetadataDocument,
     metadataPath: string,
     originalValue: EditableMetadataValue,
     nextValue: EditableMetadataValue,
   ) => void;
+  onPerformerDraftChange: (
+    document: ParsedMetadataDocument,
+    records: PerformerRecordDraft[],
+  ) => void;
+  onTechnicalCreditDraftChange: (
+    document: ParsedMetadataDocument,
+    records: PerformerRecordDraft[],
+  ) => void;
   metadataRegistry: MetadataFieldDefinition[];
   activeMetadataTab: ReleaseMetadataTab;
   savingDocumentPath: string | null;
   addingFieldsPath: string | null;
+  removingFieldKey: string | null;
+  missingTrackCreditsFile?:
+    MetadataFileStatus;
+  creatingTrackCredits: boolean;
   onSaveDocument: (
     document: ParsedMetadataDocument,
   ) => void;
@@ -7504,7 +9115,37 @@ function MetadataDocumentSection({
     document: ParsedMetadataDocument,
     fields: MetadataFieldDefinition[],
   ) => void;
+  onRemoveField: (
+    document: ParsedMetadataDocument,
+    field: MetadataFieldDefinition,
+  ) => void;
+  onCreateTrackCreditsDocument: (
+    file: MetadataFileStatus,
+  ) => void;
 }) {
+  const releaseTechnicalCredits =
+    releaseDocuments.flatMap(
+      (releaseDocument) =>
+        releaseDocument.filename ===
+        "release.toml"
+          ? readTechnicalCreditRecords(
+              releaseDocument,
+            )
+          : [],
+    );
+  const groupedReleaseTechnicalCredits =
+    groupPersonRoleDisplayRecords(
+      sortTechnicalCreditDisplayRecords(
+        releaseTechnicalCredits.map(
+          (record) => ({
+            key: record.key,
+            name: record.name,
+            role: record.role,
+            sortName: record.sortName,
+          }),
+        ),
+      ),
+    );
 
   return (
     <section className="metadata-detail-section">
@@ -7524,6 +9165,82 @@ function MetadataDocumentSection({
         </header>
       )}
 
+      {activeMetadataTab ===
+        "recording" &&
+        missingTrackCreditsFile && (
+          <div className="technical-credit-file-empty-state">
+            <div>
+              <strong>
+                Recording, mixing and mastering credits
+              </strong>
+              <p>
+                {groupedReleaseTechnicalCredits.length > 0
+                  ? "This track is using the release-level technical-credit defaults. Create a track credits document only when this track needs an override."
+                  : "No track-credits.toml document exists for this track yet."}
+              </p>
+
+              {groupedReleaseTechnicalCredits.length > 0 && (
+                <div className="missing-track-inherited-credit-list">
+                  {groupedReleaseTechnicalCredits.map(
+                    (credit) => (
+                      <div key={credit.key}>
+                        <strong>
+                          {credit.roles.join(", ")}
+                        </strong>
+                        <span>{credit.name}</span>
+                        <small>
+                          Inherited from release
+                        </small>
+                      </div>
+                    ),
+                  )}
+                </div>
+              )}
+            </div>
+
+            {editMode ? (
+              <button
+                type="button"
+                className={[
+                  "performer-add-button",
+                  creatingTrackCredits
+                    ? "is-loading"
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                disabled={
+                  creatingTrackCredits
+                }
+                aria-busy={
+                  creatingTrackCredits
+                }
+                onClick={() =>
+                  onCreateTrackCreditsDocument(
+                    missingTrackCreditsFile,
+                  )
+                }
+              >
+                <span aria-hidden="true">
+                  +
+                </span>
+                <span>
+                  {creatingTrackCredits
+                    ? "Preparing technical credits…"
+                    : groupedReleaseTechnicalCredits.length > 0
+                      ? "Add track override"
+                      : "Add technical credits"}
+                </span>
+              </button>
+            ) : (
+              <small>
+                Enter Edit mode to add the first technical
+                credit.
+              </small>
+            )}
+          </div>
+        )}
+
       {documents.length === 0 ? (
         <p className="empty-state">
           No metadata documents exist for this selection yet.
@@ -7538,9 +9255,42 @@ function MetadataDocumentSection({
                 releaseDocuments
               }
               editMode={editMode}
+              canFinishEditing={
+                canFinishEditing
+              }
+              onBeginEdit={onBeginEdit}
+              onDoneEditing={
+                onDoneEditing
+              }
               draft={draft}
+              performerDraft={
+                performerDrafts[
+                  document.relativePath
+                ]
+              }
+              technicalCreditDraft={
+                technicalCreditDrafts[
+                  document.relativePath
+                ]
+              }
               onDraftValueChange={
                 onDraftValueChange
+              }
+              onPerformerDraftChange={(
+                records,
+              ) =>
+                onPerformerDraftChange(
+                  document,
+                  records,
+                )
+              }
+              onTechnicalCreditDraftChange={(
+                records,
+              ) =>
+                onTechnicalCreditDraftChange(
+                  document,
+                  records,
+                )
               }
               metadataRegistry={
                 metadataRegistry
@@ -7556,8 +9306,14 @@ function MetadataDocumentSection({
                 addingFieldsPath ===
                 document.relativePath
               }
+              removingFieldKey={
+                removingFieldKey
+              }
               onAddFields={
                 onAddFields
+              }
+              onRemoveField={
+                onRemoveField
               }
               onSave={() =>
                 onSaveDocument(document)
@@ -7626,9 +9382,367 @@ function MetadataCompatibilityNotes({
 }
 
 
+const controlledVocabularyOtherValue =
+  "__metadata_other__";
+
+function findControlledVocabularyOption(
+  value: string,
+  options: readonly string[],
+): string | undefined {
+  const normalizedValue = value
+    .trim()
+    .toLocaleLowerCase();
+
+  if (!normalizedValue) {
+    return undefined;
+  }
+
+  return options.find(
+    (option) =>
+      option.trim().toLocaleLowerCase() ===
+      normalizedValue,
+  );
+}
+
+function SelectOrCustomMetadataInput({
+  value,
+  options,
+  onChange,
+  selectLabel,
+  customLabel = "Other…",
+  customPlaceholder = "Enter a custom value",
+  ariaInvalid,
+}: {
+  value: string;
+  options: readonly string[];
+  onChange: (value: string) => void;
+  selectLabel: string;
+  customLabel?: string;
+  customPlaceholder?: string;
+  ariaInvalid?: boolean;
+}) {
+  const matchedOption =
+    findControlledVocabularyOption(
+      value,
+      options,
+    );
+  const [customMode, setCustomMode] =
+    useState(
+      value.trim().length > 0 &&
+        matchedOption === undefined,
+    );
+
+  useEffect(() => {
+    if (matchedOption) {
+      setCustomMode(false);
+      return;
+    }
+
+    if (value.trim()) {
+      setCustomMode(true);
+      return;
+    }
+
+    setCustomMode(false);
+  }, [matchedOption, value]);
+
+  const customValue = matchedOption
+    ? ""
+    : value;
+
+  return (
+    <span
+      className={[
+        "controlled-vocabulary-input",
+        customMode ? "is-custom" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <select
+        aria-label={selectLabel}
+        aria-invalid={ariaInvalid}
+        value={
+          customMode
+            ? controlledVocabularyOtherValue
+            : matchedOption ?? ""
+        }
+        onChange={(event) => {
+          const nextValue =
+            event.target.value;
+
+          if (
+            nextValue ===
+            controlledVocabularyOtherValue
+          ) {
+            setCustomMode(true);
+            return;
+          }
+
+          setCustomMode(false);
+          onChange(nextValue);
+        }}
+      >
+        <option value="">
+          Select a standard value…
+        </option>
+        {options.map((option) => (
+          <option
+            key={option}
+            value={option}
+          >
+            {option}
+          </option>
+        ))}
+        <option
+          value={
+            controlledVocabularyOtherValue
+          }
+        >
+          {customLabel}
+        </option>
+      </select>
+
+      {customMode && (
+        <input
+          type="text"
+          aria-label={`${selectLabel} custom value`}
+          aria-invalid={ariaInvalid}
+          value={customValue}
+          placeholder={customPlaceholder}
+          onChange={(event) =>
+            onChange(event.target.value)
+          }
+        />
+      )}
+    </span>
+  );
+}
+
+
+function GuidedRightsStatementInput({
+  path,
+  symbol,
+  value,
+  onChange,
+}: {
+  path: string;
+  symbol: RightsStatementSymbol;
+  value: string;
+  onChange: (nextValue: string) => void;
+}) {
+  const parsedValue =
+    parseGuidedRightsStatement(
+      value,
+      symbol,
+    );
+  const [customMode, setCustomMode] =
+    useState(parsedValue === null);
+  const initialGuidedParts =
+    parsedValue ?? {
+      year: "",
+      holder: "",
+    };
+  const [guidedYear, setGuidedYear] =
+    useState(initialGuidedParts.year);
+  const [guidedHolder, setGuidedHolder] =
+    useState(initialGuidedParts.holder);
+
+  // Preserve partial years and spaces while controlled inputs rerender.
+  const lastEmittedGuidedValue =
+    useRef<string | null>(null);
+
+  useEffect(() => {
+    const nextParsedValue =
+      parseGuidedRightsStatement(
+        value,
+        symbol,
+      );
+
+    setCustomMode(nextParsedValue === null);
+    setGuidedYear(
+      nextParsedValue?.year ?? "",
+    );
+    setGuidedHolder(
+      nextParsedValue?.holder ?? "",
+    );
+    lastEmittedGuidedValue.current = null;
+  }, [path, symbol]);
+
+  useEffect(() => {
+    if (
+      value ===
+      lastEmittedGuidedValue.current
+    ) {
+      lastEmittedGuidedValue.current = null;
+      return;
+    }
+
+    const nextParsedValue =
+      parseGuidedRightsStatement(
+        value,
+        symbol,
+      );
+
+    if (nextParsedValue === null) {
+      return;
+    }
+
+    setGuidedYear(nextParsedValue.year);
+    setGuidedHolder(nextParsedValue.holder);
+  }, [symbol, value]);
+
+  if (customMode) {
+    return (
+      <span className="guided-rights-input is-custom">
+        <input
+          type="text"
+          aria-label="Custom rights statement"
+          value={value}
+          placeholder={
+            symbol === "℗"
+              ? "℗ 2026 Rights Holder"
+              : "© 2026 Rights Holder"
+          }
+          onChange={(event) =>
+            onChange(event.target.value)
+          }
+        />
+
+        <button
+          type="button"
+          className="guided-rights-mode-button"
+          onClick={() =>
+            setCustomMode(false)
+          }
+        >
+          Use guided fields
+        </button>
+
+        {parsedValue === null &&
+          value.trim() !== "" && (
+            <small className="guided-rights-note">
+              This existing custom value remains unchanged
+              until a guided field is edited.
+            </small>
+          )}
+      </span>
+    );
+  }
+
+  const parts = {
+    year: guidedYear,
+    holder: guidedHolder,
+  };
+  const updateParts = (
+    year: string,
+    holder: string,
+  ) => {
+    // Keep the exact in-progress input locally. The emitted TOML value
+    // remains normalized and never requires a literal symbol entry.
+    setGuidedYear(year);
+    setGuidedHolder(holder);
+
+    const nextValue =
+      formatGuidedRightsStatement(
+        symbol,
+        year,
+        holder,
+      );
+
+    lastEmittedGuidedValue.current =
+      nextValue;
+    onChange(nextValue);
+  };
+
+  return (
+    <span className="guided-rights-input">
+      <span
+        className="guided-rights-symbol"
+        aria-label={
+          symbol === "℗"
+            ? "Phonographic copyright symbol"
+            : "Copyright symbol"
+        }
+        title={
+          symbol === "℗"
+            ? "Phonographic copyright"
+            : "Copyright"
+        }
+      >
+        {symbol}
+      </span>
+
+      <input
+        type="text"
+        inputMode="numeric"
+        aria-label="Rights year"
+        value={parts.year}
+        placeholder="Year"
+        maxLength={4}
+        onChange={(event) => {
+          const nextYear =
+            event.target.value
+              .replace(/\D/g, "")
+              .slice(0, 4);
+
+          updateParts(
+            nextYear,
+            parts.holder,
+          );
+        }}
+      />
+
+      <input
+        type="text"
+        aria-label="Rights holder name"
+        value={parts.holder}
+        placeholder="Person or entity name"
+        onChange={(event) =>
+          updateParts(
+            parts.year,
+            event.target.value,
+          )
+        }
+      />
+
+      <button
+        type="button"
+        className="guided-rights-mode-button"
+        onClick={() =>
+          setCustomMode(true)
+        }
+      >
+        Custom value
+      </button>
+
+      <small className="guided-rights-preview">
+        Value preview: {
+          formatGuidedRightsStatement(
+            symbol,
+            parts.year,
+            parts.holder,
+          ) || "Blank"
+        }
+      </small>
+    </span>
+  );
+}
+
+
+function isMultilineLyricsPath(
+  path: string,
+): boolean {
+  return /^track\.text\.(lyrics|synchronized_lyrics|unsynchronized_lyrics|translation)$/.test(
+    path,
+  );
+}
+
+
 function MetadataValueCell({
   document,
   row,
+  field,
   inheritedValue,
   inheritedSourcePath,
   editMode,
@@ -7637,6 +9751,7 @@ function MetadataValueCell({
 }: {
   document: ParsedMetadataDocument;
   row: FlattenedMetadataRow;
+  field?: MetadataFieldDefinition;
   inheritedValue?: EditableMetadataValue;
   inheritedSourcePath?: string;
   editMode: boolean;
@@ -7688,6 +9803,9 @@ function MetadataValueCell({
             ? "metadata-value blank"
             : "metadata-value",
           changed ? "draft-changed" : "",
+          isMultilineLyricsPath(row.path)
+            ? "multiline-metadata-value"
+            : "",
         ]
           .filter(Boolean)
           .join(" ")}
@@ -7860,6 +9978,220 @@ function MetadataValueCell({
     );
   }
 
+  if (
+    typeof currentValue === "string" &&
+    isMultilineLyricsPath(row.path)
+  ) {
+    const lineCount =
+      currentValue.split("\n").length;
+
+    return (
+      <label className="metadata-editor-field multiline-lyrics-field">
+        <textarea
+          rows={Math.min(
+            24,
+            Math.max(12, lineCount + 2),
+          )}
+          value={currentValue}
+          placeholder="Enter complete lyrics with one lyrical line per line. Use a blank line between stanzas."
+          spellCheck="true"
+          onChange={(event) =>
+            onDraftValueChange(
+              document,
+              row.path,
+              originalValue,
+              event.target.value,
+            )
+          }
+        />
+
+        <span className="multiline-lyrics-help">
+          Preserve intentional line and stanza breaks.
+        </span>
+
+        {changed && (
+          <span className="changed-indicator">
+            Modified
+          </span>
+        )}
+      </label>
+    );
+  }
+
+  const rightsStatementSymbol =
+    typeof currentValue === "string"
+      ? getRightsStatementSymbol(row.path)
+      : null;
+
+  if (
+    rightsStatementSymbol &&
+    typeof currentValue === "string"
+  ) {
+    return (
+      <div className="metadata-editor-field guided-rights-field">
+        <GuidedRightsStatementInput
+          path={row.path}
+          symbol={rightsStatementSymbol}
+          value={currentValue}
+          onChange={(nextValue) =>
+            onDraftValueChange(
+              document,
+              row.path,
+              originalValue,
+              nextValue,
+            )
+          }
+        />
+
+        {usingInheritedValue &&
+          !changed && (
+          <span className="metadata-inherited-note">
+            Inherited from release
+          </span>
+        )}
+
+        {changed && (
+          <span className="changed-indicator">
+            {usingInheritedValue
+              ? "Track override"
+              : "Modified"}
+          </span>
+        )}
+      </div>
+    );
+  }
+
+  const controlledVocabulary =
+    field?.editor?.control ===
+      "select-or-custom" &&
+    typeof currentValue === "string"
+      ? {
+          editor: field.editor,
+          value: currentValue,
+        }
+      : null;
+
+  if (controlledVocabulary) {
+    return (
+      <label className="metadata-editor-field controlled-vocabulary-field">
+        <SelectOrCustomMetadataInput
+          value={controlledVocabulary.value}
+          options={
+            controlledVocabulary.editor.options
+          }
+          selectLabel={`Select ${field?.label ?? row.path}`}
+          customLabel={
+            controlledVocabulary.editor.customLabel
+          }
+          customPlaceholder={
+            controlledVocabulary.editor.customPlaceholder
+          }
+          onChange={(nextValue) =>
+            onDraftValueChange(
+              document,
+              row.path,
+              originalValue,
+              nextValue,
+            )
+          }
+        />
+
+        {usingInheritedValue &&
+          !changed && (
+          <span className="metadata-inherited-note">
+            Inherited from release
+          </span>
+        )}
+
+        {changed && (
+          <span className="changed-indicator">
+            {usingInheritedValue
+              ? "Track override"
+              : "Modified"}
+          </span>
+        )}
+      </label>
+    );
+  }
+
+  if (
+    row.path === "track.display_title" &&
+    typeof currentValue === "string"
+  ) {
+    const localTrackTitle =
+      readDocumentDraftString(
+        document,
+        "track.title",
+        draft,
+      );
+    const localTrackVersion =
+      readDocumentDraftString(
+        document,
+        "track.version",
+        draft,
+      );
+    const generatedDisplayTitle =
+      formatTrackDisplayTitle(
+        localTrackTitle,
+        localTrackVersion,
+      );
+    const matchesGeneratedTitle =
+      currentValue.trim() ===
+      generatedDisplayTitle;
+
+    return (
+      <label className="metadata-editor-field track-display-title-field">
+        <input
+          type="text"
+          value={currentValue}
+          onChange={(event) =>
+            onDraftValueChange(
+              document,
+              row.path,
+              originalValue,
+              event.target.value,
+            )
+          }
+        />
+
+        {generatedDisplayTitle && (
+          <span className="track-display-title-suggestion">
+            <span>
+              Suggested: {generatedDisplayTitle}
+            </span>
+
+            <button
+              type="button"
+              disabled={matchesGeneratedTitle}
+              onClick={() =>
+                onDraftValueChange(
+                  document,
+                  row.path,
+                  originalValue,
+                  generatedDisplayTitle,
+                )
+              }
+            >
+              {matchesGeneratedTitle
+                ? "Using generated title"
+                : "Use generated title"}
+            </button>
+          </span>
+        )}
+
+        <small className="track-display-title-help">
+          Generated from Track Title plus the local Track Version. Existing custom wording is preserved until you choose the suggestion.
+        </small>
+
+        {changed && (
+          <span className="changed-indicator">
+            Modified
+          </span>
+        )}
+      </label>
+    );
+  }
+
   return (
     <label className="metadata-editor-field">
       <input
@@ -7875,9 +10207,18 @@ function MetadataValueCell({
         }
       />
 
+      {usingInheritedValue &&
+        !changed && (
+        <span className="metadata-inherited-note">
+          Inherited from release
+        </span>
+      )}
+
       {changed && (
         <span className="changed-indicator">
-          Modified
+          {usingInheritedValue
+            ? "Track override"
+            : "Modified"}
         </span>
       )}
     </label>
@@ -7911,12 +10252,12 @@ function metadataRowMatchesTab(
     return group === "Artwork";
   }
 
-  const isLyricsCopyright =
-    lowerPath ===
-      "track.text.lyrics_copyright";
-
-  const isLyricsOrLanguage =
-    !isLyricsCopyright &&
+  const isLyricsRelated =
+    [
+      "Language & Writing System",
+      "Lyrics",
+      "Lyrics Rights & Source",
+    ].includes(group) ||
     (
       /(^|\.)(lyrics?|language|script|translation)(\.|\[|$)/.test(
         lowerPath,
@@ -7932,7 +10273,7 @@ function metadataRowMatchesTab(
     );
 
   if (tab === "lyrics") {
-    return isLyricsOrLanguage;
+    return isLyricsRelated;
   }
 
   if (tab === "credits") {
@@ -7955,10 +10296,7 @@ function metadataRowMatchesTab(
   }
 
   if (tab === "rights") {
-    return (
-      group === "Music Business & Rights" ||
-      isLyricsCopyright
-    );
+    return group === "Music Business & Rights";
   }
 
   if (tab === "notes") {
@@ -7974,6 +10312,9 @@ function metadataRowMatchesTab(
     "Artists",
     "Performers",
     "Writing, Lyrics & Language",
+    "Language & Writing System",
+    "Lyrics",
+    "Lyrics Rights & Source",
     "Arrangement",
     "Production",
     "Recording and Editing",
@@ -7986,8 +10327,7 @@ function metadataRowMatchesTab(
     "Files and Sources",
     "Developer / Advanced",
   ].includes(group) &&
-    !isLyricsOrLanguage &&
-    !isLyricsCopyright &&
+    !isLyricsRelated &&
     !isWritingCredit;
 }
 
@@ -8005,6 +10345,43 @@ type ReleaseContributorRecord = {
   index: number;
   rows: ReleaseContributorRowItem[];
 };
+
+const engineeringContributorGroups =
+  new Set([
+    "Recording and Editing",
+    "Mixing",
+    "Mastering",
+  ]);
+
+const engineeringCreditSummaryGroup =
+  "Recording, Mixing & Mastering Credits";
+
+function getTrackContributorRecordIndex(
+  path: string,
+): number | null {
+  const match = path.match(
+    /^track\.contributors\[(\d+)\]\./,
+  );
+
+  if (!match) {
+    return null;
+  }
+
+  const parsedIndex = Number.parseInt(
+    match[1] ?? "",
+    10,
+  );
+
+  return Number.isInteger(parsedIndex)
+    ? parsedIndex
+    : null;
+}
+
+function getTrackContributorLeaf(
+  path: string,
+): string {
+  return path.split(".").at(-1) ?? path;
+}
 
 function getReleaseContributorRecordIndex(
   path: string,
@@ -8089,37 +10466,1147 @@ function metadataStorageRoleForFilename(
   return roles[filename] ?? "";
 }
 
+function PerformerRecordEditor({
+  document,
+  records,
+  editMode,
+  metadataRegistry,
+  relatedOpen,
+  onRelatedToggle,
+  onChange,
+}: {
+  document: ParsedMetadataDocument;
+  records: PerformerRecordDraft[];
+  editMode: boolean;
+  metadataRegistry: MetadataFieldDefinition[];
+  relatedOpen: boolean;
+  onRelatedToggle: (
+    event: React.SyntheticEvent<
+      HTMLDetailsElement
+    >,
+  ) => void;
+  onChange: (
+    records: PerformerRecordDraft[],
+  ) => void;
+}) {
+  const nameField =
+    findRegisteredMetadataField(
+      metadataRegistry,
+      "track.performers[0].name",
+    );
+  const roleField =
+    findRegisteredMetadataField(
+      metadataRegistry,
+      "track.performers[0].role",
+    );
+  const sortNameField =
+    findRegisteredMetadataField(
+      metadataRegistry,
+      "track.performers[0].sort_name",
+    );
+  const performanceRoleOptions =
+    roleField?.editor?.options ??
+    roleField?.presentation?.commonValues ??
+    [];
+
+  const updateRecord = (
+    recordIndex: number,
+    updates: Partial<
+      Pick<
+        PerformerRecordDraft,
+        "name" | "role" | "sortName"
+      >
+    >,
+  ) => {
+    onChange(
+      records.map(
+        (record, index) =>
+          index === recordIndex
+            ? {
+                ...record,
+                ...updates,
+              }
+            : record,
+      ),
+    );
+  };
+
+  const addRecord = () => {
+    if (records.length >= 500) {
+      return;
+    }
+
+    onChange([
+      ...records,
+      {
+        key: [
+          "new",
+          Date.now(),
+          records.length,
+        ].join("-"),
+        sourceIndex: null,
+        name: "",
+        role: "",
+        sortName: "",
+      },
+    ]);
+  };
+
+  const removeRecord = (
+    recordIndex: number,
+  ) => {
+    const record =
+      records[recordIndex];
+
+    if (!record) {
+      return;
+    }
+
+    const hasContent = [
+      record.name,
+      record.role,
+      record.sortName,
+    ].some(
+      (value) =>
+        value.trim().length > 0,
+    );
+
+    if (
+      hasContent &&
+      !window.confirm(
+        `Remove performer ${
+          record.name.trim() ||
+          recordIndex + 1
+        } and the paired performance role?`,
+      )
+    ) {
+      return;
+    }
+
+    onChange(
+      records.filter(
+        (_, index) =>
+          index !== recordIndex,
+      ),
+    );
+  };
+
+  const groupedRecords =
+    groupPersonRoleDisplayRecords(
+      records.map((record) => ({
+        key: record.key,
+        name: record.name,
+        role: record.role,
+        sortName: record.sortName,
+      })),
+    );
+  const showSortNames =
+    editMode
+      ? records.some(
+          (record) =>
+            record.sortName.trim(),
+        ) || records.length > 0
+      : groupedRecords.some(
+          (record) =>
+            record.sortNames.length > 0,
+        );
+  const incompleteCount =
+    records.filter(
+      (record) =>
+        !record.name.trim() ||
+        !record.role.trim(),
+    ).length;
+
+  return (
+    <div className="performer-record-editor">
+      <div className="performer-record-toolbar">
+        <div>
+          <div className="credit-pair-help-heading">
+            <strong>Performer name and role</strong>
+            <MetadataFieldPairControls
+              title="Performer name and role"
+              description="Each performer record keeps one credited name paired with one performance role. Repeat the same name in edit mode when one performer has several roles; read-only mode groups those roles into one summary row."
+              nameField={nameField}
+              namePath="track.performers[].name"
+              roleField={roleField}
+              rolePath="track.performers[].role"
+              nameGuidance="Enter the performer name exactly as supplied by the artist, liner notes, or release documentation."
+              roleGuidance="Enter one performed role per record. Add another record with the same name when the performer has another instrument or vocal role."
+              nameExample="Nathan Brenton"
+              roleExample="vocals"
+              commonRoleValues={
+                performanceRoleOptions
+              }
+            />
+          </div>
+          <p>
+            Keep each performer name paired with
+            the role they performed.
+          </p>
+
+          {editMode &&
+            incompleteCount > 0 && (
+            <p className="performer-validation-message">
+              {incompleteCount} incomplete{" "}
+              {incompleteCount === 1
+                ? "record needs"
+                : "records need"}{" "}
+              both a name and role before saving.
+            </p>
+          )}
+        </div>
+
+        {editMode && (
+          <button
+            type="button"
+            className="performer-add-button"
+            disabled={records.length >= 500}
+            onClick={addRecord}
+          >
+            <span aria-hidden="true">+</span>
+            <span>Add performer</span>
+          </button>
+        )}
+      </div>
+
+      {records.length === 0 ? (
+        <div className="performer-empty-state">
+          <p>
+            No performers have been added.
+          </p>
+
+          {editMode && (
+            <button
+              type="button"
+              className="performer-add-button"
+              onClick={addRecord}
+            >
+              <span aria-hidden="true">+</span>
+              <span>Add first performer</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          <div
+            className={[
+              "performer-record-column-headings",
+              !editMode
+                ? "is-read-only"
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          >
+            <div>
+              <strong>Name</strong>
+            </div>
+
+            <div>
+              <strong>Performance role</strong>
+            </div>
+
+            {editMode && (
+              <span className="sr-only">
+                Record actions
+              </span>
+            )}
+          </div>
+
+          <div className="performer-record-list">
+            {editMode
+              ? records.map(
+                  (record, recordIndex) => (
+                    <div
+                      key={record.key}
+                      className={[
+                        "performer-record-row",
+                        !record.name.trim() ||
+                        !record.role.trim()
+                          ? "is-incomplete"
+                          : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                    >
+                      <label>
+                        <span className="sr-only">
+                          Performer{" "}
+                          {recordIndex + 1} name
+                        </span>
+                        <input
+                          type="text"
+                          value={record.name}
+                          aria-invalid={
+                            !record.name.trim()
+                          }
+                          placeholder="Performer name"
+                          onChange={(event) =>
+                            updateRecord(
+                              recordIndex,
+                              {
+                                name:
+                                  event.target.value,
+                              },
+                            )
+                          }
+                        />
+                      </label>
+
+                      <label>
+                        <span className="sr-only">
+                          Performer{" "}
+                          {recordIndex + 1} role
+                        </span>
+                        <SelectOrCustomMetadataInput
+                          value={record.role}
+                          options={
+                            performanceRoleOptions
+                          }
+                          selectLabel={`Select performer ${recordIndex + 1} role`}
+                          customPlaceholder="Custom performance role"
+                          ariaInvalid={
+                            !record.role.trim()
+                          }
+                          onChange={(nextRole) =>
+                            updateRecord(
+                              recordIndex,
+                              {
+                                role: nextRole,
+                              },
+                            )
+                          }
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        className="performer-remove-button"
+                        aria-label={`Remove performer ${recordIndex + 1}`}
+                        title="Remove performer and role"
+                        onClick={() =>
+                          removeRecord(
+                            recordIndex,
+                          )
+                        }
+                      >
+                        <span aria-hidden="true">
+                          −
+                        </span>
+                      </button>
+                    </div>
+                  ),
+                )
+              : groupedRecords.map(
+                  (record) => (
+                    <div
+                      key={record.key}
+                      className="performer-record-row is-read-only is-grouped-display"
+                    >
+                      <span>
+                        {record.name ||
+                          "(name not entered)"}
+                      </span>
+                      <span>
+                        {record.roles.length > 0
+                          ? record.roles.join(", ")
+                          : "(role not entered)"}
+                      </span>
+                    </div>
+                  ),
+                )}
+          </div>
+
+        </>
+      )}
+
+      {showSortNames &&
+        records.length > 0 && (
+        <details
+          className="metadata-related-tags performer-related-tags"
+          open={relatedOpen}
+          onToggle={onRelatedToggle}
+        >
+          <summary>
+            <span
+              className="metadata-section-triangle"
+              aria-hidden="true"
+            />
+            <span>Related tags</span>
+          </summary>
+
+          <div className="performer-sort-name-list">
+            <header>
+              <strong>
+                Performer sort names
+              </strong>
+              <MetadataFieldControls
+                field={sortNameField}
+                path="track.performers[].sort_name"
+                valueType="string"
+              />
+            </header>
+
+            {editMode
+              ? records.map(
+                  (record, recordIndex) => (
+                    <label key={record.key}>
+                      <span>
+                        {record.name ||
+                          `Performer ${recordIndex + 1}`}
+                      </span>
+
+                      <input
+                        type="text"
+                        value={record.sortName}
+                        placeholder="Last, First"
+                        onChange={(event) =>
+                          updateRecord(
+                            recordIndex,
+                            {
+                              sortName:
+                                event.target.value,
+                            },
+                          )
+                        }
+                      />
+                    </label>
+                  ),
+                )
+              : groupedRecords
+                  .filter(
+                    (record) =>
+                      record.sortNames.length > 0,
+                  )
+                  .map((record) => (
+                    <label key={record.key}>
+                      <span>
+                        {record.name ||
+                          "(name not entered)"}
+                      </span>
+                      <span>
+                        {record.sortNames.join(", ")}
+                      </span>
+                    </label>
+                  ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
+
+function TechnicalCreditRecordEditor({
+  document,
+  records,
+  inheritedRecords = [],
+  releaseDefaultRecords = [],
+  editMode,
+  metadataRegistry,
+  relatedOpen,
+  onRelatedToggle,
+  onChange,
+}: {
+  document: ParsedMetadataDocument;
+  records: PerformerRecordDraft[];
+  inheritedRecords?: PerformerRecordDraft[];
+  releaseDefaultRecords?: PerformerRecordDraft[];
+  editMode: boolean;
+  metadataRegistry: MetadataFieldDefinition[];
+  relatedOpen: boolean;
+  onRelatedToggle: (
+    event: React.SyntheticEvent<
+      HTMLDetailsElement
+    >,
+  ) => void;
+  onChange: (
+    records: PerformerRecordDraft[],
+  ) => void;
+}) {
+  const contributorPath =
+    getTechnicalContributorPath(
+      document,
+    );
+  const indexedContributorPath =
+    contributorPath.replace(
+      ".contributors",
+      ".contributors[0]",
+    );
+  const genericContributorPath =
+    contributorPath.replace(
+      ".contributors",
+      ".contributors[]",
+    );
+  const nameField =
+    findRegisteredMetadataField(
+      metadataRegistry,
+      `${indexedContributorPath}.name`,
+    );
+  const roleField =
+    findRegisteredMetadataField(
+      metadataRegistry,
+      `${indexedContributorPath}.role`,
+    );
+  const sortNameField =
+    findRegisteredMetadataField(
+      metadataRegistry,
+      `${indexedContributorPath}.sort_name`,
+    );
+  const contributorRoleOptions =
+    roleField?.editor?.options ??
+    roleField?.presentation?.commonValues ??
+    [];
+  const technicalRoleOptions =
+    contributorRoleOptions.filter(
+      isTechnicalContributorRoleValue,
+    );
+  const isReleaseCreditEditor =
+    document.scope === "release";
+
+  const updateRecord = (
+    recordIndex: number,
+    updates: Partial<
+      Pick<
+        PerformerRecordDraft,
+        "name" | "role" | "sortName"
+      >
+    >,
+  ) => {
+    onChange(
+      records.map(
+        (record, index) =>
+          index === recordIndex
+            ? {
+                ...record,
+                ...updates,
+              }
+            : record,
+      ),
+    );
+  };
+
+  const addRecord = (
+    initial?: Partial<
+      Pick<
+        PerformerRecordDraft,
+        "name" | "role" | "sortName"
+      >
+    >,
+  ) => {
+    if (records.length >= 500) {
+      return;
+    }
+
+    onChange([
+      ...records,
+      {
+        key: [
+          "new-technical",
+          document.scope,
+          Date.now(),
+          records.length,
+        ].join("-"),
+        sourceIndex: null,
+        name: initial?.name ?? "",
+        role: initial?.role ?? "",
+        sortName:
+          initial?.sortName ?? "",
+      },
+    ]);
+  };
+
+  const removeRecord = (
+    recordIndex: number,
+  ) => {
+    const record =
+      records[recordIndex];
+
+    if (!record) {
+      return;
+    }
+
+    const hasContent = [
+      record.name,
+      record.role,
+      record.sortName,
+    ].some(
+      (value) =>
+        value.trim().length > 0,
+    );
+
+    if (
+      hasContent &&
+      !window.confirm(
+        `Remove technical credit ${
+          record.name.trim() ||
+          recordIndex + 1
+        } and the paired role?`,
+      )
+    ) {
+      return;
+    }
+
+    onChange(
+      records.filter(
+        (_, index) =>
+          index !== recordIndex,
+      ),
+    );
+  };
+
+  const restoreReleaseRole = (
+    role: string,
+  ) => {
+    const overrideKey =
+      technicalCreditOverrideKey(role);
+    const matchingCount =
+      records.filter(
+        (record) =>
+          technicalCreditOverrideKey(
+            record.role,
+          ) === overrideKey,
+      ).length;
+
+    if (
+      matchingCount > 0 &&
+      !window.confirm(
+        `Remove ${matchingCount} track-level ${
+          matchingCount === 1
+            ? "credit"
+            : "credits"
+        } for “${role}” and use the release default?`,
+      )
+    ) {
+      return;
+    }
+
+    onChange(
+      records.filter(
+        (record) =>
+          technicalCreditOverrideKey(
+            record.role,
+          ) !== overrideKey,
+      ),
+    );
+  };
+
+  const groupedLocalRecords =
+    groupPersonRoleDisplayRecords(
+      sortTechnicalCreditDisplayRecords(
+        records.map((record) => ({
+          key: record.key,
+          name: record.name,
+          role: record.role,
+          sortName: record.sortName,
+        })),
+      ),
+    );
+  const groupedInheritedRecords =
+    groupPersonRoleDisplayRecords(
+      sortTechnicalCreditDisplayRecords(
+        inheritedRecords.map((record) => ({
+          key: record.key,
+          name: record.name,
+          role: record.role,
+          sortName: record.sortName,
+        })),
+      ),
+    );
+  const readOnlyGroupedRecords = [
+    ...groupedLocalRecords.map(
+      (record, sourceIndex) => ({
+        record,
+        inherited: false,
+        sourceIndex,
+      }),
+    ),
+    ...groupedInheritedRecords.map(
+      (record, sourceIndex) => ({
+        record,
+        inherited: true,
+        sourceIndex:
+          groupedLocalRecords.length +
+          sourceIndex,
+      }),
+    ),
+  ].sort((left, right) => {
+    const priorityDifference =
+      getTechnicalCreditDisplayPriority(
+        left.record.roles[0] ?? "",
+      ) -
+      getTechnicalCreditDisplayPriority(
+        right.record.roles[0] ?? "",
+      );
+
+    return priorityDifference !== 0
+      ? priorityDifference
+      : left.sourceIndex - right.sourceIndex;
+  });
+  const showSortNames =
+    editMode
+      ? records.some(
+          (record) =>
+            record.sortName.trim(),
+        ) || records.length > 0
+      : [
+          ...groupedLocalRecords,
+          ...groupedInheritedRecords,
+        ].some(
+          (record) =>
+            record.sortNames.length > 0,
+        );
+  const incompleteCount =
+    records.filter(
+      (record) =>
+        !record.name.trim() ||
+        !record.role.trim(),
+    ).length;
+  const releaseOverrideKeys =
+    new Set(
+      releaseDefaultRecords.map((record) =>
+        technicalCreditOverrideKey(
+          record.role,
+        ),
+      ),
+    );
+
+  const renderReadOnlyRecord = (
+    record: GroupedPersonRoleDisplay,
+    inherited: boolean,
+  ) => (
+    <div
+      key={`${inherited ? "inherited" : "local"}:${record.key}`}
+      className="performer-record-row is-read-only is-grouped-display"
+    >
+      <span>
+        {record.roles.length > 0
+          ? record.roles.join(", ")
+          : "(role not entered)"}
+      </span>
+      <span>
+        {record.name ||
+          "(name not entered)"}
+        {inherited && (
+          <small className="metadata-inherited-note technical-credit-inherited-note">
+            Inherited from release
+          </small>
+        )}
+      </span>
+    </div>
+  );
+
+  return (
+    <div className="performer-record-editor technical-credit-record-editor">
+      <div className="performer-record-toolbar">
+        <div>
+          <div className="credit-pair-help-heading">
+            <strong>
+              {isReleaseCreditEditor
+                ? "Release technical credit role and name"
+                : "Technical credit role and name"}
+            </strong>
+            <MetadataFieldPairControls
+              title={
+                isReleaseCreditEditor
+                  ? "Release technical credit role and name"
+                  : "Technical credit role and name"
+              }
+              description={
+                isReleaseCreditEditor
+                  ? "Release-level recording, mixing, and mastering credits become defaults for every track. Add one record per credited person and role."
+                  : "Track-level technical credits override matching release defaults by role. Unrelated release roles continue to inherit."
+              }
+              nameField={nameField}
+              namePath={`${genericContributorPath}.name`}
+              roleField={roleField}
+              rolePath={`${genericContributorPath}.role`}
+              nameGuidance="Enter the credited person's name exactly as supplied by the contributor, liner notes, or release documentation."
+              roleGuidance={
+                isReleaseCreditEditor
+                  ? "Use one recording, mixing, or mastering role per record. These credits are inherited by tracks until a track supplies an override for the same role."
+                  : "Use one recording, mixing, or mastering role per record. A track-level role replaces the matching release default while other release credits remain inherited."
+              }
+              nameExample="Nathan Brenton"
+              roleExample="recorded by"
+              commonRoleValues={technicalRoleOptions}
+              fieldOrder="role-name"
+            />
+          </div>
+          <p>
+            {isReleaseCreditEditor
+              ? "Set release-wide defaults, then tailor only the tracks that differ."
+              : "Track credits override matching release defaults; all other release credits remain inherited."}
+          </p>
+
+          {editMode &&
+            incompleteCount > 0 && (
+            <p className="performer-validation-message">
+              {incompleteCount} incomplete{" "}
+              {incompleteCount === 1
+                ? "record needs"
+                : "records need"}{" "}
+              both a name and role before saving.
+            </p>
+          )}
+        </div>
+
+        {editMode && (
+          <button
+            type="button"
+            className="performer-add-button"
+            disabled={records.length >= 500}
+            onClick={() => addRecord()}
+          >
+            <span aria-hidden="true">+</span>
+            <span>Add technical credit</span>
+          </button>
+        )}
+      </div>
+
+      {editMode ? (
+        <>
+          {records.length === 0 ? (
+            <div className="performer-empty-state">
+              <p>
+                {isReleaseCreditEditor
+                  ? "No release-level recording, mixing, or mastering credits have been added."
+                  : inheritedRecords.length > 0
+                    ? "This track currently uses all release-level technical-credit defaults."
+                    : "No recording, mixing, or mastering credits have been added."}
+              </p>
+
+              <button
+                type="button"
+                className="performer-add-button"
+                onClick={() => addRecord()}
+              >
+                <span aria-hidden="true">+</span>
+                <span>
+                  {isReleaseCreditEditor
+                    ? "Add first release credit"
+                    : "Add track override"}
+                </span>
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="performer-record-column-headings">
+                <div>
+                  <strong>
+                    Recording, mixing or mastering role
+                  </strong>
+                </div>
+                <div><strong>Name</strong></div>
+                <span className="sr-only">
+                  Record actions
+                </span>
+              </div>
+
+              <div className="performer-record-list">
+                {records.map(
+                  (record, recordIndex) => {
+                    const canRestoreRelease =
+                      !isReleaseCreditEditor &&
+                      releaseOverrideKeys.has(
+                        technicalCreditOverrideKey(
+                          record.role,
+                        ),
+                      );
+
+                    return (
+                      <div
+                        key={record.key}
+                        className={[
+                          "performer-record-row",
+                          !record.name.trim() ||
+                          !record.role.trim()
+                            ? "is-incomplete"
+                            : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                      >
+                        <label>
+                          <span className="sr-only">
+                            Technical credit {recordIndex + 1} role
+                          </span>
+                          <SelectOrCustomMetadataInput
+                            value={record.role}
+                            options={technicalRoleOptions}
+                            selectLabel={`Select technical credit ${recordIndex + 1} role`}
+                            customPlaceholder="Custom recording, mixing, or mastering role"
+                            ariaInvalid={!record.role.trim()}
+                            onChange={(nextRole) =>
+                              updateRecord(
+                                recordIndex,
+                                { role: nextRole },
+                              )
+                            }
+                          />
+                        </label>
+
+                        <label>
+                          <span className="sr-only">
+                            Technical credit {recordIndex + 1} name
+                          </span>
+                          <input
+                            type="text"
+                            value={record.name}
+                            aria-invalid={!record.name.trim()}
+                            placeholder="Credited person"
+                            onChange={(event) =>
+                              updateRecord(
+                                recordIndex,
+                                { name: event.target.value },
+                              )
+                            }
+                          />
+                        </label>
+
+                        <div className="technical-credit-record-actions">
+                          {canRestoreRelease && (
+                            <button
+                              type="button"
+                              className="technical-credit-use-release-button"
+                              title="Remove track override and restore the release credit"
+                              onClick={() =>
+                                restoreReleaseRole(
+                                  record.role,
+                                )
+                              }
+                            >
+                              Use release credit
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            className="performer-remove-button"
+                            aria-label={`Remove technical credit ${recordIndex + 1}`}
+                            title="Remove credited person and role"
+                            onClick={() =>
+                              removeRecord(recordIndex)
+                            }
+                          >
+                            <span aria-hidden="true">−</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  },
+                )}
+              </div>
+            </>
+          )}
+
+          {!isReleaseCreditEditor &&
+            inheritedRecords.length > 0 && (
+            <section className="inherited-technical-credit-list">
+              <header>
+                <div>
+                  <strong>Inherited release defaults</strong>
+                  <p>
+                    Override only the roles that differ on this track.
+                  </p>
+                </div>
+              </header>
+
+              {sortTechnicalCreditDisplayRecords(
+                inheritedRecords,
+              ).map((record, index) => (
+                  <div
+                    key={record.key}
+                    className="inherited-technical-credit-row"
+                  >
+                    <span>{record.role}</span>
+                    <span>{record.name}</span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        addRecord({
+                          name: record.name,
+                          role: record.role,
+                          sortName: record.sortName,
+                        })
+                      }
+                    >
+                      Override
+                    </button>
+                  </div>
+                ),
+              )}
+            </section>
+          )}
+        </>
+      ) : (
+        <>
+          {readOnlyGroupedRecords.length === 0 ? (
+            <div className="performer-empty-state">
+              <p>
+                No recording, mixing, or mastering credits have been added.
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="performer-record-column-headings is-read-only">
+                <div>
+                  <strong>
+                    Recording, mixing or mastering role
+                  </strong>
+                </div>
+                <div><strong>Name</strong></div>
+              </div>
+              <div className="performer-record-list">
+                {readOnlyGroupedRecords.map(
+                  ({ record, inherited }) =>
+                    renderReadOnlyRecord(
+                      record,
+                      inherited,
+                    ),
+                )}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {showSortNames &&
+        records.length > 0 && (
+        <details
+          className="metadata-related-tags performer-related-tags"
+          open={relatedOpen}
+          onToggle={onRelatedToggle}
+        >
+          <summary>
+            <span
+              className="metadata-section-triangle"
+              aria-hidden="true"
+            />
+            <span>Related tags</span>
+          </summary>
+
+          <div className="performer-sort-name-list">
+            <header>
+              <strong>
+                Contributor sort names
+              </strong>
+              <MetadataFieldControls
+                field={sortNameField}
+                path={`${genericContributorPath}.sort_name`}
+                valueType="string"
+              />
+            </header>
+
+            {editMode
+              ? records.map(
+                  (record, recordIndex) => (
+                    <label key={record.key}>
+                      <span>
+                        {record.name ||
+                          `Technical credit ${recordIndex + 1}`}
+                      </span>
+
+                      <input
+                        type="text"
+                        value={record.sortName}
+                        placeholder="Last, First"
+                        onChange={(event) =>
+                          updateRecord(
+                            recordIndex,
+                            {
+                              sortName:
+                                event.target.value,
+                            },
+                          )
+                        }
+                      />
+                    </label>
+                  ),
+                )
+              : groupedLocalRecords
+                  .filter(
+                    (record) =>
+                      record.sortNames.length > 0,
+                  )
+                  .map((record) => (
+                    <label key={record.key}>
+                      <span>
+                        {record.name ||
+                          "(name not entered)"}
+                      </span>
+                      <span>
+                        {record.sortNames.join(", ")}
+                      </span>
+                    </label>
+                  ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 function MetadataDocumentTable({
   document,
   releaseDocuments,
   editMode,
+  canFinishEditing,
+  onBeginEdit,
+  onDoneEditing,
   draft,
+  performerDraft,
+  technicalCreditDraft,
   onDraftValueChange,
+  onPerformerDraftChange,
+  onTechnicalCreditDraftChange,
   metadataRegistry,
   activeMetadataTab,
   saving,
   addingFields,
+  removingFieldKey,
   onSave,
   onAddFields,
+  onRemoveField,
 }: {
   document: ParsedMetadataDocument;
   releaseDocuments: ParsedMetadataDocument[];
   editMode: boolean;
+  canFinishEditing: boolean;
+  onBeginEdit: () => void;
+  onDoneEditing: () => void;
   draft: MetadataDraft;
+  performerDraft:
+    | PerformerRecordDraft[]
+    | undefined;
+  technicalCreditDraft:
+    | PerformerRecordDraft[]
+    | undefined;
   onDraftValueChange: (
     document: ParsedMetadataDocument,
     metadataPath: string,
     originalValue: EditableMetadataValue,
     nextValue: EditableMetadataValue,
   ) => void;
+  onPerformerDraftChange: (
+    records: PerformerRecordDraft[],
+  ) => void;
+  onTechnicalCreditDraftChange: (
+    records: PerformerRecordDraft[],
+  ) => void;
   metadataRegistry: MetadataFieldDefinition[];
   activeMetadataTab: ReleaseMetadataTab;
   saving: boolean;
   addingFields: boolean;
+  removingFieldKey: string | null;
   onSave: () => void;
   onAddFields: (
     document: ParsedMetadataDocument,
     fields: MetadataFieldDefinition[],
+  ) => void;
+  onRemoveField: (
+    document: ParsedMetadataDocument,
+    field: MetadataFieldDefinition,
   ) => void;
 }) {
   const rows = flattenMetadata(
@@ -8129,6 +11616,13 @@ function MetadataDocumentTable({
     selectedMissingFieldPaths,
     setSelectedMissingFieldPaths,
   ] = useState<string[]>([]);
+  const [
+    pendingFieldRemoval,
+    setPendingFieldRemoval,
+  ] = useState<{
+    field: MetadataFieldDefinition;
+    row: FlattenedMetadataRow;
+  } | null>(null);
   const metadataSectionsRef =
     useRef<HTMLDivElement>(null);
 
@@ -8300,27 +11794,99 @@ function MetadataDocumentTable({
     );
   };
 
-  const allGroupedRows = rows.map(
-    (row, sourceIndex) => {
-      const fieldDefinition =
-        findRegisteredMetadataField(
-          metadataRegistry,
-          row.path,
-        );
+  const renderSectionEditButton = () => {
+    if (editMode && !canFinishEditing) {
+      // Dirty drafts keep the explicit Save/Discard controls in the status bar.
+      return null;
+    }
 
-      return {
-        row,
-        fieldDefinition,
-        group:
-          resolveMetadataRowGroup(
-            rows,
-            row,
-            fieldDefinition,
-          ),
-        sourceIndex,
-      };
-    },
+    return (
+      <button
+        type="button"
+        className="metadata-section-edit-button"
+        disabled={saving || addingFields}
+        onClick={(event) => {
+          // A nested button must not toggle its parent <details> disclosure.
+          event.preventDefault();
+          event.stopPropagation();
+
+          if (editMode) {
+            onDoneEditing();
+            return;
+          }
+
+          onBeginEdit();
+        }}
+      >
+        {editMode
+          ? "Done editing"
+          : "Edit metadata"}
+      </button>
+    );
+  };
+
+  const inheritedOnlyRows =
+    buildMissingInheritedMetadataRows(
+      document,
+      releaseDocuments,
+      metadataRegistry,
+      metadataStorageRoleForFilename(
+        document.filename,
+      ),
+    );
+  const inheritedOnlyPaths = new Set(
+    inheritedOnlyRows.map(
+      (row) => row.path,
+    ),
   );
+
+  const allGroupedRows = [
+    ...rows.map(
+      (row, sourceIndex) => {
+        const fieldDefinition =
+          findRegisteredMetadataField(
+            metadataRegistry,
+            row.path,
+          );
+
+        return {
+          row,
+          fieldDefinition,
+          group:
+            resolveMetadataRowGroup(
+              rows,
+              row,
+              fieldDefinition,
+            ),
+          sourceIndex,
+          inheritedOnly: false,
+        };
+      },
+    ),
+    ...inheritedOnlyRows.map(
+      (row, inheritedIndex) => {
+        const fieldDefinition =
+          findRegisteredMetadataField(
+            metadataRegistry,
+            row.path,
+          );
+
+        return {
+          row,
+          fieldDefinition,
+          group:
+            resolveMetadataRowGroup(
+              rows,
+              row,
+              fieldDefinition,
+            ),
+          sourceIndex:
+            rows.length + inheritedIndex,
+          inheritedOnly: true,
+        };
+      },
+    ),
+  ];
 
   const groupedRows =
     activeMetadataTab === "settings"
@@ -8352,6 +11918,9 @@ function MetadataDocumentTable({
           !existingPaths.has(
             field.tomlPath,
           ) &&
+          !inheritedOnlyPaths.has(
+            field.tomlPath,
+          ) &&
           metadataRowMatchesTab(
             field.tomlPath,
             field.presentation?.group ??
@@ -8370,6 +11939,82 @@ function MetadataDocumentTable({
             Number.MAX_SAFE_INTEGER
           ),
       );
+
+  const supportsPerformerRecords =
+    document.scope === "track" &&
+    document.filename ===
+      "track-credits.toml" &&
+    activeMetadataTab === "credits";
+  const performerRecords =
+    performerDraft ??
+    readPerformerRecords(document);
+  const supportsTechnicalCreditRecords =
+    activeMetadataTab === "recording" &&
+    (
+      (
+        document.scope === "track" &&
+        document.filename ===
+          "track-credits.toml"
+      ) ||
+      (
+        document.scope === "release" &&
+        document.filename ===
+          "release.toml"
+      )
+    );
+  const technicalCreditRecords =
+    technicalCreditDraft ??
+    readTechnicalCreditRecords(
+      document,
+    );
+  const releaseTechnicalCreditRecords =
+    document.scope === "track"
+      ? releaseDocuments.flatMap(
+          (releaseDocument) =>
+            releaseDocument.filename ===
+            "release.toml"
+              ? readTechnicalCreditRecords(
+                  releaseDocument,
+                )
+              : [],
+        )
+      : [];
+  const mergedTechnicalCredits =
+    document.scope === "track"
+      ? mergeInheritedTechnicalCredits(
+          releaseTechnicalCreditRecords,
+          technicalCreditRecords,
+        )
+      : {
+          effective:
+            technicalCreditRecords,
+          inherited: [] as
+            PerformerRecordDraft[],
+        };
+  const effectiveTechnicalCreditRecords =
+    mergedTechnicalCredits.effective;
+  const inheritedTechnicalCreditRecords =
+    mergedTechnicalCredits.inherited;
+  const releaseTechnicalContributorIndexes =
+    new Set(
+      document.scope === "release"
+        ? technicalCreditRecords.flatMap(
+            (record) =>
+              record.sourceIndex === null
+                ? []
+                : [record.sourceIndex],
+          )
+        : [],
+    );
+  const groupedPerformerRecords =
+    groupPersonRoleDisplayRecords(
+      performerRecords.map((record) => ({
+        key: record.key,
+        name: record.name,
+        role: record.role,
+        sortName: record.sortName,
+      })),
+    );
 
   const numberingRows =
     groupedRows
@@ -8479,9 +12124,9 @@ function MetadataDocumentTable({
           const preferredTrackOverviewOrder =
             new Map<string, number>([
               ["track.title", 10],
-              ["track.subtitle", 20],
-              ["track.display_title", 30],
-              ["track.version", 40],
+              ["track.version", 20],
+              ["track.subtitle", 30],
+              ["track.display_title", 40],
               ["track.explicit", 50],
               ["track.classification.genres", 100],
               ["track.classification.styles", 110],
@@ -8579,7 +12224,12 @@ function MetadataDocumentTable({
             item.row.path,
           );
 
-        if (contributorIndex === null) {
+        if (
+          contributorIndex === null ||
+          releaseTechnicalContributorIndexes.has(
+            contributorIndex,
+          )
+        ) {
           return records;
         }
 
@@ -8603,6 +12253,18 @@ function MetadataDocumentTable({
         (left, right) =>
           left.index - right.index,
       );
+
+  const groupedEngineeringCredits =
+    groupPersonRoleDisplayRecords(
+      effectiveTechnicalCreditRecords.map(
+        (record) => ({
+          key: record.key,
+          name: record.name,
+          role: record.role,
+          sortName: record.sortName,
+        }),
+      ),
+    );
 
   const standardSections =
     standardRows.reduce<
@@ -8631,10 +12293,99 @@ function MetadataDocumentTable({
       return sections;
     }, []);
 
+  const visibleStandardSections =
+    standardSections
+      .map((section) => ({
+        ...section,
+        rows: section.rows.filter(
+          ({ row, group }) => {
+            const trackContributorIndex =
+              getTrackContributorRecordIndex(
+                row.path,
+              );
+            const releaseContributorIndex =
+              getReleaseContributorRecordIndex(
+                row.path,
+              );
+
+            return !(
+              supportsTechnicalCreditRecords &&
+              (
+                (
+                  trackContributorIndex !== null &&
+                  engineeringContributorGroups.has(
+                    group,
+                  )
+                ) ||
+                (
+                  releaseContributorIndex !== null &&
+                  releaseTechnicalContributorIndexes.has(
+                    releaseContributorIndex,
+                  )
+                )
+              )
+            );
+          },
+        ),
+      }))
+      .filter(
+        (section) =>
+          section.rows.length > 0,
+      );
+
+  let displayStandardSections =
+    supportsPerformerRecords &&
+    !visibleStandardSections.some(
+      (section) =>
+        section.group ===
+          "Performers",
+    )
+      ? [
+          ...visibleStandardSections,
+          {
+            group: "Performers",
+            rows: [],
+          },
+        ]
+      : visibleStandardSections;
+
+  if (
+    supportsTechnicalCreditRecords
+  ) {
+    const summarySection = {
+      group: engineeringCreditSummaryGroup,
+      rows: [] as Array<
+        (typeof standardRows)[number]
+      >,
+    };
+    const technicalAudioIndex =
+      displayStandardSections.findIndex(
+        (section) =>
+          section.group ===
+            "Technical Audio",
+      );
+    const insertionIndex =
+      technicalAudioIndex >= 0
+        ? technicalAudioIndex
+        : displayStandardSections.length;
+
+    displayStandardSections = [
+      ...displayStandardSections.slice(
+        0,
+        insertionIndex,
+      ),
+      summarySection,
+      ...displayStandardSections.slice(
+        insertionIndex,
+      ),
+    ];
+  }
+
 
   const renderMetadataRow = ({
     row,
     fieldDefinition,
+    inheritedOnly,
   }: (typeof groupedRows)[number]) => {
     const inherited =
       resolveInheritedReleaseValue(
@@ -8671,24 +12422,100 @@ function MetadataDocumentTable({
             path={row.path}
             valueType={row.valueType}
           />
+
+          {editMode &&
+            !inheritedOnly &&
+            fieldDefinition &&
+            !fieldDefinition.required &&
+            fieldDefinition.tomlPath ===
+              row.path &&
+            !row.path.includes("[") &&
+            [
+              "string",
+              "number",
+              "boolean",
+              "string-array",
+            ].includes(row.valueType) && (
+              <button
+                type="button"
+                className="metadata-field-remove-control"
+                aria-label={`Remove ${fieldDefinition.label} field`}
+                title={`Remove ${fieldDefinition.label} field`}
+                disabled={
+                  saving ||
+                  addingFields ||
+                  removingFieldKey !== null
+                }
+                onClick={() =>
+                  setPendingFieldRemoval({
+                    field: fieldDefinition,
+                    row,
+                  })
+                }
+              >
+                {removingFieldKey ===
+                buildDocumentDraftKey(
+                  document,
+                  fieldDefinition.tomlPath,
+                )
+                  ? "…"
+                  : "×"}
+              </button>
+            )}
         </div>
       </div>
 
-      <MetadataValueCell
-        document={document}
-        row={row}
-        inheritedValue={
-          inherited?.value
-        }
-        inheritedSourcePath={
-          inherited?.sourcePath
-        }
-        editMode={editMode}
-        draft={draft}
-        onDraftValueChange={
-          onDraftValueChange
-        }
-      />
+      {inheritedOnly && editMode &&
+      inherited && fieldDefinition ? (
+        <div className="metadata-inherited-override-field">
+          <span className="metadata-value">
+            <span>
+              {formatMetadataValue(
+                inherited.value,
+              )}
+            </span>
+            <small
+              className="metadata-inherited-note"
+              title={`Inherited from ${inherited.sourcePath}`}
+            >
+              Inherited from release
+            </small>
+          </span>
+
+          <button
+            type="button"
+            className="metadata-inherited-override-button"
+            disabled={saving || addingFields}
+            onClick={() =>
+              onAddFields(
+                document,
+                [fieldDefinition],
+              )
+            }
+          >
+            {addingFields
+              ? "Preparing override…"
+              : "Create track override"}
+          </button>
+        </div>
+      ) : (
+        <MetadataValueCell
+          document={document}
+          row={row}
+          field={fieldDefinition}
+          inheritedValue={
+            inherited?.value
+          }
+          inheritedSourcePath={
+            inherited?.sourcePath
+          }
+          editMode={editMode}
+          draft={draft}
+          onDraftValueChange={
+            onDraftValueChange
+          }
+        />
+      )}
     </div>
     );
   };
@@ -8697,7 +12524,14 @@ function MetadataDocumentTable({
     getDocumentDraftChanges(
       document,
       draft,
-    ).length;
+    ).length +
+    (performerDraft !== undefined
+      ? 1
+      : 0) +
+    (technicalCreditDraft !==
+      undefined
+      ? 1
+      : 0);
 
   const isSettingsDocument =
     /settings/i.test(document.filename);
@@ -8715,7 +12549,9 @@ function MetadataDocumentTable({
     !(
       editMode &&
       missingCategoryFields.length > 0
-    )
+    ) &&
+    !supportsPerformerRecords &&
+    !supportsTechnicalCreditRecords
   ) {
     return null;
   }
@@ -8958,6 +12794,8 @@ function MetadataDocumentTable({
                   )}
                 </span>
               )}
+
+              {renderSectionEditButton()}
             </summary>
 
             <div className="metadata-numbering-pairs">
@@ -9099,7 +12937,7 @@ function MetadataDocumentTable({
           </details>
         )}
 
-        {standardSections.map(
+        {displayStandardSections.map(
           (section) => (
             <details
               key={section.group}
@@ -9135,18 +12973,111 @@ function MetadataDocumentTable({
                 </strong>
 
                 <small>
-                  {section.rows.length}
-                  {" "}
-                  {section.rows.length === 1
-                    ? "field"
-                    : "fields"}
+                  {section.group ===
+                  "Performers"
+                    ? editMode
+                      ? `${performerRecords.length} ${
+                          performerRecords.length === 1
+                            ? "credit"
+                            : "credits"
+                        }`
+                      : `${groupedPerformerRecords.length} ${
+                          groupedPerformerRecords.length === 1
+                            ? "performer"
+                            : "performers"
+                        }`
+                    : section.group ===
+                        engineeringCreditSummaryGroup
+                      ? editMode
+                        ? `${technicalCreditRecords.length} ${
+                            technicalCreditRecords.length === 1
+                              ? "credit"
+                              : "credits"
+                          }`
+                        : `${groupedEngineeringCredits.length} ${
+                            groupedEngineeringCredits.length === 1
+                              ? "person"
+                              : "people"
+                          }`
+                      : `${section.rows.length} ${
+                          section.rows.length === 1
+                            ? "field"
+                            : "fields"
+                        }`}
                 </small>
+
+                {renderSectionEditButton()}
               </summary>
 
               <div className="metadata-section-rows">
+                {section.group ===
+                  engineeringCreditSummaryGroup && (
+                  <TechnicalCreditRecordEditor
+                    document={document}
+                    records={
+                      technicalCreditRecords
+                    }
+                    inheritedRecords={
+                      inheritedTechnicalCreditRecords
+                    }
+                    releaseDefaultRecords={
+                      releaseTechnicalCreditRecords
+                    }
+                    editMode={editMode}
+                    metadataRegistry={
+                      metadataRegistry
+                    }
+                    relatedOpen={
+                      metadataSectionOpenState[
+                        `${engineeringCreditSummaryGroup}:related`
+                      ] ?? false
+                    }
+                    onRelatedToggle={(event) =>
+                      handleMetadataSectionToggle(
+                        `${engineeringCreditSummaryGroup}:related`,
+                        event,
+                      )
+                    }
+                    onChange={
+                      onTechnicalCreditDraftChange
+                    }
+                  />
+                )}
+
+                {section.group ===
+                  "Performers" && (
+                  <PerformerRecordEditor
+                    document={document}
+                    records={
+                      performerRecords
+                    }
+                    editMode={editMode}
+                    metadataRegistry={
+                      metadataRegistry
+                    }
+                    relatedOpen={
+                      metadataSectionOpenState[
+                        "Performers:related"
+                      ] ?? false
+                    }
+                    onRelatedToggle={(event) =>
+                      handleMetadataSectionToggle(
+                        "Performers:related",
+                        event,
+                      )
+                    }
+                    onChange={
+                      onPerformerDraftChange
+                    }
+                  />
+                )}
+
                 {section.rows
                   .filter(
                     ({ row }) =>
+                      !isPerformerRecordPath(
+                        row.path,
+                      ) &&
                       getReleaseContributorRecordIndex(
                         row.path,
                       ) === null &&
@@ -9158,6 +13089,9 @@ function MetadataDocumentTable({
 
                 {section.rows.some(
                   ({ row }) =>
+                    !isPerformerRecordPath(
+                      row.path,
+                    ) &&
                     getReleaseContributorRecordIndex(
                       row.path,
                     ) === null &&
@@ -9191,6 +13125,9 @@ function MetadataDocumentTable({
                       {section.rows
                         .filter(
                           ({ row }) =>
+                            !isPerformerRecordPath(
+                              row.path,
+                            ) &&
                             getReleaseContributorRecordIndex(
                               row.path,
                             ) === null &&
@@ -9320,6 +13257,9 @@ function MetadataDocumentTable({
                                             document
                                           }
                                           row={row}
+                                          field={
+                                            fieldDefinition
+                                          }
                                           editMode={
                                             editMode
                                           }
@@ -9388,6 +13328,9 @@ function MetadataDocumentTable({
                                             row={
                                               row
                                             }
+                                            field={
+                                              fieldDefinition
+                                            }
                                             editMode={
                                               editMode
                                             }
@@ -9415,6 +13358,79 @@ function MetadataDocumentTable({
           ),
         )}
       </div>
+
+      {pendingFieldRemoval && (
+        <MetadataFieldModal
+          title={`Remove ${pendingFieldRemoval.field.label}?`}
+          onClose={() =>
+            setPendingFieldRemoval(null)
+          }
+        >
+          <section className="metadata-field-removal-confirmation">
+            <p>
+              This removes the optional field from
+              <code>{document.filename}</code>. A verified backup is
+              created before the TOML document is replaced.
+            </p>
+
+            <dl>
+              <div>
+                <dt>Canonical path</dt>
+                <dd>
+                  <code>
+                    {pendingFieldRemoval.field.tomlPath}
+                  </code>
+                </dd>
+              </div>
+              <div>
+                <dt>Current value</dt>
+                <dd>
+                  {isBlankMetadataValue(
+                    pendingFieldRemoval.row.value,
+                  )
+                    ? "Blank"
+                    : "This field contains a value"}
+                </dd>
+              </div>
+            </dl>
+
+            <p className="metadata-field-removal-warning">
+              Removing a populated field also removes its local value.
+              Inherited release values are not deleted.
+            </p>
+
+            <div className="metadata-field-removal-actions">
+              <button
+                type="button"
+                onClick={() =>
+                  setPendingFieldRemoval(null)
+                }
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={
+                  removingFieldKey !== null
+                }
+                onClick={() => {
+                  const field =
+                    pendingFieldRemoval.field;
+
+                  setPendingFieldRemoval(null);
+                  onRemoveField(
+                    document,
+                    field,
+                  );
+                }}
+              >
+                Remove field
+              </button>
+            </div>
+          </section>
+        </MetadataFieldModal>
+      )}
 
     </article>
   );
@@ -9768,6 +13784,11 @@ function MetadataPreviewPanel({
                 ["Artist", track.artistName],
                 ["Track number", track.trackNumber],
                 ["Track title", track.trackTitle],
+                ["Track version", track.trackVersion],
+                [
+                  "Display title",
+                  track.trackDisplayTitle,
+                ],
                 ["Audio master", track.audioMasterPath],
                 ["Artwork master", track.artworkMasterPath],
               ]}

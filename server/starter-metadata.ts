@@ -1,4 +1,8 @@
 import {
+  formatTrackDisplayTitle,
+} from "../shared/track-title.js";
+
+import {
   parse,
   stringify,
 } from "smol-toml";
@@ -15,6 +19,8 @@ export type StarterTrackInput = {
   trackNumber: number;
   artist: string;
   title: string;
+  version?: string;
+  displayTitle?: string;
 };
 
 export type StarterMetadataInput = {
@@ -170,6 +176,21 @@ export function buildStarterMetadataPlan(
         inputTrack.trackNumber,
       );
 
+      const title = requireText(
+        inputTrack.title,
+        `${track.id} title`,
+      );
+      const version =
+        inputTrack.version?.trim() ?? "";
+      const generatedDisplayTitle =
+        formatTrackDisplayTitle(
+          title,
+          version,
+        );
+      const displayTitle =
+        inputTrack.displayTitle?.trim() ||
+        generatedDisplayTitle;
+
       return {
         scan: track,
         trackNumber:
@@ -178,10 +199,9 @@ export function buildStarterMetadataPlan(
           inputTrack.artist,
           `${track.id} artist`,
         ),
-        title: requireText(
-          inputTrack.title,
-          `${track.id} title`,
-        ),
+        title,
+        version,
+        displayTitle,
       };
     });
 
@@ -271,9 +291,10 @@ export function buildStarterMetadataPlan(
       track: {
         id: track.scan.id,
         title: track.title,
-        version: "",
+        version: track.version,
         subtitle: "",
-        display_title: "",
+        display_title:
+          track.displayTitle,
         sort_title: "",
         language: "",
         script: "",

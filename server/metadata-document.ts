@@ -271,3 +271,94 @@ export function createMetadataValueAtPath(
 
   return createAt(document, 0);
 }
+
+/*
+ * Removes one existing scalar or string-array field and returns a new root
+ * document. Object-only paths are supported so array records cannot be
+ * partially deleted through this generic field-removal flow.
+ *
+ * Empty parent tables created solely for the removed field are pruned while
+ * sibling keys, including unknown authored metadata, remain untouched.
+ */
+export function deleteMetadataValueAtPath(
+  document: unknown,
+  metadataPath:
+    | string
+    | readonly MetadataPathSegment[],
+): unknown {
+  const segments =
+    typeof metadataPath === "string"
+      ? parseMetadataPath(metadataPath)
+      : [...metadataPath];
+
+  if (
+    segments.length === 0 ||
+    segments.some(
+      (segment) => typeof segment === "number",
+    )
+  ) {
+    throw new Error(
+      "Metadata field removal requires a non-array object path.",
+    );
+  }
+
+  // Confirm that the complete path exists before cloning any container.
+  readMetadataValueAtPath(
+    document,
+    segments,
+  );
+
+  if (!isRecord(document)) {
+    throw new Error(
+      "Expected a metadata document object.",
+    );
+  }
+
+  const deleteAt = (
+    current: Record<string, unknown>,
+    segmentIndex: number,
+  ): Record<string, unknown> => {
+    const segment = segments[segmentIndex];
+
+    if (typeof segment !== "string") {
+      throw new Error(
+        "Metadata field removal supports object paths only.",
+      );
+    }
+
+    const clone = {
+      ...current,
+    };
+    const isLeaf =
+      segmentIndex ===
+      segments.length - 1;
+
+    if (isLeaf) {
+      delete clone[segment];
+      return clone;
+    }
+
+    const child = current[segment];
+
+    if (!isRecord(child)) {
+      throw new Error(
+        `Cannot remove metadata below scalar path segment "${segment}".`,
+      );
+    }
+
+    const nextChild = deleteAt(
+      child,
+      segmentIndex + 1,
+    );
+
+    if (Object.keys(nextChild).length === 0) {
+      delete clone[segment];
+    } else {
+      clone[segment] = nextChild;
+    }
+
+    return clone;
+  };
+
+  return deleteAt(document, 0);
+}

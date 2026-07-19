@@ -255,9 +255,11 @@ function buildTrackDocuments(
     track: {
       id: trackId,
       title: preview.trackTitle?.value ?? "",
-      version: "",
+      version: preview.trackVersion?.value ?? "",
       subtitle: "",
-      display_title: "",
+      display_title:
+        preview.trackDisplayTitle?.value ??
+        preview.trackTitle?.value ?? "",
       sort_title: "",
       language: "",
       script: "",

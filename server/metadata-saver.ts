@@ -25,10 +25,15 @@ import {
 import {
   applyMetadataChanges,
   applyMetadataCreations,
+  applyMetadataDeletions,
+  applyPerformerRecords,
+  applyTechnicalContributorRecords,
 } from "./metadata-change-set.js";
 import type {
   ReleaseScanResult,
   MetadataValueChange,
+  PerformerRecordInput,
+  TechnicalContributorRecordInput,
   ScalarMetadataSaveReceipt,
 } from "./types.js";
 
@@ -80,6 +85,16 @@ export async function saveScalarMetadataChanges(
   originalSha256: string,
   changes: MetadataValueChange[],
   createMissing = false,
+  performerRecords?: PerformerRecordInput[],
+  technicalContributorRecords?:
+    TechnicalContributorRecordInput[],
+  managedTechnicalContributorSourceIndexes:
+    number[] = [],
+  technicalContributorPath:
+    | "track.contributors"
+    | "release.credits.contributors" =
+      "track.contributors",
+  deletePaths: string[] = [],
 ): Promise<ScalarMetadataSaveReceipt> {
   if (!/^[a-f0-9]{64}$/.test(originalSha256)) {
     throw new Error(
@@ -87,9 +102,105 @@ export async function saveScalarMetadataChanges(
     );
   }
 
-  if (changes.length === 0) {
+  if (
+    changes.length === 0 &&
+    performerRecords === undefined &&
+    technicalContributorRecords ===
+      undefined &&
+    deletePaths.length === 0
+  ) {
     throw new Error(
-      "At least one scalar metadata change is required",
+      "At least one metadata change is required",
+    );
+  }
+
+  if (
+    createMissing &&
+    (
+      performerRecords !== undefined ||
+      technicalContributorRecords !==
+        undefined
+    )
+  ) {
+    throw new Error(
+      "Field creation and record replacement cannot be combined.",
+    );
+  }
+
+  if (
+    deletePaths.length > 0 &&
+    (
+      createMissing ||
+      changes.length > 0 ||
+      performerRecords !== undefined ||
+      technicalContributorRecords !==
+        undefined
+    )
+  ) {
+    throw new Error(
+      "Field removal must be saved as a separate metadata operation.",
+    );
+  }
+
+  if (
+    performerRecords !== undefined &&
+    path.basename(relativePath) !==
+      "track-credits.toml"
+  ) {
+    throw new Error(
+      "Performer records may only be saved in track-credits.toml.",
+    );
+  }
+
+  if (
+    technicalContributorRecords !==
+      undefined
+  ) {
+    const targetFilename =
+      path.basename(relativePath);
+    const expectedFilename =
+      technicalContributorPath ===
+      "release.credits.contributors"
+        ? "release.toml"
+        : "track-credits.toml";
+
+    if (
+      targetFilename !==
+      expectedFilename
+    ) {
+      throw new Error(
+        technicalContributorPath ===
+        "release.credits.contributors"
+          ? "Release technical contributor records may only be saved in release.toml."
+          : "Technical contributor records may only be saved in track-credits.toml.",
+      );
+    }
+  }
+
+  if (
+    performerRecords !== undefined &&
+    changes.some((change) =>
+      change.path.startsWith(
+        "track.performers",
+      ),
+    )
+  ) {
+    throw new Error(
+      "Indexed performer changes cannot be combined with a performer-record replacement.",
+    );
+  }
+
+  if (
+    technicalContributorRecords !==
+      undefined &&
+    changes.some((change) =>
+      change.path.startsWith(
+        technicalContributorPath,
+      ),
+    )
+  ) {
+    throw new Error(
+      "Indexed contributor changes cannot be combined with a technical-credit replacement.",
     );
   }
 
@@ -150,16 +261,50 @@ export async function saveScalarMetadataChanges(
     );
   }
 
-  const updatedDocument =
-    createMissing
-      ? applyMetadataCreations(
-          parsed,
-          changes,
-        )
-      : applyMetadataChanges(
-          parsed,
-          changes,
-        );
+  let updatedDocument: unknown =
+    parsed;
+
+  if (changes.length > 0) {
+    updatedDocument =
+      createMissing
+        ? applyMetadataCreations(
+            updatedDocument,
+            changes,
+          )
+        : applyMetadataChanges(
+            updatedDocument,
+            changes,
+          );
+  }
+
+  if (deletePaths.length > 0) {
+    updatedDocument =
+      applyMetadataDeletions(
+        updatedDocument,
+        deletePaths,
+      );
+  }
+
+  if (performerRecords !== undefined) {
+    updatedDocument =
+      applyPerformerRecords(
+        updatedDocument,
+        performerRecords,
+      );
+  }
+
+  if (
+    technicalContributorRecords !==
+      undefined
+  ) {
+    updatedDocument =
+      applyTechnicalContributorRecords(
+        updatedDocument,
+        technicalContributorRecords,
+        managedTechnicalContributorSourceIndexes,
+        technicalContributorPath,
+      );
+  }
 
   const updatedContent =
     `${stringify(updatedDocument).trimEnd()}\n`;

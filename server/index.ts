@@ -22,7 +22,10 @@ import {
 import { buildMetadataGenerationPlan } from "./generation-plan.js";
 import { readJsonBody } from "./http.js";
 import { buildMetadataPreview } from "./inference.js";
-import { metadataFieldRegistry } from "./metadata-registry.js";
+import {
+  findMetadataField,
+  metadataFieldRegistry,
+} from "./metadata-registry.js";
 import {
   assertPathWithinRoot,
   resolveMediaRoot,
@@ -49,6 +52,49 @@ const port = Number.parseInt(
   process.env.METADATA_EDITOR_PORT ?? "4174",
   10,
 );
+
+const metadataStorageFilenames: Record<string, string> = {
+  release: "release.toml",
+  track: "track.toml",
+  "track-credits": "track-credits.toml",
+  "track-production": "track-production-notes.toml",
+};
+
+function assertMetadataFieldMayBeRemoved(
+  relativePath: string,
+  metadataPath: string,
+): void {
+  const field = findMetadataField(
+    metadataPath,
+  );
+
+  if (!field) {
+    throw new Error(
+      `Only registered metadata fields may be removed: ${metadataPath}`,
+    );
+  }
+
+  if (field.required) {
+    throw new Error(
+      `Required metadata fields cannot be removed: ${metadataPath}`,
+    );
+  }
+
+  const expectedFilename =
+    metadataStorageFilenames[
+      field.storageFileRole
+    ];
+
+  if (
+    !expectedFilename ||
+    path.basename(relativePath) !==
+      expectedFilename
+  ) {
+    throw new Error(
+      `Metadata field ${metadataPath} does not belong in ${path.basename(relativePath)}.`,
+    );
+  }
+}
 
 
 function parseGenerationScope(
@@ -818,6 +864,127 @@ const server = createServer(
     if (
       request.method === "POST" &&
       requestUrl.pathname ===
+        "/api/library/create-track-credits-document"
+    ) {
+      try {
+        const body =
+          await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error:
+              "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId ===
+            "string"
+            ? body.releaseId
+            : null;
+        const relativePath =
+          "relativePath" in body &&
+          typeof body.relativePath ===
+            "string"
+            ? body.relativePath
+            : null;
+
+        if (!releaseId || !relativePath) {
+          sendJson(response, 400, {
+            error:
+              "releaseId and relativePath are required",
+          });
+          return;
+        }
+
+        const mediaRoot =
+          await resolveMediaRoot();
+        const release =
+          await scanReleaseById(
+            mediaRoot,
+            releaseId,
+          );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error:
+              "Release not found",
+          });
+          return;
+        }
+
+        const track =
+          release.tracks.find(
+            (candidate) =>
+              candidate.metadataFiles.some(
+                (file) =>
+                  !file.exists &&
+                  file.filename ===
+                    "track-credits.toml" &&
+                  file.relativePath ===
+                    relativePath,
+              ),
+          );
+
+        if (!track) {
+          sendJson(response, 409, {
+            error:
+              "Target is not a missing track-credits.toml file in the selected release",
+          });
+          return;
+        }
+
+        const result =
+          await executeMetadataCreationPlan(
+            mediaRoot,
+            {
+              releaseId,
+              scope: "track",
+              trackId: track.id,
+              items: [
+                {
+                  storageRole:
+                    "track-credits",
+                  filename:
+                    "track-credits.toml",
+                  relativePath,
+                  action: "create",
+                  reason:
+                    "Create an empty technical-credit document for browser editing",
+                  content:
+                    "[track]\nperformers = []\ncontributors = []\n",
+                  validated: true,
+                },
+              ],
+              summary: {
+                createCount: 1,
+                blockedCount: 0,
+              },
+              warnings: [],
+            },
+          );
+
+        sendJson(response, 201, result);
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown track-credits document creation error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
         "/api/library/create-metadata-fields"
     ) {
       try {
@@ -958,6 +1125,137 @@ const server = createServer(
       return;
     }
 
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/delete-metadata-fields"
+    ) {
+      try {
+        const body =
+          await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error:
+              "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId ===
+            "string"
+            ? body.releaseId
+            : null;
+
+        const relativePath =
+          "relativePath" in body &&
+          typeof body.relativePath ===
+            "string"
+            ? body.relativePath
+            : null;
+
+        const originalSha256 =
+          "originalSha256" in body &&
+          typeof body.originalSha256 ===
+            "string"
+            ? body.originalSha256
+            : null;
+
+        const metadataPaths =
+          "paths" in body &&
+          Array.isArray(body.paths)
+            ? body.paths
+            : null;
+
+        if (
+          !releaseId ||
+          !relativePath ||
+          !originalSha256 ||
+          !metadataPaths ||
+          metadataPaths.length === 0
+        ) {
+          sendJson(response, 400, {
+            error:
+              "releaseId, relativePath, originalSha256, and at least one path are required",
+          });
+          return;
+        }
+
+        const normalizedPaths =
+          metadataPaths.map(
+            (metadataPath) => {
+              if (
+                typeof metadataPath !==
+                "string"
+              ) {
+                throw new Error(
+                  "Each removable metadata field requires a canonical path.",
+                );
+              }
+
+              assertMetadataFieldMayBeRemoved(
+                relativePath,
+                metadataPath,
+              );
+
+              return metadataPath;
+            },
+          );
+
+        const mediaRoot =
+          await resolveMediaRoot();
+        const release =
+          await scanReleaseById(
+            mediaRoot,
+            releaseId,
+          );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error:
+              "Release not found",
+          });
+          return;
+        }
+
+        const receipt =
+          await saveScalarMetadataChanges(
+            mediaRoot,
+            release,
+            relativePath,
+            originalSha256,
+            [],
+            false,
+            undefined,
+            undefined,
+            [],
+            "track.contributors",
+            normalizedPaths,
+          );
+
+        sendJson(
+          response,
+          200,
+          receipt,
+        );
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown metadata field removal error",
+        });
+      }
+
+      return;
+    }
+
     if (
       request.method === "POST" &&
       requestUrl.pathname ===
@@ -1000,11 +1298,63 @@ const server = createServer(
             ? body.changes
             : null;
 
+        const performers =
+          "performers" in body
+            ? body.performers
+            : undefined;
+
+        const technicalContributors =
+          "technicalContributors" in body
+            ? body.technicalContributors
+            : undefined;
+
+        const managedTechnicalContributorSourceIndexes =
+          "managedTechnicalContributorSourceIndexes" in
+          body
+            ? body.managedTechnicalContributorSourceIndexes
+            : undefined;
+
+        const technicalContributorPath =
+          "technicalContributorPath" in body &&
+          typeof body.technicalContributorPath ===
+            "string"
+            ? body.technicalContributorPath
+            : "track.contributors";
+
         if (
           !releaseId ||
           !relativePath ||
           !originalSha256 ||
-          !changes
+          !changes ||
+          !(
+            performers === undefined ||
+            Array.isArray(performers)
+          ) ||
+          !(
+            technicalContributors ===
+              undefined ||
+            Array.isArray(
+              technicalContributors,
+            )
+          ) ||
+          !(
+            managedTechnicalContributorSourceIndexes ===
+              undefined ||
+            (
+              Array.isArray(
+                managedTechnicalContributorSourceIndexes,
+              ) &&
+              managedTechnicalContributorSourceIndexes.every(
+                (value: unknown) =>
+                  typeof value ===
+                    "number",
+              )
+            )
+          ) ||
+          ![
+            "track.contributors",
+            "release.credits.contributors",
+          ].includes(technicalContributorPath)
         ) {
           sendJson(response, 400, {
             error:
@@ -1045,6 +1395,105 @@ const server = createServer(
             };
           });
 
+        const normalizedPerformers =
+          performers === undefined
+            ? undefined
+            : performers.map(
+                (
+                  performer,
+                  performerIndex,
+                ) => {
+                  if (
+                    typeof performer !==
+                      "object" ||
+                    performer === null ||
+                    !("sourceIndex" in performer) ||
+                    !(
+                      performer.sourceIndex ===
+                        null ||
+                      typeof performer.sourceIndex ===
+                        "number"
+                    ) ||
+                    !("name" in performer) ||
+                    typeof performer.name !==
+                      "string" ||
+                    !("role" in performer) ||
+                    typeof performer.role !==
+                      "string" ||
+                    !("sortName" in performer) ||
+                    typeof performer.sortName !==
+                      "string"
+                  ) {
+                    throw new Error(
+                      `Performer ${performerIndex + 1} requires sourceIndex, name, role, and sortName`,
+                    );
+                  }
+
+                  return {
+                    sourceIndex:
+                      performer.sourceIndex,
+                    name: performer.name,
+                    role: performer.role,
+                    sortName:
+                      performer.sortName,
+                  };
+                },
+              );
+
+        const normalizedTechnicalContributors =
+          technicalContributors ===
+            undefined
+            ? undefined
+            : technicalContributors.map(
+                (
+                  contributor,
+                  contributorIndex,
+                ) => {
+                  if (
+                    typeof contributor !==
+                      "object" ||
+                    contributor === null ||
+                    !("sourceIndex" in
+                      contributor) ||
+                    !(
+                      contributor.sourceIndex ===
+                        null ||
+                      typeof contributor.sourceIndex ===
+                        "number"
+                    ) ||
+                    !("name" in contributor) ||
+                    typeof contributor.name !==
+                      "string" ||
+                    !("role" in contributor) ||
+                    typeof contributor.role !==
+                      "string" ||
+                    !("sortName" in
+                      contributor) ||
+                    typeof contributor.sortName !==
+                      "string"
+                  ) {
+                    throw new Error(
+                      `Technical contributor ${contributorIndex + 1} requires sourceIndex, name, role, and sortName`,
+                    );
+                  }
+
+                  return {
+                    sourceIndex:
+                      contributor.sourceIndex,
+                    name: contributor.name,
+                    role: contributor.role,
+                    sortName:
+                      contributor.sortName,
+                  };
+                },
+              );
+
+        const normalizedManagedTechnicalContributorSourceIndexes =
+          managedTechnicalContributorSourceIndexes ===
+            undefined
+            ? []
+            : managedTechnicalContributorSourceIndexes;
+
         const mediaRoot =
           await resolveMediaRoot();
 
@@ -1068,6 +1517,13 @@ const server = createServer(
             relativePath,
             originalSha256,
             normalizedChanges,
+            false,
+            normalizedPerformers,
+            normalizedTechnicalContributors,
+            normalizedManagedTechnicalContributorSourceIndexes,
+            technicalContributorPath as
+              | "track.contributors"
+              | "release.credits.contributors",
           );
 
         const totals =

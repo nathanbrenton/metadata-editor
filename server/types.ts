@@ -51,6 +51,8 @@ export type TrackMetadataPreview = {
   artistName?: InferredValue<string>;
   trackNumber?: InferredValue<number>;
   trackTitle?: InferredValue<string>;
+  trackVersion?: InferredValue<string>;
+  trackDisplayTitle?: InferredValue<string>;
   audioMasterPath?: InferredValue<string>;
   artworkMasterPath?: InferredValue<string>;
 };
@@ -156,6 +158,20 @@ export type EditableMetadataValue =
 export type MetadataValueChange = {
   path: string;
   value: EditableMetadataValue;
+};
+
+export type PerformerRecordInput = {
+  sourceIndex: number | null;
+  name: string;
+  role: string;
+  sortName: string;
+};
+
+export type TechnicalContributorRecordInput = {
+  sourceIndex: number | null;
+  name: string;
+  role: string;
+  sortName: string;
 };
 
 export type ScalarMetadataSaveRequest = {
@@ -396,6 +412,7 @@ export type MetadataFieldDefinition = {
       | "Artists"
       | "Music Business & Rights"
       | "Dates"
+      | "Musical Analysis"
       | "Track & Disc Numbering"
       | "Movement & Work"
       | "Performers"
@@ -405,6 +422,9 @@ export type MetadataFieldDefinition = {
       | "Mixing"
       | "Mastering"
       | "Writing, Lyrics & Language"
+      | "Language & Writing System"
+      | "Lyrics"
+      | "Lyrics Rights & Source"
       | "Identifiers"
       | "Text and Notes"
       | "Artwork"
@@ -415,6 +435,13 @@ export type MetadataFieldDefinition = {
     commonValues?: string[];
     examples?: string[];
     help?: string;
+  };
+
+  editor?: {
+    control: "select-or-custom";
+    options: string[];
+    customLabel?: string;
+    customPlaceholder?: string;
   };
 
   displayPolicy:

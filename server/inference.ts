@@ -1,3 +1,7 @@
+import {
+  inferTrackTitleMetadata,
+} from "../shared/track-title.js";
+
 import type {
   LibraryMetadataPreview,
   ReleaseMetadataPreview,
@@ -71,6 +75,7 @@ function inferReleasePreview(
 
 function inferTrackPreview(
   track: TrackScanResult,
+  releaseTitle = "",
 ): TrackMetadataPreview {
   const preview: TrackMetadataPreview = {
     trackId: {
@@ -112,10 +117,29 @@ function inferTrackPreview(
     }
 
     if (titleSlug) {
+      const inferredTitle =
+        inferTrackTitleMetadata(
+          humanizeSlug(titleSlug),
+          releaseTitle,
+        );
+
       preview.trackTitle = {
-        value: humanizeSlug(titleSlug),
+        value: inferredTitle.title,
         source: "track directory title segment",
       };
+      preview.trackDisplayTitle = {
+        value: inferredTitle.displayTitle,
+        source:
+          "inferred track title and version",
+      };
+
+      if (inferredTitle.version) {
+        preview.trackVersion = {
+          value: inferredTitle.version,
+          source:
+            "recognized track-version suffix",
+        };
+      }
     }
   }
 
@@ -176,10 +200,19 @@ export function buildMetadataPreview(
     }
   }
 
+  const releasePreview =
+    inferReleasePreview(release);
+  const inferredReleaseTitle =
+    releasePreview.releaseTitle?.value ?? "";
+
   return {
-    release: inferReleasePreview(release),
+    release: releasePreview,
     tracks: release.tracks.map(
-      inferTrackPreview,
+      (track) =>
+        inferTrackPreview(
+          track,
+          inferredReleaseTitle,
+        ),
     ),
     warnings,
   };

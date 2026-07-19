@@ -147,3 +147,53 @@ test(
     );
   },
 );
+
+test(
+  "writes inferred track version and display title",
+  () => {
+    const release: ReleaseScanResult = {
+      id: "2025-09-10_nebula-remixes",
+      relativePath:
+        "releases/2025-09-10_nebula-remixes",
+      metadataFiles: [],
+      artworkMasters: [],
+      tracks: [
+        {
+          id:
+            "nathanbrenton_01_nebula-original-mix",
+          relativePath:
+            "releases/2025-09-10_nebula-remixes/tracks/nathanbrenton_01_nebula-original-mix",
+          metadataFiles: [],
+          audioMasters: [],
+          artworkMasters: [],
+        },
+      ],
+    };
+    const inferred =
+      buildMetadataPreview(release);
+    const generated =
+      buildGeneratedTomlPreview(
+        release,
+        inferred,
+      );
+    const trackDocument =
+      generated.documents.find(
+        (document) =>
+          document.filename === "track.toml",
+      );
+
+    assert.ok(trackDocument);
+    assert.match(
+      trackDocument.content,
+      /title = "Nebula"/,
+    );
+    assert.match(
+      trackDocument.content,
+      /version = "Original Mix"/,
+    );
+    assert.match(
+      trackDocument.content,
+      /display_title = "Nebula \(Original Mix\)"/,
+    );
+  },
+);

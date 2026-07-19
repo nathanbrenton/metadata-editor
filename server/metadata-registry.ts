@@ -1,6 +1,20 @@
 import type {
   MetadataFieldDefinition,
 } from "./types.js";
+import {
+  artworkRoleOptions,
+  camelotKeyOptions,
+  contributorRoleOptions,
+  languageCodeOptions,
+  musicalKeyOptions,
+  performanceRoleOptions,
+  releaseStatusOptions,
+  releaseTypeOptions,
+  releaseVersionOptions,
+  scriptCodeOptions,
+  timeSignatureOptions,
+  trackVersionOptions,
+} from "./metadata-vocabularies.js";
 
 /*
  * Player aliases are populated only after controlled fixture tests.
@@ -199,21 +213,15 @@ export const metadataFieldRegistry:
       required: false,
       repeatable: false,
       inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...releaseTypeOptions],
+        customPlaceholder: "Custom release type",
+      },
       presentation: {
         group: "Release & Track Identity",
         order: 25,
-        commonValues: [
-          "album",
-          "single",
-          "ep",
-          "compilation",
-          "soundtrack",
-          "live",
-          "demo",
-          "mixtape",
-          "remix",
-          "other",
-        ],
+        commonValues: [...releaseTypeOptions],
         examples: [
           "album",
           "single",
@@ -221,6 +229,70 @@ export const metadataFieldRegistry:
         ],
         help:
           "Choose one concise lowercase value and use it consistently across the library. These values are project recommendations rather than a universal embedded-tag standard.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.status",
+      canonicalName: "release.status",
+      label: "Release Status",
+      description:
+        "Publication or lifecycle state of the release.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.status",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...releaseStatusOptions],
+        customPlaceholder: "Custom release status",
+      },
+      presentation: {
+        group: "Release & Track Identity",
+        order: 30,
+        commonValues: [...releaseStatusOptions],
+        examples: [
+          "draft",
+          "official",
+          "archived",
+        ],
+        help:
+          "Choose the release lifecycle state used by this library. Use Other… only when a project-specific state is required.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.version",
+      canonicalName: "release.version",
+      label: "Release Version",
+      description:
+        "Edition or variant label that distinguishes this release from another edition of the same title.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.version",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...releaseVersionOptions],
+        customPlaceholder: "Custom release version",
+      },
+      presentation: {
+        group: "Release & Track Identity",
+        order: 35,
+        commonValues: [...releaseVersionOptions],
+        examples: [
+          "Original Release",
+          "Deluxe Edition",
+          "2026 Remaster",
+        ],
+        help:
+          "Choose a standard edition label when it accurately describes the release. Use Other… for year-specific or label-supplied wording.",
       },
       displayPolicy: "auto",
     },
@@ -267,23 +339,15 @@ export const metadataFieldRegistry:
       required: false,
       repeatable: true,
       inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...contributorRoleOptions],
+        customPlaceholder: "Custom contributor role",
+      },
       presentation: {
         group: "Artists",
         order: 20,
-        commonValues: [
-          "primary artist",
-          "featured artist",
-          "producer",
-          "executive producer",
-          "composer",
-          "songwriter",
-          "lyricist",
-          "arranger",
-          "recording engineer",
-          "mixing engineer",
-          "mastering engineer",
-          "art director",
-        ],
+        commonValues: [...contributorRoleOptions],
         examples: [
           "producer",
           "executive producer",
@@ -493,7 +557,7 @@ export const metadataFieldRegistry:
           "Sine Sweep Up",
         ],
         help:
-          "Enter the base public track title without redundant artist or album text.",
+          "Enter the base public track title without a mix, edit, or version suffix. Use Track Version for wording such as Original Mix or Radio Edit; Track Display Title can then format the combined public title.",
       },
       displayPolicy: "always",
     },
@@ -542,8 +606,8 @@ export const metadataFieldRegistry:
       repeatable: false,
       inherited: false,
       presentation: {
-        group: "Music Business & Rights",
-        order: 70,
+        group: "Lyrics Rights & Source",
+        order: 10,
         examples: [
           "© 2026 Example Music Publishing",
           "Lyrics © 2026 Jane Doe",
@@ -606,6 +670,244 @@ export const metadataFieldRegistry:
       displayPolicy: "auto",
     },
     {
+      id: "track.album_artists[].name",
+      canonicalName:
+        "track.album_artists[].name",
+      label: "Album Artist",
+      description:
+        "Track-level compatibility copy of the artist credited for the release or album.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.album_artists[].name",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: true,
+      presentation: {
+        group: "Artists",
+        order: 80,
+        examples: [
+          "Album Artist",
+          "Various Artists",
+        ],
+        help:
+          "This value normally mirrors release.primary_artist.name for compatibility with players and embedded-tag formats. Use Track Artist for the artist credited on this individual track.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.album_artists[].sort_name",
+      canonicalName:
+        "track.album_artists[].sort_name",
+      label: "Album Artist Sort Name",
+      description:
+        "Optional alphabetical sort form for the track-level Album Artist compatibility value.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.album_artists[].sort_name",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: true,
+      presentation: {
+        group: "Artists",
+        order: 90,
+        examples: [
+          "First Last → Last, First",
+          "The Example Band → Example Band, The",
+        ],
+        help:
+          "This normally mirrors release.primary_artist.sort_name. Leave it blank when the Album Artist display name already sorts correctly.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.subtitle",
+      canonicalName:
+        "track.subtitle",
+      label: "Track Subtitle",
+      description:
+        "Optional secondary title shown beneath or alongside the primary track title.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.subtitle",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: true,
+      presentation: {
+        group: "Release & Track Identity",
+        order: 30,
+        examples: [
+          "Part I",
+          "Live Session",
+        ],
+        help:
+          "A blank track subtitle inherits release.subtitle when available. Enter a value only when this track needs a distinct subtitle.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.dates.release",
+      canonicalName:
+        "track.dates.release",
+      label: "Track Release Date",
+      description:
+        "Date this track or track version was released.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.dates.release",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: true,
+      presentation: {
+        group: "Dates",
+        order: 10,
+        examples: [
+          "2009-05-01",
+          "2026-07-18",
+        ],
+        help:
+          "A blank value inherits release.dates.release. Override it only when this track has a different release date.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.dates.original_release",
+      canonicalName:
+        "track.dates.original_release",
+      label: "Original Release Date",
+      description:
+        "Earliest known release date for this recording or track version.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.dates.original_release",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: true,
+      presentation: {
+        group: "Dates",
+        order: 20,
+        examples: [
+          "2009-05-01",
+          "1998",
+        ],
+        help:
+          "A blank value inherits release.dates.original_release. Override it when the track or recording has a different historical release date.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.rights.copyright",
+      canonicalName:
+        "track.rights.copyright",
+      label: "Track Copyright Notice",
+      description:
+        "Track-specific copyright notice for the composition, text, or associated material.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.rights.copyright",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: true,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 40,
+        examples: [
+          "© 2009 Example Publishing",
+        ],
+        help:
+          "Leave this blank when the release-level copyright notice applies. Add a track override only when ownership or wording differs.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.rights.phonographic_copyright",
+      canonicalName:
+        "track.rights.phonographic_copyright",
+      label: "Sound Recording Copyright",
+      description:
+        "Track-specific ℗ notice covering ownership of the sound recording.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.rights.phonographic_copyright",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: true,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 50,
+        examples: [
+          "℗ 2009 Example Records",
+        ],
+        help:
+          "This ℗ notice applies to the recorded performance. It is distinct from composition, publishing, and lyrics copyright.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.rights.publisher",
+      canonicalName:
+        "track.rights.publisher",
+      label: "Publisher",
+      description:
+        "Publisher associated with the underlying musical work.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.rights.publisher",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: true,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 60,
+        examples: [
+          "Example Music Publishing",
+        ],
+        help:
+          "Leave blank when the release-level publisher applies. Add a track override only when this work has a different publisher.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.rights.license",
+      canonicalName:
+        "track.rights.license",
+      label: "Track License",
+      description:
+        "Optional track-specific license or usage statement.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.rights.license",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: true,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 70,
+        examples: [
+          "All rights reserved",
+        ],
+        help:
+          "Use only when this track has licensing terms that differ from the release-level terms.",
+      },
+      displayPolicy: "auto",
+    },
+    {
       id: "track.version",
       canonicalName: "track.version",
       label: "Track Version",
@@ -617,32 +919,52 @@ export const metadataFieldRegistry:
       valueType: "string",
       required: false,
       repeatable: false,
+      inherited: true,
+      editor: {
+        control: "select-or-custom",
+        options: [...trackVersionOptions],
+        customPlaceholder: "Custom track version",
+      },
+      presentation: {
+        group: "Release & Track Identity",
+        order: 20,
+        commonValues: [...trackVersionOptions],
+        examples: [
+          "Original Version",
+          "Original Mix",
+          "Radio Edit",
+          "Clean",
+        ],
+        help:
+          "Choose a recommended mix, edit, performance, or version label, or select Other… to preserve custom wording. A blank track version may inherit release.version, but Track Display Title suggestions use only the locally authored track version so release-edition labels are not appended to every song title.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.display_title",
+      canonicalName:
+        "track.display_title",
+      label: "Track Display Title",
+      description:
+        "Display-ready title that may combine the base track title and a local track-version label.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.display_title",
+      valueType: "string",
+      required: false,
+      repeatable: false,
       inherited: false,
       presentation: {
         group: "Release & Track Identity",
-        order: 25,
-        commonValues: [
-          "Original Mix",
-          "Radio Edit",
-          "Extended Mix",
-          "Instrumental",
-          "Acoustic",
-          "Live",
-          "Demo",
-          "Remix",
-          "Remaster",
-          "Clean",
-          "Explicit",
-          "Mono",
-          "Stereo",
-        ],
+        order: 40,
         examples: [
-          "Original Mix",
-          "Radio Edit",
-          "Demo",
+          "Angel",
+          "Nebula (Original Mix)",
+          "Signal (Radio Edit)",
         ],
         help:
-          "Use a concise version label only when it distinguishes this recording from another version of the same track. Preserve established capitalization used by the artist or label.",
+          "Normally generate this from Track Title plus the locally authored Track Version in parentheses. Existing custom display titles are never replaced automatically; use the generated suggestion only when it matches your intended public wording.",
       },
       displayPolicy: "auto",
     },
@@ -873,18 +1195,45 @@ export const metadataFieldRegistry:
             "Apple Music did not expose the embedded language value in the inspected Song Info tabs.",
         },
       ],
+      editor: {
+        control: "select-or-custom",
+        options: [...languageCodeOptions],
+        customPlaceholder: "Custom language code",
+      },
       presentation: {
-        group: "Writing, Lyrics & Language",
-        order: 20,
-        commonValues: [
-          "en",
-          "es",
-          "fr",
-          "de",
-          "ja",
-        ],
+        group: "Language & Writing System",
+        order: 10,
+        commonValues: [...languageCodeOptions],
         help:
           "Use a two-letter ISO 639-1 language code when practical.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.script",
+      canonicalName: "release.script",
+      label: "Release Script",
+      description:
+        "Primary writing system used by the release's lyrical or spoken text, expressed as an ISO 15924 code.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.script",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...scriptCodeOptions],
+        customPlaceholder: "Custom ISO 15924 code",
+      },
+      presentation: {
+        group: "Language & Writing System",
+        order: 20,
+        commonValues: [...scriptCodeOptions],
+        examples: ["Latn", "Cyrl", "Arab", "Jpan"],
+        help:
+          "Use an ISO 15924 writing-system code. Latn means Latin script; this field is not a body of lyrics.",
       },
       displayPolicy: "auto",
     },
@@ -926,18 +1275,151 @@ export const metadataFieldRegistry:
             "Apple Music did not expose the embedded language value in the inspected Song Info tabs.",
         },
       ],
+      editor: {
+        control: "select-or-custom",
+        options: [...languageCodeOptions],
+        customPlaceholder: "Custom language code",
+      },
       presentation: {
-        group: "Writing, Lyrics & Language",
-        order: 30,
-        commonValues: [
-          "en",
-          "es",
-          "fr",
-          "de",
-          "ja",
-        ],
+        group: "Language & Writing System",
+        order: 20,
+        commonValues: [...languageCodeOptions],
         help:
           "Use the language of lyrical or spoken content. Instrumental tracks may leave this blank.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.script",
+      canonicalName: "track.script",
+      label: "Track Script",
+      description:
+        "Writing system used by this track's lyrical or spoken content, expressed as an ISO 15924 code.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.script",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...scriptCodeOptions],
+        customPlaceholder: "Custom ISO 15924 code",
+      },
+      presentation: {
+        group: "Language & Writing System",
+        order: 30,
+        commonValues: [...scriptCodeOptions],
+        examples: ["Latn", "Cyrl", "Arab", "Jpan"],
+        help:
+          "Use an ISO 15924 writing-system code. Latn means Latin script; this field does not contain lyrics.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.text.lyrics_language",
+      canonicalName: "track.text.lyrics_language",
+      label: "Lyrics Language",
+      description:
+        "Primary language of the complete lyrical text, preferably as an ISO 639-1 code.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.text.lyrics_language",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...languageCodeOptions],
+        customPlaceholder: "Custom language code",
+      },
+      presentation: {
+        group: "Language & Writing System",
+        order: 40,
+        commonValues: [...languageCodeOptions],
+        examples: ["en", "es", "zxx"],
+        help:
+          "Use the language of track.text.lyrics. Use zxx when the text intentionally has no linguistic content.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.text.lyrics_script",
+      canonicalName: "track.text.lyrics_script",
+      label: "Lyrics Script",
+      description:
+        "Writing system used by the complete lyrical text, expressed as an ISO 15924 code.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.text.lyrics_script",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...scriptCodeOptions],
+        customPlaceholder: "Custom ISO 15924 code",
+      },
+      presentation: {
+        group: "Language & Writing System",
+        order: 50,
+        commonValues: [...scriptCodeOptions],
+        examples: ["Latn", "Cyrl", "Arab", "Jpan"],
+        help:
+          "Use the ISO 15924 code for the writing system used in track.text.lyrics.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.text.lyrics",
+      canonicalName: "track.text.lyrics",
+      label: "Lyrics",
+      description:
+        "Complete lyrical text for this track, including line and stanza breaks.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.text.lyrics",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Lyrics",
+        order: 10,
+        examples: [
+          "First line\nSecond line\n\nNext stanza",
+        ],
+        help:
+          "Enter the complete lyrics here. Preserve intentional line and stanza breaks; they remain part of the stored TOML string value.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.text.lyrics_source",
+      canonicalName: "track.text.lyrics_source",
+      label: "Lyrics Source",
+      description:
+        "Source or authority from which the lyrical text was obtained or verified.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.text.lyrics_source",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Lyrics Rights & Source",
+        order: 20,
+        examples: [
+          "Artist-approved lyric sheet",
+          "Publisher-supplied lyrics",
+          "Transcribed from final master",
+        ],
+        help:
+          "Describe the source used to enter or verify the lyrics. Do not place the lyrics body in this field.",
       },
       displayPolicy: "auto",
     },
@@ -1340,6 +1822,70 @@ export const metadataFieldRegistry:
       displayPolicy: "auto",
     },
     {
+      id: "release.artwork[].role",
+      canonicalName: "release.artwork[].role",
+      label: "Release Artwork Role",
+      description:
+        "Purpose of an artwork asset associated with the release.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.artwork[].role",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...artworkRoleOptions],
+        customPlaceholder: "Custom artwork role",
+      },
+      presentation: {
+        group: "Artwork",
+        order: 10,
+        commonValues: [...artworkRoleOptions],
+        examples: [
+          "front_cover",
+          "booklet",
+          "disc",
+        ],
+        help:
+          "Choose the asset's primary release-level purpose. Use Other… only for a role not represented by the standard list.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.artwork[].role",
+      canonicalName: "track.artwork[].role",
+      label: "Track Artwork Role",
+      description:
+        "Purpose of an artwork asset associated with an individual track.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.artwork[].role",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...artworkRoleOptions],
+        customPlaceholder: "Custom artwork role",
+      },
+      presentation: {
+        group: "Artwork",
+        order: 10,
+        commonValues: [...artworkRoleOptions],
+        examples: [
+          "track_artwork",
+          "artist",
+          "thumbnail",
+        ],
+        help:
+          "Choose the asset's primary track-level purpose. Use Other… only for a role not represented by the standard list.",
+      },
+      displayPolicy: "auto",
+    },
+    {
       id: "track.audio.bpm",
       canonicalName: "track.audio.bpm",
       label: "BPM",
@@ -1380,7 +1926,7 @@ export const metadataFieldRegistry:
         },
       ],
       presentation: {
-        group: "Technical Audio",
+        group: "Musical Analysis",
         order: 10,
         examples: [
           "120",
@@ -1389,6 +1935,131 @@ export const metadataFieldRegistry:
         ],
         help:
           "Enter the musical tempo as a whole or decimal number. Leave blank when tempo is not meaningful.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.audio.key",
+      canonicalName: "track.audio.key",
+      label: "Key",
+      description:
+        "Musical key or tonal center associated with the track.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.audio.key",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...musicalKeyOptions],
+        customPlaceholder: "Custom musical key",
+      },
+      presentation: {
+        group: "Musical Analysis",
+        order: 20,
+        commonValues: [...musicalKeyOptions],
+        examples: [
+          "A minor",
+          "F♯ major",
+          "C",
+        ],
+        help:
+          "Enter the musically meaningful key using a consistent notation. Preserve accidentals and major/minor wording when known; leave blank for atonal, indeterminate, or intentionally unclassified material.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.audio.camelot_key",
+      canonicalName: "track.audio.camelot_key",
+      label: "Camelot Key",
+      description:
+        "DJ-oriented Camelot wheel representation of the musical key.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.audio.camelot_key",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...camelotKeyOptions],
+        customPlaceholder: "Custom Camelot value",
+      },
+      presentation: {
+        group: "Musical Analysis",
+        order: 30,
+        commonValues: [...camelotKeyOptions],
+        examples: [
+          "8A",
+          "8B",
+          "11A",
+        ],
+        help:
+          "Optional DJ compatibility value. Keep the ordinary Key field authoritative and use this only when a Camelot designation is available or useful.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.audio.time_signature",
+      canonicalName:
+        "track.audio.time_signature",
+      label: "Time Signature",
+      description:
+        "Meter used to describe the track's rhythmic grouping.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.audio.time_signature",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...timeSignatureOptions],
+        customPlaceholder: "Custom time signature",
+      },
+      presentation: {
+        group: "Musical Analysis",
+        order: 40,
+        commonValues: [...timeSignatureOptions],
+        examples: [
+          "4/4",
+          "3/4",
+          "6/8",
+        ],
+        help:
+          "Enter the principal meter as numerator/denominator. Use notes for mixed or changing meters rather than forcing one misleading value.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.audio.tuning_hz",
+      canonicalName:
+        "track.audio.tuning_hz",
+      label: "Tuning Reference",
+      description:
+        "Reference pitch in hertz used for tuning, typically the frequency assigned to A4.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.audio.tuning_hz",
+      valueType: "number",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Musical Analysis",
+        order: 50,
+        examples: [
+          "440",
+          "432",
+          "442",
+        ],
+        help:
+          "Enter the reference pitch in hertz only when it is known and musically relevant. Do not infer a value from ordinary pitch detection alone.",
       },
       displayPolicy: "auto",
     },
@@ -1440,19 +2111,15 @@ export const metadataFieldRegistry:
           appleMusic: [],
         },
       },
+      editor: {
+        control: "select-or-custom",
+        options: [...performanceRoleOptions],
+        customPlaceholder: "Custom performance role",
+      },
       presentation: {
         group: "Performers",
         order: 20,
-        commonValues: [
-          "lead vocals",
-          "background vocals",
-          "guitar",
-          "bass",
-          "drums",
-          "keyboards",
-          "percussion",
-          "programming",
-        ],
+        commonValues: [...performanceRoleOptions],
         help:
           "Use the specific credited instrument, vocal part, programming role, or other performance contribution.",
       },
@@ -1518,44 +2185,15 @@ export const metadataFieldRegistry:
       required: false,
       repeatable: true,
       inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...contributorRoleOptions],
+        customPlaceholder: "Custom contributor role",
+      },
       presentation: {
         group: "Production",
         order: 20,
-        commonValues: [
-          "producer",
-          "co-producer",
-          "additional producer",
-          "executive producer",
-          "vocal producer",
-          "recording engineer",
-          "assistant recording engineer",
-          "editor",
-          "audio editor",
-          "vocal editor",
-          "drum editor",
-          "mix engineer",
-          "assistant mix engineer",
-          "mix technician",
-          "mastering engineer",
-          "mastering assistant",
-          "sound designer",
-          "programmer",
-          "MIDI programmer",
-          "arranger",
-          "orchestrator",
-          "conductor",
-          "composer",
-          "lyricist",
-          "songwriter",
-          "restoration engineer",
-          "transfer engineer",
-          "remastering engineer",
-          "studio assistant",
-          "creative director",
-          "art director",
-          "project coordinator",
-          "production coordinator",
-        ],
+        commonValues: [...contributorRoleOptions],
         help:
           "Prefer the wording used in the official credit. Suggestions are examples, not restrictions; custom roles remain valid.",
       },

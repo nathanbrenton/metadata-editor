@@ -134,7 +134,7 @@ code {
 
 .application-menu {
   position: absolute;
-  z-index: 20;
+  z-index: 80;
   top: 5.25rem;
   right: 1rem;
   display: grid;
@@ -1727,8 +1727,11 @@ button,
 .starter-track-editor-row {
   display: grid;
   grid-template-columns:
-    4.5rem minmax(12rem, 0.8fr)
-    minmax(15rem, 1.4fr);
+    4.5rem
+    minmax(10rem, 0.8fr)
+    minmax(12rem, 1.1fr)
+    minmax(10rem, 0.8fr)
+    minmax(14rem, 1.2fr);
   gap: 0.75rem;
   align-items: center;
 }
@@ -1745,6 +1748,20 @@ button,
 .starter-track-editor-row {
   padding: 0.45rem 0;
   border-top: 1px solid #2d353c;
+}
+
+.starter-display-title-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
+.starter-use-generated-title {
+  min-height: 2.3rem;
+  padding-inline: 0.65rem;
+  white-space: nowrap;
+  font-size: 0.72rem;
 }
 
 .starter-confirmation {
@@ -1789,8 +1806,12 @@ button,
     grid-template-columns: 4rem 1fr;
   }
 
-  .starter-track-editor-row > :last-child {
+  .starter-track-editor-row > :not(:first-child) {
     grid-column: 2;
+  }
+
+  .starter-display-title-field {
+    grid-template-columns: 1fr;
   }
 
   .onboarding-actions {
@@ -1905,6 +1926,31 @@ button,
   color: #818d98;
   font-size: 0.68rem;
   font-weight: 600;
+}
+
+/* Expanded sections provide the contextual entry point into global edit mode. */
+.metadata-section-edit-button {
+  flex: 0 0 auto;
+  min-height: 1.9rem;
+  border-color: #52606d;
+  padding: 0.34rem 0.65rem;
+  color: #d7dee5;
+  background: #30363d;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.metadata-section-edit-button:hover {
+  border-color: #718397;
+  background: #3a434c;
+}
+
+/* Keep collapsed headers compact and free of inactive edit controls. */
+.metadata-section:not([open])
+  > summary
+  .metadata-section-edit-button {
+  display: none;
 }
 
 .metadata-section-triangle {
@@ -2374,6 +2420,31 @@ summary:not(:has(.metadata-numbering-summary)) {
   outline: 2px solid #344355;
 }
 
+.track-display-title-field {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.track-display-title-suggestion {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: #aeb8c1;
+  font-size: 0.75rem;
+}
+
+.track-display-title-suggestion button {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.72rem;
+}
+
+.track-display-title-help {
+  color: #7f8b96;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
 .changed-indicator {
   color: #d6bd79;
   font-size: 0.68rem;
@@ -2410,6 +2481,11 @@ summary:not(:has(.metadata-numbering-summary)) {
     grid-template-columns: 1fr;
   }
 
+  .track-display-title-suggestion {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .metadata-numbering-fraction
   .metadata-editor-field {
     display: flex;
@@ -2427,62 +2503,6 @@ summary:not(:has(.metadata-numbering-summary)) {
   font-size: 0.75rem;
 }
 
-.save-receipt {
-  display: grid;
-  gap: 0.75rem;
-  border: 1px solid #48634d;
-  border-radius: 0.25rem;
-  padding: 0.85rem;
-  background: #172019;
-}
-
-.save-receipt > div > strong {
-  display: block;
-  margin-bottom: 0.25rem;
-  color: #b7d9bc;
-}
-
-.save-receipt dl {
-  display: grid;
-  grid-template-columns:
-    repeat(2, minmax(12rem, 1fr));
-  gap: 0.65rem 1rem;
-  margin: 0;
-}
-
-.save-receipt dl > div {
-  min-width: 0;
-}
-
-.save-receipt dt {
-  margin-bottom: 0.2rem;
-  color: #8fa493;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.save-receipt dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-@media (max-width: 52rem) {
-  .document-save-controls {
-    width: 100%;
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .document-save-controls button {
-    width: 100%;
-  }
-
-  .save-receipt dl {
-    grid-template-columns: 1fr;
-  }
-}
 
 .metadata-editor-field textarea {
   width: 100%;
@@ -2500,6 +2520,30 @@ summary:not(:has(.metadata-numbering-summary)) {
 .metadata-editor-field textarea:focus {
   border-color: #7b91aa;
   outline: 2px solid #344355;
+}
+
+/* Lyrics use a long-form editor rather than the single-line scalar control. */
+.multiline-lyrics-field {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
+.multiline-lyrics-field textarea {
+  grid-column: 1 / -1;
+  min-height: 18rem;
+  tab-size: 2;
+}
+
+.multiline-lyrics-help {
+  color: #7f8992;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.multiline-metadata-value > span:first-child {
+  display: block;
+  line-height: 1.6;
+  white-space: pre-wrap;
 }
 
 .array-field {
@@ -3962,8 +4006,8 @@ summary:not(:has(.metadata-numbering-summary)) {
 }
 
 .metadata-field-modal {
-  width: min(42rem, 100%);
-  max-height: min(46rem, 88vh);
+  width: min(74rem, 100%);
+  max-height: min(58rem, 92vh);
   overflow: hidden;
   border: 1px solid #59636d;
   border-radius: 0.8rem;
@@ -3983,7 +4027,8 @@ summary:not(:has(.metadata-numbering-summary)) {
 }
 
 .metadata-field-modal h3,
-.metadata-field-modal h4 {
+.metadata-field-modal h4,
+.metadata-field-modal h5 {
   margin: 0;
 }
 
@@ -3998,6 +4043,12 @@ summary:not(:has(.metadata-numbering-summary)) {
   font-size: 0.76rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.metadata-field-modal h5 {
+  margin-bottom: 0.35rem;
+  color: #e3e8ed;
+  font-size: 0.82rem;
 }
 
 .metadata-field-modal-close {
@@ -4023,10 +4074,20 @@ summary:not(:has(.metadata-numbering-summary)) {
 
 .metadata-field-modal-body {
   display: grid;
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 1rem;
-  max-height: calc(88vh - 4rem);
+  max-height: calc(92vh - 4rem);
   overflow: auto;
   padding: 1rem;
+}
+
+.metadata-field-examples,
+.metadata-field-common-values,
+.metadata-field-technical-details,
+.metadata-field-full-width {
+  grid-column: 1 / -1;
 }
 
 .metadata-field-modal-body > p {
@@ -4053,6 +4114,193 @@ summary:not(:has(.metadata-numbering-summary)) {
   overflow-wrap: anywhere;
 }
 
+.metadata-field-pair-example-grid,
+.metadata-field-pair-guidance-grid,
+.metadata-field-pair-facts-grid {
+  display: grid;
+  grid-template-columns:
+    repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.metadata-field-pair-example-grid > div,
+.metadata-field-pair-guidance-grid > article,
+.metadata-field-pair-facts-grid > article {
+  min-width: 0;
+  border: 1px solid #353d45;
+  border-radius: 0.45rem;
+  padding: 0.75rem;
+  background: #131619;
+}
+
+.metadata-field-pair-example-grid span {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #98a2ad;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.metadata-field-pair-example-grid code {
+  color: #eef2f5;
+  font-size: 0.95rem;
+}
+
+.metadata-field-pair-guidance-grid p {
+  margin: 0;
+  color: #c1c8cf;
+  line-height: 1.5;
+}
+
+.metadata-tag-details-inline {
+  margin-top: 1rem;
+  border-top: 1px solid #343a41;
+  padding-top: 1rem;
+}
+
+.metadata-activity-log-intro,
+.metadata-activity-empty,
+.metadata-activity-list {
+  grid-column: 1 / -1;
+}
+
+.metadata-activity-log-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid #343a41;
+  padding-bottom: 1rem;
+}
+
+.metadata-activity-log-intro h4,
+.metadata-activity-log-intro p,
+.metadata-activity-empty {
+  margin: 0;
+}
+
+.metadata-activity-log-intro p {
+  margin-top: 0.35rem;
+  color: #9fa9b2;
+  line-height: 1.5;
+}
+
+.metadata-activity-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.metadata-activity-entry {
+  min-width: 0;
+  border: 1px solid #3a434c;
+  border-left: 0.25rem solid #3e8b68;
+  border-radius: 0.45rem;
+  padding: 0.85rem;
+  background: #121619;
+}
+
+.metadata-activity-entry.failed {
+  border-left-color: #b65d63;
+}
+
+.metadata-activity-entry > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.metadata-activity-entry > header > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.metadata-activity-entry time {
+  color: #87929c;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.metadata-activity-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.65rem 0 0.35rem;
+  color: #97a2ac;
+  font-size: 0.75rem;
+}
+
+.metadata-activity-path {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.metadata-activity-entry > p:last-of-type {
+  margin: 0.55rem 0 0;
+  color: #c9d0d6;
+}
+
+.metadata-activity-receipt {
+  margin-top: 0.7rem;
+  border-top: 1px solid #303840;
+  padding-top: 0.65rem;
+}
+
+.metadata-activity-receipt > summary {
+  color: #aeb9c3;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.metadata-activity-receipt dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem 1rem;
+  margin: 0.75rem 0 0;
+}
+
+.metadata-activity-receipt dl > div {
+  min-width: 0;
+}
+
+.metadata-activity-receipt dt {
+  margin-bottom: 0.2rem;
+  color: #87929c;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.metadata-activity-receipt dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 42rem) {
+  .metadata-activity-log-intro,
+  .metadata-activity-entry > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .metadata-activity-entry time {
+    white-space: normal;
+  }
+
+  .metadata-activity-receipt dl {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 42rem) {
   .metadata-field-modal-backdrop {
     align-items: end;
@@ -4061,12 +4309,22 @@ summary:not(:has(.metadata-numbering-summary)) {
 
   .metadata-field-modal {
     width: 100%;
-    max-height: 88vh;
+    max-height: 92vh;
     border-right: 0;
     border-bottom: 0;
     border-left: 0;
     border-radius:
       0.85rem 0.85rem 0 0;
+  }
+
+  .metadata-field-modal-body {
+    grid-template-columns: 1fr;
+  }
+
+  .metadata-field-pair-example-grid,
+  .metadata-field-pair-guidance-grid,
+  .metadata-field-pair-facts-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -4424,4 +4682,744 @@ textarea:disabled {
   display: flex;
   justify-content: flex-end;
   margin-top: 0.85rem;
+}
+
+/* Rotate the Related tags triangle when its disclosure is open. */
+.metadata-related-tags > summary
+.metadata-section-triangle {
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.metadata-related-tags[open] > summary
+.metadata-section-triangle {
+  transform: rotate(90deg);
+}
+
+
+.performer-record-editor {
+  background: #15191d;
+}
+
+.performer-record-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid #303840;
+  padding: 0.7rem 0.9rem;
+}
+
+.credit-pair-help-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.3rem;
+  color: #d7dde3;
+}
+
+.performer-record-toolbar p,
+.performer-empty-state p {
+  margin: 0;
+  color: #929ca6;
+  font-size: 0.78rem;
+}
+
+.performer-record-toolbar
+.performer-validation-message {
+  margin-top: 0.25rem;
+  color: #d6b36a;
+}
+
+.performer-record-row.is-incomplete {
+  background: rgb(117 78 20 / 12%);
+}
+
+.performer-record-row
+input[aria-invalid="true"] {
+  border-color: #8a642d;
+}
+
+.performer-add-button,
+.performer-remove-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.performer-add-button > span:first-child,
+.performer-remove-button > span {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.performer-remove-button {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+}
+
+.performer-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.performer-record-column-headings,
+.performer-record-row {
+  display: grid;
+  grid-template-columns:
+    minmax(12rem, 1fr)
+    minmax(12rem, 1fr)
+    auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.performer-record-column-headings {
+  border-bottom: 1px solid #303840;
+  padding: 0.6rem 0.9rem;
+  color: #98a2ad;
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.performer-record-column-headings > div {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.performer-record-row {
+  border-bottom: 1px solid #30373e;
+  padding: 0.65rem 0.9rem;
+}
+
+.performer-record-row:last-child {
+  border-bottom: 0;
+}
+
+.performer-record-row label,
+.performer-record-row input {
+  min-width: 0;
+  width: 100%;
+}
+
+.performer-record-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.performer-related-tags {
+  margin-top: 0;
+}
+
+.performer-sort-name-list {
+  display: grid;
+}
+
+.performer-sort-name-list > header,
+.performer-sort-name-list > label {
+  display: grid;
+  grid-template-columns:
+    minmax(12rem, 0.75fr)
+    minmax(14rem, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid #30373e;
+  padding: 0.65rem 0.9rem;
+}
+
+.performer-sort-name-list > header {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.performer-sort-name-list > label:last-child {
+  border-bottom: 0;
+}
+
+.performer-sort-name-list input {
+  width: 100%;
+}
+
+@media (max-width: 52rem) {
+  .performer-record-toolbar,
+  .performer-empty-state {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .performer-record-column-headings {
+    display: none;
+  }
+
+  .performer-record-row {
+    grid-template-columns: 1fr;
+  }
+
+  .performer-remove-button {
+    width: 100%;
+  }
+
+  .performer-sort-name-list > label {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Read-only credit summaries collapse repeated names into role lists. */
+.performer-record-column-headings.is-read-only,
+.performer-record-row.is-read-only {
+  grid-template-columns:
+    minmax(12rem, 0.8fr)
+    minmax(14rem, 1.2fr);
+}
+
+.performer-record-row.is-grouped-display > span:last-child {
+  color: #cbd2d9;
+  line-height: 1.45;
+}
+
+/* Technical credits read as role → credited name; performer rows stay name → role. */
+.technical-credit-record-editor
+.performer-record-column-headings.is-read-only,
+.technical-credit-record-editor
+.performer-record-row.is-read-only {
+  grid-template-columns:
+    minmax(14rem, 1.2fr)
+    minmax(12rem, 0.8fr);
+}
+
+.technical-credit-record-editor
+.performer-record-row.is-grouped-display
+> span:first-child {
+  color: #cbd2d9;
+  line-height: 1.45;
+}
+
+.technical-credit-record-editor
+.performer-record-row.is-grouped-display
+> span:last-child {
+  color: inherit;
+}
+
+
+/* Compact technical-credit pairs around a central role-to-name axis. */
+@media (min-width: 52.0625rem) {
+  .technical-credit-record-editor
+  .performer-record-column-headings.is-read-only,
+  .technical-credit-record-editor
+  .performer-record-row.is-read-only {
+    grid-template-columns:
+      minmax(12rem, 22rem)
+      minmax(12rem, 22rem);
+    justify-content: center;
+    column-gap: 0.9rem;
+  }
+
+  /* Roles align toward their associated credited names. */
+  .technical-credit-record-editor
+  .performer-record-column-headings.is-read-only
+  > :first-child,
+  .technical-credit-record-editor
+  .performer-record-row.is-read-only
+  > :first-child {
+    text-align: right;
+  }
+
+  .technical-credit-record-editor
+  .performer-record-column-headings.is-read-only
+  > :last-child,
+  .technical-credit-record-editor
+  .performer-record-row.is-read-only
+  > :last-child {
+    text-align: left;
+  }
+
+  .inherited-technical-credit-row {
+    grid-template-columns:
+      minmax(12rem, 22rem)
+      minmax(12rem, 22rem)
+      auto;
+    justify-content: center;
+  }
+
+  .inherited-technical-credit-row > :first-child {
+    text-align: right;
+  }
+
+  .inherited-technical-credit-row > :nth-child(2) {
+    text-align: left;
+  }
+
+  .missing-track-inherited-credit-list > div {
+    grid-template-columns:
+      minmax(12rem, 22rem)
+      minmax(12rem, 22rem);
+    justify-content: center;
+  }
+
+  .missing-track-inherited-credit-list > div > :first-child {
+    text-align: right;
+  }
+
+  .missing-track-inherited-credit-list > div > :nth-child(2) {
+    text-align: left;
+  }
+}
+
+.grouped-engineering-credit-list {
+  background: #15191d;
+}
+
+/* First-time onboarding for track-level recording/mixing/mastering credits. */
+.technical-credit-file-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid #34414c;
+  border-radius: 0.45rem;
+  background: #151b20;
+  margin: 0 0 1rem;
+  padding: 1rem;
+}
+
+.technical-credit-file-empty-state strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.technical-credit-file-empty-state p,
+.technical-credit-file-empty-state small {
+  margin: 0;
+  color: #9aa5af;
+}
+
+.technical-credit-record-editor {
+  border-top: 1px solid #303840;
+}
+
+@media (max-width: 52rem) {
+  .technical-credit-file-empty-state {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* Standard vocabulary selectors retain an explicit free-text escape hatch. */
+.controlled-vocabulary-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.4rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.controlled-vocabulary-input.is-custom {
+  grid-template-columns:
+    minmax(10rem, 0.75fr)
+    minmax(12rem, 1.25fr);
+}
+
+.controlled-vocabulary-input select,
+.controlled-vocabulary-input input {
+  min-width: 0;
+  width: 100%;
+}
+
+.performer-record-row
+.controlled-vocabulary-input {
+  align-self: stretch;
+}
+
+.performer-record-row
+.controlled-vocabulary-input select,
+.performer-record-row
+.controlled-vocabulary-input input {
+  min-height: 2.25rem;
+}
+
+@media (max-width: 64rem) {
+  .controlled-vocabulary-input.is-custom {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Release-level technical credits remain visible as inherited track defaults. */
+.technical-credit-inherited-note {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.technical-credit-record-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.technical-credit-use-release-button {
+  min-height: 2.25rem;
+  padding-inline: 0.65rem;
+  white-space: nowrap;
+}
+
+.inherited-technical-credit-list {
+  border-top: 1px solid #303840;
+  background: #12171b;
+}
+
+.inherited-technical-credit-list > header {
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid #303840;
+}
+
+.inherited-technical-credit-list > header p {
+  margin: 0.25rem 0 0;
+  color: #929ca6;
+  font-size: 0.78rem;
+}
+
+.inherited-technical-credit-row {
+  display: grid;
+  grid-template-columns:
+    minmax(14rem, 1.2fr)
+    minmax(12rem, 0.8fr)
+    auto;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid #30373e;
+  padding: 0.65rem 0.9rem;
+}
+
+.inherited-technical-credit-row:last-child {
+  border-bottom: 0;
+}
+
+.missing-track-inherited-credit-list {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.missing-track-inherited-credit-list > div {
+  display: grid;
+  grid-template-columns:
+    minmax(14rem, 1.2fr)
+    minmax(12rem, 0.8fr);
+  gap: 0.2rem 0.75rem;
+  border-top: 1px solid #303840;
+  padding-top: 0.55rem;
+}
+
+.missing-track-inherited-credit-list small {
+  grid-column: 2;
+  color: #7f9aaf;
+}
+
+@media (max-width: 52rem) {
+  .technical-credit-record-editor
+  .performer-record-column-headings.is-read-only,
+  .technical-credit-record-editor
+  .performer-record-row.is-read-only,
+  .technical-credit-record-actions,
+  .inherited-technical-credit-row,
+  .missing-track-inherited-credit-list > div {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .technical-credit-record-actions {
+    flex-direction: column;
+  }
+
+  .technical-credit-use-release-button,
+  .technical-credit-record-actions .performer-remove-button {
+    width: 100%;
+  }
+
+  .missing-track-inherited-credit-list small {
+    grid-column: auto;
+  }
+}
+/* Keep compatibility details available without overwhelming field help. */
+.metadata-tag-disclosure {
+  overflow: hidden;
+  border-top: 1px solid #343a41;
+  padding-top: 0;
+}
+
+.metadata-tag-disclosure > summary {
+  display: grid;
+  grid-template-columns:
+    auto
+    minmax(0, 1fr)
+    auto;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.85rem 0;
+  color: #b9c2cb;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+
+.metadata-tag-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.metadata-tag-disclosure > summary::before {
+  content: "▸";
+  color: #8f9aa5;
+  transition: transform 120ms ease;
+}
+
+.metadata-tag-disclosure[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.metadata-tag-disclosure > summary:hover,
+.metadata-tag-disclosure > summary:focus-visible {
+  color: #eef2f5;
+}
+
+.metadata-tag-disclosure > summary small {
+  color: #7f8a95;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.metadata-tag-disclosure-content {
+  padding: 0 0 0.85rem 1.1rem;
+}
+
+/* Copyright symbols are generated from the canonical field semantics. */
+.guided-rights-input {
+  display: grid;
+  grid-template-columns:
+    2.5rem
+    minmax(5.5rem, 7rem)
+    minmax(12rem, 1fr)
+    auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.guided-rights-input.is-custom {
+  grid-template-columns:
+    minmax(12rem, 1fr)
+    auto;
+}
+
+.guided-rights-symbol {
+  display: grid;
+  min-height: 2.15rem;
+  place-items: center;
+  border: 1px solid #59636d;
+  border-radius: 0.25rem;
+  color: #edf1f4;
+  background: #252a2f;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.guided-rights-mode-button {
+  min-height: 2.15rem;
+  border: 1px solid #59636d;
+  border-radius: 0.25rem;
+  padding: 0.45rem 0.65rem;
+  color: #c4cbd2;
+  background: #252a2f;
+  white-space: nowrap;
+}
+
+.guided-rights-mode-button:hover,
+.guided-rights-mode-button:focus-visible {
+  border-color: #8291a0;
+  color: #fff;
+  background: #323940;
+}
+
+.guided-rights-preview,
+.guided-rights-note {
+  grid-column: 1 / -1;
+  color: #7f8a95;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 52rem) {
+  .guided-rights-input,
+  .guided-rights-input.is-custom {
+    grid-template-columns:
+      2.5rem
+      minmax(0, 1fr);
+  }
+
+  .guided-rights-input
+  > input[aria-label="Rights holder name"],
+  .guided-rights-input.is-custom > input,
+  .guided-rights-mode-button,
+  .guided-rights-preview,
+  .guided-rights-note {
+    grid-column: 1 / -1;
+  }
+
+  .metadata-tag-disclosure > summary {
+    grid-template-columns:
+      auto
+      minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .metadata-tag-disclosure > summary small {
+    grid-column: 2;
+  }
+
+  .metadata-tag-disclosure-content {
+    padding-left: 0;
+  }
+}
+
+/* Optional registered fields can be removed from their canonical TOML file. */
+.metadata-field-remove-control {
+  display: grid;
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #76545a;
+  border-radius: 50%;
+  padding: 0;
+  color: #d8aeb4;
+  background: transparent;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.metadata-field-remove-control:hover,
+.metadata-field-remove-control:focus-visible {
+  border-color: #d79aa3;
+  color: #fff;
+  background: #5a292f;
+}
+
+.metadata-field-remove-control:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.metadata-field-removal-confirmation {
+  display: grid;
+  gap: 1rem;
+}
+
+.metadata-field-removal-confirmation > p {
+  margin: 0;
+}
+
+.metadata-field-removal-confirmation > p code {
+  margin-inline: 0.35rem;
+}
+
+.metadata-field-removal-confirmation dl {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.metadata-field-removal-confirmation dl > div {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.35fr) 1fr;
+  gap: 0.75rem;
+}
+
+.metadata-field-removal-confirmation dt {
+  color: #9ca7b1;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.metadata-field-removal-confirmation dd {
+  margin: 0;
+}
+
+.metadata-field-removal-warning {
+  border-left: 0.2rem solid #b66b45;
+  padding-left: 0.8rem;
+  color: #d7c0b3;
+}
+
+.metadata-field-removal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  border-top: 1px solid #343b42;
+  padding-top: 1rem;
+}
+
+.danger-button {
+  border-color: #8f4d56;
+  color: #fff;
+  background: #672f37;
+}
+
+.danger-button:hover,
+.danger-button:focus-visible {
+  border-color: #d3808c;
+  background: #7d3943;
+}
+
+@media (max-width: 40rem) {
+  .metadata-field-removal-confirmation dl > div {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}
+
+/* Missing local paths can still display release defaults without writing them. */
+.metadata-inherited-override-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.metadata-inherited-override-field .metadata-value {
+  min-width: 0;
+}
+
+.metadata-inherited-override-button {
+  flex: 0 0 auto;
+  padding: 0.42rem 0.65rem;
+  font-size: 0.72rem;
+}
+
+@media (max-width: 52rem) {
+  .metadata-inherited-override-field {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .metadata-inherited-override-button {
+    align-self: flex-start;
+  }
 }

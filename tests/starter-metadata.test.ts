@@ -83,7 +83,9 @@ test(
               "nathan-brenton_01_nebula-original-mix",
             trackNumber: 1,
             artist: "Nathan Brenton",
-            title:
+            title: "Nebula",
+            version: "Original Mix",
+            displayTitle:
               "Nebula (Original Mix)",
           },
         ],
@@ -127,7 +129,15 @@ test(
     );
     assert.match(
       trackItem?.content ?? "",
-      /title = "Nebula \(Original Mix\)"/,
+      /title = "Nebula"/,
+    );
+    assert.match(
+      trackItem?.content ?? "",
+      /version = "Original Mix"/,
+    );
+    assert.match(
+      trackItem?.content ?? "",
+      /display_title = "Nebula \(Original Mix\)"/,
     );
     assert.match(
       trackItem?.content ?? "",

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  deleteMetadataValueAtPath,
   readMetadataValueAtPath,
   replaceMetadataValueAtPath,
 } from "../server/metadata-document.js";
@@ -213,6 +214,89 @@ test(
           "unsafe",
         ),
       /Unsafe metadata path segment/,
+    );
+  },
+);
+
+
+test(
+  "deletes an object-path field immutably and preserves siblings",
+  () => {
+    const document = {
+      track: {
+        script: "Latn",
+        title: "Angel",
+      },
+    };
+
+    const updated =
+      deleteMetadataValueAtPath(
+        document,
+        "track.script",
+      ) as {
+        track: {
+          title: string;
+          script?: string;
+        };
+      };
+
+    assert.equal(
+      updated.track.script,
+      undefined,
+    );
+    assert.equal(
+      updated.track.title,
+      "Angel",
+    );
+    assert.equal(
+      document.track.script,
+      "Latn",
+    );
+  },
+);
+
+test(
+  "prunes empty parent tables after field deletion",
+  () => {
+    const updated =
+      deleteMetadataValueAtPath(
+        {
+          track: {
+            text: {
+              lyrics_script: "",
+            },
+            title: "Angel",
+          },
+        },
+        "track.text.lyrics_script",
+      ) as {
+        track: {
+          title: string;
+          text?: unknown;
+        };
+      };
+
+    assert.equal(
+      updated.track.text,
+      undefined,
+    );
+    assert.equal(
+      updated.track.title,
+      "Angel",
+    );
+  },
+);
+
+test(
+  "rejects array-indexed field deletion",
+  () => {
+    assert.throws(
+      () =>
+        deleteMetadataValueAtPath(
+          createDocument(),
+          "track.performers[0].role",
+        ),
+      /non-array object path/,
     );
   },
 );

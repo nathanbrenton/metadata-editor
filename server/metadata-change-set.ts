@@ -1,5 +1,6 @@
 import {
   createMetadataValueAtPath,
+  deleteMetadataValueAtPath,
   readMetadataValueAtPath,
   replaceMetadataValueAtPath,
 } from "./metadata-document.js";
@@ -14,6 +15,13 @@ import {
   isEditableMetadataValue,
   type EditableMetadataValue,
 } from "./metadata-editability.js";
+import type {
+  PerformerRecordInput,
+  TechnicalContributorRecordInput,
+} from "./types.js";
+import {
+  isTechnicalContributorRole,
+} from "./metadata-vocabularies.js";
 
 export type MetadataValueChange = {
   path: string;
@@ -282,4 +290,595 @@ export function applyMetadataCreations(
   }
 
   return updatedDocument;
+}
+
+
+/*
+ * Removes registered optional scalar or string-array fields without allowing
+ * array-record surgery, duplicate paths, overlapping paths, or object/table
+ * deletion. Empty parent tables are pruned by deleteMetadataValueAtPath().
+ */
+export function applyMetadataDeletions(
+  document: unknown,
+  metadataPaths: readonly string[],
+): unknown {
+  if (metadataPaths.length === 0) {
+    throw new Error(
+      "At least one metadata field removal is required.",
+    );
+  }
+
+  const normalizedPaths = metadataPaths.map(
+    (metadataPath) => {
+      const segments = parseMetadataPath(
+        metadataPath,
+      );
+
+      if (
+        segments.some(
+          (segment) =>
+            typeof segment === "number",
+        )
+      ) {
+        throw new Error(
+          `Removing array metadata is not supported: ${metadataPath}`,
+        );
+      }
+
+      return {
+        segments,
+        normalizedPath:
+          formatMetadataPath(segments),
+      };
+    },
+  );
+
+  const uniquePaths = new Set<string>();
+
+  for (const metadataPath of normalizedPaths) {
+    if (
+      uniquePaths.has(
+        metadataPath.normalizedPath,
+      )
+    ) {
+      throw new Error(
+        `Duplicate metadata removal path "${metadataPath.normalizedPath}".`,
+      );
+    }
+
+    uniquePaths.add(
+      metadataPath.normalizedPath,
+    );
+  }
+
+  for (
+    let leftIndex = 0;
+    leftIndex < normalizedPaths.length;
+    leftIndex += 1
+  ) {
+    for (
+      let rightIndex = leftIndex + 1;
+      rightIndex < normalizedPaths.length;
+      rightIndex += 1
+    ) {
+      const left = normalizedPaths[leftIndex];
+      const right = normalizedPaths[rightIndex];
+
+      if (
+        isPathPrefix(
+          left.segments,
+          right.segments,
+        ) ||
+        isPathPrefix(
+          right.segments,
+          left.segments,
+        )
+      ) {
+        throw new Error(
+          `Overlapping metadata removals "${left.normalizedPath}" and "${right.normalizedPath}" are not allowed.`,
+        );
+      }
+    }
+  }
+
+  let updatedDocument = document;
+
+  for (const metadataPath of normalizedPaths) {
+    const currentValue =
+      readMetadataValueAtPath(
+        updatedDocument,
+        metadataPath.segments,
+      );
+
+    if (!isEditableMetadataValue(currentValue)) {
+      throw new Error(
+        `Metadata path "${metadataPath.normalizedPath}" is not an editable scalar or string array.`,
+      );
+    }
+
+    updatedDocument =
+      deleteMetadataValueAtPath(
+        updatedDocument,
+        metadataPath.segments,
+      );
+  }
+
+  return updatedDocument;
+}
+
+
+function isMetadataRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+function validatePerformerText(
+  label: string,
+  value: string,
+): void {
+  if (value.length > 500) {
+    throw new Error(
+      `${label} must not exceed 500 characters.`,
+    );
+  }
+
+  if (value.includes("\0")) {
+    throw new Error(
+      `${label} must not contain null characters.`,
+    );
+  }
+}
+
+/*
+ * Rebuilds track.performers from paired record inputs.
+ *
+ * Existing records are referenced by their original array index so
+ * unknown sibling keys survive edits. Omitted source indexes are removed;
+ * null source indexes append new name/role records.
+ */
+export function applyPerformerRecords(
+  document: unknown,
+  performers: readonly PerformerRecordInput[],
+): unknown {
+  if (performers.length > 500) {
+    throw new Error(
+      "A track may not contain more than 500 performer records.",
+    );
+  }
+
+  let existingValue: unknown = [];
+  let pathExists = true;
+
+  try {
+    existingValue =
+      readMetadataValueAtPath(
+        document,
+        "track.performers",
+      );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes(
+        "does not exist",
+      )
+    ) {
+      pathExists = false;
+    } else {
+      throw error;
+    }
+  }
+
+  if (
+    pathExists &&
+    !Array.isArray(existingValue)
+  ) {
+    throw new Error(
+      "track.performers must be an array.",
+    );
+  }
+
+  const existingRecords =
+    Array.isArray(existingValue)
+      ? existingValue
+      : [];
+
+  const usedSourceIndexes =
+    new Set<number>();
+
+  const nextRecords =
+    performers.map(
+      (performer, recordIndex) => {
+        validatePerformerText(
+          `Performer ${recordIndex + 1} name`,
+          performer.name,
+        );
+        validatePerformerText(
+          `Performer ${recordIndex + 1} role`,
+          performer.role,
+        );
+        validatePerformerText(
+          `Performer ${recordIndex + 1} sort name`,
+          performer.sortName,
+        );
+
+        if (
+          !performer.name.trim() ||
+          !performer.role.trim()
+        ) {
+          throw new Error(
+            `Performer ${recordIndex + 1} requires both a name and role.`,
+          );
+        }
+
+        if (
+          performer.sourceIndex === null
+        ) {
+          return {
+            name: performer.name,
+            role: performer.role,
+            ...(performer.sortName
+              ? {
+                  sort_name:
+                    performer.sortName,
+                }
+              : {}),
+          };
+        }
+
+        if (
+          !Number.isSafeInteger(
+            performer.sourceIndex,
+          ) ||
+          performer.sourceIndex < 0 ||
+          performer.sourceIndex >=
+            existingRecords.length
+        ) {
+          throw new Error(
+            `Performer source index is out of bounds: ${performer.sourceIndex}`,
+          );
+        }
+
+        if (
+          usedSourceIndexes.has(
+            performer.sourceIndex,
+          )
+        ) {
+          throw new Error(
+            `Duplicate performer source index: ${performer.sourceIndex}`,
+          );
+        }
+
+        usedSourceIndexes.add(
+          performer.sourceIndex,
+        );
+
+        const existingRecord =
+          existingRecords[
+            performer.sourceIndex
+          ];
+
+        if (
+          !isMetadataRecord(
+            existingRecord,
+          )
+        ) {
+          throw new Error(
+            `Existing performer ${performer.sourceIndex + 1} is not a record.`,
+          );
+        }
+
+        const nextRecord: Record<
+          string,
+          unknown
+        > = {
+          ...existingRecord,
+          name: performer.name,
+          role: performer.role,
+        };
+
+        if (
+          performer.sortName ||
+          Object.prototype.hasOwnProperty.call(
+            existingRecord,
+            "sort_name",
+          )
+        ) {
+          nextRecord.sort_name =
+            performer.sortName;
+        }
+
+        return nextRecord;
+      },
+    );
+
+  return pathExists
+    ? replaceMetadataValueAtPath(
+        document,
+        "track.performers",
+        nextRecords,
+      )
+    : createMetadataValueAtPath(
+        document,
+        "track.performers",
+        nextRecords,
+      );
+}
+
+
+/*
+ * Rebuilds only the technical track.contributors records managed by the
+ * Recording, Mixing & Mastering editor. Contributor records outside the
+ * managed source-index set are preserved byte-for-byte at the parsed-object
+ * level, including unknown sibling keys.
+ */
+export function applyTechnicalContributorRecords(
+  document: unknown,
+  contributors: readonly TechnicalContributorRecordInput[],
+  managedSourceIndexes: readonly number[],
+  contributorPath:
+    | "track.contributors"
+    | "release.credits.contributors" =
+      "track.contributors",
+): unknown {
+  const scopeLabel =
+    contributorPath ===
+    "release.credits.contributors"
+      ? "release"
+      : "track";
+
+  if (contributors.length > 500) {
+    throw new Error(
+      `A ${scopeLabel} may not contain more than 500 technical contributor records.`,
+    );
+  }
+
+  let existingValue: unknown = [];
+  let pathExists = true;
+
+  try {
+    existingValue =
+      readMetadataValueAtPath(
+        document,
+        contributorPath,
+      );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes(
+        "does not exist",
+      )
+    ) {
+      pathExists = false;
+    } else {
+      throw error;
+    }
+  }
+
+  if (
+    pathExists &&
+    !Array.isArray(existingValue)
+  ) {
+    throw new Error(
+      `${contributorPath} must be an array.`,
+    );
+  }
+
+  const existingRecords =
+    Array.isArray(existingValue)
+      ? existingValue
+      : [];
+
+  const managedIndexes =
+    new Set<number>();
+
+  managedSourceIndexes.forEach(
+    (sourceIndex) => {
+      if (
+        !Number.isSafeInteger(sourceIndex) ||
+        sourceIndex < 0 ||
+        sourceIndex >= existingRecords.length
+      ) {
+        throw new Error(
+          `Technical contributor source index is out of bounds: ${sourceIndex}`,
+        );
+      }
+
+      if (managedIndexes.has(sourceIndex)) {
+        throw new Error(
+          `Duplicate managed technical contributor source index: ${sourceIndex}`,
+        );
+      }
+
+      const existingRecord =
+        existingRecords[
+          sourceIndex
+        ];
+
+      if (
+        !isMetadataRecord(
+          existingRecord,
+        ) ||
+        typeof existingRecord.role !==
+          "string" ||
+        !isTechnicalContributorRole(
+          existingRecord.role,
+        )
+      ) {
+        throw new Error(
+          `Contributor source index is not a recording, mixing, or mastering credit: ${sourceIndex}`,
+        );
+      }
+
+      managedIndexes.add(sourceIndex);
+    },
+  );
+
+  const usedSourceIndexes =
+    new Set<number>();
+  const updatedBySourceIndex =
+    new Map<number, Record<string, unknown>>();
+  const appendedRecords:
+    Record<string, unknown>[] = [];
+
+  contributors.forEach(
+    (contributor, recordIndex) => {
+      validatePerformerText(
+        `Technical contributor ${recordIndex + 1} name`,
+        contributor.name,
+      );
+      validatePerformerText(
+        `Technical contributor ${recordIndex + 1} role`,
+        contributor.role,
+      );
+      validatePerformerText(
+        `Technical contributor ${recordIndex + 1} sort name`,
+        contributor.sortName,
+      );
+
+      if (
+        !contributor.name.trim() ||
+        !contributor.role.trim()
+      ) {
+        throw new Error(
+          `Technical contributor ${recordIndex + 1} requires both a name and role.`,
+        );
+      }
+
+      if (
+        !isTechnicalContributorRole(
+          contributor.role,
+        )
+      ) {
+        throw new Error(
+          `Technical contributor ${recordIndex + 1} role must describe recording, mixing, or mastering work.`,
+        );
+      }
+
+      if (
+        contributor.sourceIndex === null
+      ) {
+        appendedRecords.push({
+          name: contributor.name,
+          role: contributor.role,
+          ...(contributor.sortName
+            ? {
+                sort_name:
+                  contributor.sortName,
+              }
+            : {}),
+        });
+        return;
+      }
+
+      if (
+        !managedIndexes.has(
+          contributor.sourceIndex,
+        )
+      ) {
+        throw new Error(
+          `Technical contributor source index is not managed by this editor: ${contributor.sourceIndex}`,
+        );
+      }
+
+      if (
+        usedSourceIndexes.has(
+          contributor.sourceIndex,
+        )
+      ) {
+        throw new Error(
+          `Duplicate technical contributor source index: ${contributor.sourceIndex}`,
+        );
+      }
+
+      usedSourceIndexes.add(
+        contributor.sourceIndex,
+      );
+
+      const existingRecord =
+        existingRecords[
+          contributor.sourceIndex
+        ];
+
+      if (
+        !isMetadataRecord(
+          existingRecord,
+        )
+      ) {
+        throw new Error(
+          `Existing contributor ${contributor.sourceIndex + 1} is not a record.`,
+        );
+      }
+
+      const nextRecord: Record<
+        string,
+        unknown
+      > = {
+        ...existingRecord,
+        name: contributor.name,
+        role: contributor.role,
+      };
+
+      if (
+        contributor.sortName ||
+        Object.prototype.hasOwnProperty.call(
+          existingRecord,
+          "sort_name",
+        )
+      ) {
+        nextRecord.sort_name =
+          contributor.sortName;
+      }
+
+      updatedBySourceIndex.set(
+        contributor.sourceIndex,
+        nextRecord,
+      );
+    },
+  );
+
+  const nextRecords:
+    Record<string, unknown>[] = [];
+
+  existingRecords.forEach(
+    (record, sourceIndex) => {
+      if (!managedIndexes.has(sourceIndex)) {
+        if (!isMetadataRecord(record)) {
+          throw new Error(
+            `Existing contributor ${sourceIndex + 1} is not a record.`,
+          );
+        }
+
+        nextRecords.push(record);
+        return;
+      }
+
+      const replacement =
+        updatedBySourceIndex.get(
+          sourceIndex,
+        );
+
+      if (replacement) {
+        nextRecords.push(replacement);
+      }
+    },
+  );
+
+  nextRecords.push(...appendedRecords);
+
+  return pathExists
+    ? replaceMetadataValueAtPath(
+        document,
+        contributorPath,
+        nextRecords,
+      )
+    : createMetadataValueAtPath(
+        document,
+        contributorPath,
+        nextRecords,
+      );
 }
