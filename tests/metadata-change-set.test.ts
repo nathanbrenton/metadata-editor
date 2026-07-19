@@ -927,3 +927,45 @@ test(
     );
   },
 );
+
+test(
+  "updates an album-artist sort override without dropping unknown record keys",
+  () => {
+    const document = {
+      track: {
+        album_artists: [
+          {
+            name: "Nathan Brenton",
+            sort_name: "",
+            authority_id: "artist-001",
+          },
+        ],
+      },
+    };
+
+    const updated = applyMetadataChanges(
+      document,
+      [
+        {
+          path:
+            "track.album_artists[0].sort_name",
+          value: "Brenton, Nathan",
+        },
+      ],
+    ) as typeof document;
+
+    assert.deepEqual(
+      updated.track.album_artists[0],
+      {
+        name: "Nathan Brenton",
+        sort_name: "Brenton, Nathan",
+        authority_id: "artist-001",
+      },
+    );
+    assert.equal(
+      document.track.album_artists[0]
+        .sort_name,
+      "",
+    );
+  },
+);

@@ -37,9 +37,15 @@ import {
 
 import {
   buildMissingInheritedMetadataRows,
+  findMetadataValueAcrossDocuments,
+  isArtistSortNameInheritancePath,
   isBlankMetadataValue,
   resolveInheritedReleaseValue,
 } from "./release-inheritance.js";
+
+import {
+  prioritizeReleaseArtistDisplay,
+} from "./performer-display-order.js";
 
 import {
   getMissingTrackOverviewFieldPresentation,
@@ -3748,6 +3754,63 @@ type ScalarMetadataSaveReceipt = {
   skippedTrackFiles?: number;
 };
 
+type PerformerCopyTargetPlan = {
+  trackId: string;
+  relativePath: string;
+  documentExists: boolean;
+  addCount: number;
+  duplicateCount: number;
+  resultingCount: number;
+  status: "ready" | "blocked";
+  reason?: string;
+};
+
+type PerformerCopyExecutionTarget =
+  PerformerCopyTargetPlan & {
+    createdDocument: boolean;
+    receipt?: ScalarMetadataSaveReceipt;
+    error?: string;
+  };
+
+type PerformerCopyResponse = {
+  releaseId: string;
+  sourceTrackId: string;
+  sourceRelativePath: string;
+  sourceSha256: string;
+  selectedCredits: Array<{
+    sourceIndex: number;
+    name: string;
+    role: string;
+    sortName: string;
+  }>;
+  destinations: PerformerCopyTargetPlan[];
+  summary: {
+    selectedCreditCount: number;
+    destinationCount: number;
+    readyCount: number;
+    blockedCount: number;
+    addCount: number;
+    duplicateCount: number;
+  };
+  execution?: {
+    status: "verified" | "partial" | "failed";
+    targets: PerformerCopyExecutionTarget[];
+    addedCount: number;
+    duplicateCount: number;
+    failedCount: number;
+  };
+};
+
+type PerformerCopySource = {
+  document: ParsedMetadataDocument;
+  records: PerformerRecordDraft[];
+};
+
+type PerformerCopyTrackOption = {
+  trackId: string;
+  label: string;
+};
+
 function createMetadataActivityEntry({
   releaseId,
   document,
@@ -3798,6 +3861,64 @@ function createMetadataActivityEntry({
             receipt.synchronizedTrackFiles,
           skippedTrackFiles:
             receipt.skippedTrackFiles,
+        }
+      : undefined,
+  };
+}
+
+function createPerformerCopyActivityEntry({
+  releaseId,
+  sourceTrackId,
+  target,
+}: {
+  releaseId: string;
+  sourceTrackId: string;
+  target: PerformerCopyExecutionTarget;
+}): MetadataActivityEntry {
+  const occurredAt =
+    target.receipt?.savedAt ??
+    new Date().toISOString();
+  const verified =
+    Boolean(target.receipt) &&
+    !target.error;
+
+  return {
+    id: [
+      occurredAt,
+      target.relativePath,
+      "copy-performers",
+      verified ? "verified" : "failed",
+      Math.random().toString(36).slice(2),
+    ].join(":"),
+    occurredAt,
+    releaseId,
+    documentRelativePath:
+      target.relativePath,
+    documentFilename:
+      "track-credits.toml",
+    scope: "track",
+    trackId: target.trackId,
+    action: "copy-performers",
+    status: verified
+      ? "verified"
+      : "failed",
+    message: verified
+      ? `${target.addCount} ${
+          target.addCount === 1
+            ? "performer credit was"
+            : "performer credits were"
+        } copied from ${sourceTrackId} and verified.`
+      : target.error ??
+        `Performer credits from ${sourceTrackId} could not be copied.`,
+    receipt: target.receipt
+      ? {
+          backupRelativePath:
+            target.receipt.backupRelativePath,
+          previousSha256:
+            target.receipt.previousSha256,
+          savedSha256:
+            target.receipt.savedSha256,
+          bytes: target.receipt.bytes,
         }
       : undefined,
   };
@@ -5253,7 +5374,13 @@ function MetadataActivityLogModal({
                 <span>
                   {entry.action === "add-fields"
                     ? "Added fields"
-                    : "Saved metadata"}
+                    : entry.action ===
+                        "remove-fields"
+                      ? "Removed fields"
+                      : entry.action ===
+                          "copy-performers"
+                        ? "Copied performer credits"
+                        : "Saved metadata"}
                 </span>
               </p>
 
@@ -5303,6 +5430,523 @@ function MetadataActivityLogModal({
           ))}
         </ol>
       )}
+    </MetadataFieldModal>
+  );
+}
+
+
+function PerformerCreditCopyModal({
+  releaseId,
+  source,
+  sourceLabel,
+  releasePrimaryArtistName,
+  trackOptions,
+  onClose,
+  onComplete,
+}: {
+  releaseId: string;
+  source: PerformerCopySource;
+  sourceLabel: string;
+  releasePrimaryArtistName: string;
+  trackOptions: PerformerCopyTrackOption[];
+  onClose: () => void;
+  onComplete: (
+    result: PerformerCopyResponse,
+  ) => void | Promise<void>;
+}) {
+  const selectableRecords =
+    source.records.filter(
+      (record): record is
+        PerformerRecordDraft & {
+          sourceIndex: number;
+        } =>
+        record.sourceIndex !== null &&
+        Boolean(record.name.trim()) &&
+        Boolean(record.role.trim()),
+    );
+  const [selectedSourceIndexes, setSelectedSourceIndexes] =
+    useState<number[]>(() =>
+      selectableRecords.map(
+        (record) => record.sourceIndex,
+      ),
+    );
+  const [selectedDestinationTrackIds, setSelectedDestinationTrackIds] =
+    useState<string[]>([]);
+  const [plan, setPlan] =
+    useState<PerformerCopyResponse | null>(
+      null,
+    );
+  const [loadingMode, setLoadingMode] =
+    useState<"review" | "execute" | null>(
+      null,
+    );
+  const [error, setError] =
+    useState<string | null>(null);
+
+  const groupedRecords = useMemo(() => {
+    const groups = new Map<
+      string,
+      {
+        name: string;
+        records: Array<
+          PerformerRecordDraft & {
+            sourceIndex: number;
+          }
+        >;
+      }
+    >();
+
+    selectableRecords.forEach((record) => {
+      const normalizedName = record.name
+        .trim()
+        .replace(/\\s+/g, " ")
+        .toLocaleLowerCase();
+      const existing =
+        groups.get(normalizedName);
+
+      if (existing) {
+        existing.records.push(record);
+      } else {
+        groups.set(normalizedName, {
+          name: record.name.trim(),
+          records: [record],
+        });
+      }
+    });
+
+    return prioritizeReleaseArtistDisplay(
+      Array.from(groups.values()),
+      releasePrimaryArtistName,
+    );
+  }, [
+    releasePrimaryArtistName,
+    selectableRecords,
+  ]);
+
+  const resetPlan = () => {
+    setPlan(null);
+    setError(null);
+  };
+
+  const updateSourceSelection = (
+    sourceIndexes: number[],
+  ) => {
+    setSelectedSourceIndexes(
+      Array.from(new Set(sourceIndexes)),
+    );
+    resetPlan();
+  };
+
+  const updateDestinationSelection = (
+    trackIds: string[],
+  ) => {
+    setSelectedDestinationTrackIds(
+      Array.from(new Set(trackIds)),
+    );
+    resetPlan();
+  };
+
+  const requestCopy = async (
+    execute: boolean,
+  ) => {
+    setLoadingMode(
+      execute ? "execute" : "review",
+    );
+    setError(null);
+
+    try {
+      const response = await fetch(
+        "/api/library/copy-performer-credits",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            releaseId,
+            sourceTrackId:
+              source.document.trackId,
+            sourceOriginalSha256:
+              source.document.sha256,
+            selectedSourceIndexes,
+            destinationTrackIds:
+              selectedDestinationTrackIds,
+            execute,
+          }),
+        },
+      );
+      const result =
+        (await response.json()) as
+          | PerformerCopyResponse
+          | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error ??
+                `Performer copy failed: HTTP ${response.status}`
+            : `Performer copy failed: HTTP ${response.status}`,
+        );
+      }
+
+      const copyResult =
+        result as PerformerCopyResponse;
+      setPlan(copyResult);
+
+      if (execute) {
+        await onComplete(copyResult);
+      }
+    } catch (copyError) {
+      setError(
+        copyError instanceof Error
+          ? copyError.message
+          : "Unknown performer-copy error",
+      );
+    } finally {
+      setLoadingMode(null);
+    }
+  };
+
+  const targetLabel = (trackId: string) =>
+    trackOptions.find(
+      (option) =>
+        option.trackId === trackId,
+    )?.label ?? trackId;
+  const executionComplete =
+    Boolean(plan?.execution);
+
+  return (
+    <MetadataFieldModal
+      title="Copy performer credits"
+      onClose={onClose}
+    >
+      <section className="performer-copy-intro">
+        <h4>Source track</h4>
+        <strong>{sourceLabel}</strong>
+        <p>
+          Select saved name/role pairs, choose destination tracks, then review the duplicate-aware copy plan before writing. Existing target credits are never removed.
+        </p>
+      </section>
+
+      <section className="performer-copy-section">
+        <header>
+          <div>
+            <h4>1. Performer credits</h4>
+            <p>
+              Select one role, several roles for the same person, or credits from multiple people.
+            </p>
+          </div>
+          <div className="performer-copy-selection-actions">
+            <button
+              type="button"
+              onClick={() =>
+                updateSourceSelection(
+                  selectableRecords.map(
+                    (record) =>
+                      record.sourceIndex,
+                  ),
+                )
+              }
+            >
+              Select all
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                updateSourceSelection([])
+              }
+            >
+              Clear
+            </button>
+          </div>
+        </header>
+
+        <div className="performer-copy-credit-groups">
+          {groupedRecords.map((group) => {
+            const groupIndexes =
+              group.records.map(
+                (record) =>
+                  record.sourceIndex,
+              );
+            const groupSelected =
+              groupIndexes.every(
+                (sourceIndex) =>
+                  selectedSourceIndexes.includes(
+                    sourceIndex,
+                  ),
+              );
+
+            return (
+              <fieldset key={group.name}>
+                <legend>
+                  <label>
+                    <input
+                      type="checkbox"
+                      checked={groupSelected}
+                      onChange={(event) => {
+                        if (event.target.checked) {
+                          updateSourceSelection([
+                            ...selectedSourceIndexes,
+                            ...groupIndexes,
+                          ]);
+                        } else {
+                          updateSourceSelection(
+                            selectedSourceIndexes.filter(
+                              (sourceIndex) =>
+                                !groupIndexes.includes(
+                                  sourceIndex,
+                                ),
+                            ),
+                          );
+                        }
+                      }}
+                    />
+                    <strong>{group.name}</strong>
+                    <small>
+                      Select all {group.records.length} {group.records.length === 1 ? "role" : "roles"}
+                    </small>
+                  </label>
+                </legend>
+
+                {group.records.map((record) => (
+                  <label
+                    key={record.sourceIndex}
+                    className="performer-copy-credit-option"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={
+                        selectedSourceIndexes.includes(
+                          record.sourceIndex,
+                        )
+                      }
+                      onChange={(event) =>
+                        updateSourceSelection(
+                          event.target.checked
+                            ? [
+                                ...selectedSourceIndexes,
+                                record.sourceIndex,
+                              ]
+                            : selectedSourceIndexes.filter(
+                                (sourceIndex) =>
+                                  sourceIndex !==
+                                  record.sourceIndex,
+                              ),
+                        )
+                      }
+                    />
+                    <span>{record.name}</span>
+                    <strong>{record.role}</strong>
+                    {record.sortName && (
+                      <small>
+                        Sort name: {record.sortName}
+                      </small>
+                    )}
+                  </label>
+                ))}
+              </fieldset>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="performer-copy-section">
+        <header>
+          <div>
+            <h4>2. Destination tracks</h4>
+            <p>
+              The source track is excluded. Missing track-credits documents will be created only for targets that receive a new credit.
+            </p>
+          </div>
+          <div className="performer-copy-selection-actions">
+            <button
+              type="button"
+              onClick={() =>
+                updateDestinationSelection(
+                  trackOptions.map(
+                    (option) => option.trackId,
+                  ),
+                )
+              }
+            >
+              Select all tracks
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                updateDestinationSelection([])
+              }
+            >
+              Clear
+            </button>
+          </div>
+        </header>
+
+        <div className="performer-copy-destination-grid">
+          {trackOptions.map((option) => (
+            <label key={option.trackId}>
+              <input
+                type="checkbox"
+                checked={
+                  selectedDestinationTrackIds.includes(
+                    option.trackId,
+                  )
+                }
+                onChange={(event) =>
+                  updateDestinationSelection(
+                    event.target.checked
+                      ? [
+                          ...selectedDestinationTrackIds,
+                          option.trackId,
+                        ]
+                      : selectedDestinationTrackIds.filter(
+                          (trackId) =>
+                            trackId !==
+                            option.trackId,
+                        ),
+                  )
+                }
+              />
+              <span>{option.label}</span>
+            </label>
+          ))}
+        </div>
+      </section>
+
+      <section className="performer-copy-section performer-copy-review">
+        <header>
+          <div>
+            <h4>3. Review copy plan</h4>
+            <p>
+              Exact name/role duplicates are skipped using case-insensitive, whitespace-normalized matching.
+            </p>
+          </div>
+          {!executionComplete && (
+            <button
+              type="button"
+              disabled={
+                selectedSourceIndexes.length === 0 ||
+                selectedDestinationTrackIds.length === 0 ||
+                loadingMode !== null
+              }
+              onClick={() =>
+                void requestCopy(false)
+              }
+            >
+              {loadingMode === "review"
+                ? "Reviewing…"
+                : "Review copy plan"}
+            </button>
+          )}
+        </header>
+
+        {plan && (
+          <>
+            <div className="performer-copy-summary">
+              <span>
+                <strong>{plan.summary.selectedCreditCount}</strong> selected credits
+              </span>
+              <span>
+                <strong>{plan.summary.addCount}</strong> records to add
+              </span>
+              <span>
+                <strong>{plan.summary.duplicateCount}</strong> duplicates to skip
+              </span>
+              <span>
+                <strong>{plan.summary.blockedCount}</strong> blocked targets
+              </span>
+            </div>
+
+            <ol className="performer-copy-target-plan">
+              {(plan.execution?.targets ??
+                plan.destinations).map(
+                (target) => {
+                  const executionTarget:
+                    | PerformerCopyExecutionTarget
+                    | null = plan.execution
+                      ? (
+                          target as
+                            PerformerCopyExecutionTarget
+                        )
+                      : null;
+                  return (
+                    <li
+                      key={target.trackId}
+                      className={
+                        target.status === "blocked" ||
+                        executionTarget?.error
+                          ? "blocked"
+                          : "ready"
+                      }
+                    >
+                      <div>
+                        <strong>
+                          {targetLabel(
+                            target.trackId,
+                          )}
+                        </strong>
+                        <small>
+                          {target.relativePath ||
+                            "No target path"}
+                        </small>
+                      </div>
+                      <span>
+                        {executionTarget?.receipt
+                          ? `${target.addCount} added and verified`
+                          : executionTarget?.error
+                            ? executionTarget.error
+                            : target.status === "blocked"
+                              ? target.reason
+                              : target.addCount === 0
+                                ? `${target.duplicateCount} duplicate ${target.duplicateCount === 1 ? "credit" : "credits"}; no write needed`
+                                : `${target.addCount} to add · ${target.duplicateCount} ${target.duplicateCount === 1 ? "duplicate" : "duplicates"} skipped`}
+                      </span>
+                    </li>
+                  );
+                },
+              )}
+            </ol>
+          </>
+        )}
+
+        {error && (
+          <p className="error-message">
+            {error}
+          </p>
+        )}
+      </section>
+
+      <footer className="performer-copy-footer">
+        <button
+          type="button"
+          onClick={onClose}
+        >
+          {executionComplete ? "Close" : "Cancel"}
+        </button>
+
+        {!executionComplete && (
+          <button
+            type="button"
+            className="primary-button"
+            disabled={
+              !plan ||
+              plan.summary.addCount === 0 ||
+              plan.summary.readyCount === 0 ||
+              loadingMode !== null
+            }
+            onClick={() =>
+              void requestCopy(true)
+            }
+          >
+            {loadingMode === "execute"
+              ? "Copying credits…"
+              : plan
+                ? `Copy ${plan.summary.addCount} missing ${plan.summary.addCount === 1 ? "credit" : "credits"}`
+                : "Review before copying"}
+          </button>
+        )}
+      </footer>
     </MetadataFieldModal>
   );
 }
@@ -6364,6 +7008,10 @@ function ReleaseMetadataDetailView({
     useState<string | null>(null);
   const [activityLogOpen, setActivityLogOpen] =
     useState(false);
+  const [performerCopySource, setPerformerCopySource] =
+    useState<PerformerCopySource | null>(
+      null,
+    );
   const [metadataActivityEntries, setMetadataActivityEntries] =
     useState<MetadataActivityEntry[]>(() =>
       readMetadataActivityLog(
@@ -6415,11 +7063,64 @@ function ReleaseMetadataDetailView({
     setMetadataActivityEntries([]);
   };
 
+
+  const completePerformerCopy = async (
+    result: PerformerCopyResponse,
+  ) => {
+    const execution = result.execution;
+
+    if (!execution) {
+      return;
+    }
+
+    execution.targets.forEach((target) => {
+      if (
+        target.receipt ||
+        target.error
+      ) {
+        recordMetadataActivity(
+          createPerformerCopyActivityEntry({
+            releaseId: detail.releaseId,
+            sourceTrackId:
+              result.sourceTrackId,
+            target,
+          }),
+        );
+      }
+    });
+
+    await Promise.resolve(onRefresh());
+
+    if (execution.status === "verified") {
+      onNotify(
+        `${execution.addedCount} ${
+          execution.addedCount === 1
+            ? "performer credit"
+            : "performer credits"
+        } copied and verified`,
+        "success",
+      );
+    } else if (
+      execution.status === "partial"
+    ) {
+      onNotify(
+        `${execution.addedCount} performer credits copied; ${execution.failedCount} targets need review`,
+        "info",
+      );
+    } else {
+      onNotify(
+        "Performer credits could not be copied",
+        "error",
+      );
+    }
+  };
+
   useEffect(() => {
     setActiveDocumentGroup("release");
     setActiveMetadataTab("overview");
     setDetailMenuOpen(false);
     setActivityLogOpen(false);
+    setPerformerCopySource(null);
     setSetupMode(false);
     setStarterDraft(null);
     setStarterReviewed(false);
@@ -7400,6 +8101,16 @@ function ReleaseMetadataDetailView({
       (document) =>
         document.scope === "release",
     );
+  const releasePrimaryArtistValue =
+    findMetadataValueAcrossDocuments(
+      releaseDocuments,
+      "release.primary_artist.name",
+    );
+  const releasePrimaryArtistName =
+    typeof releasePrimaryArtistValue ===
+    "string"
+      ? releasePrimaryArtistValue
+      : "";
 
   /*
    * Build track navigation from the scanner result rather than from
@@ -7557,6 +8268,40 @@ function ReleaseMetadataDetailView({
           titleMetadata.displayTitle,
       };
     });
+
+  const performerCopyTrackOptions =
+    trackIds.map((trackId, index) => {
+      const trackDocuments =
+        detail.documents.filter(
+          (document) =>
+            document.trackId === trackId,
+        );
+      const inferredTitle =
+        inferredTracks.find(
+          (track) =>
+            track.id === trackId,
+        )?.displayTitle ??
+        formatReleaseTitle(trackId);
+
+      return {
+        trackId,
+        label: `Track ${index + 1} — ${readTrackDisplayTitle(
+          trackId,
+          trackDocuments,
+          inferredTitle,
+        )}`,
+      };
+    });
+
+  const performerCopySourceLabel =
+    performerCopySource?.document.trackId
+      ? performerCopyTrackOptions.find(
+          (option) =>
+            option.trackId ===
+            performerCopySource.document.trackId,
+        )?.label ??
+        performerCopySource.document.trackId
+      : "Track";
 
   const inferredReleaseArtist =
     inferCommonReleaseArtist(
@@ -7988,6 +8733,32 @@ function ReleaseMetadataDetailView({
           onClear={clearActivityLog}
         />
       )}
+
+
+      {performerCopySource &&
+        performerCopySource.document.trackId && (
+          <PerformerCreditCopyModal
+            releaseId={detail.releaseId}
+            source={performerCopySource}
+            sourceLabel={
+              performerCopySourceLabel
+            }
+            releasePrimaryArtistName={
+              releasePrimaryArtistName
+            }
+            trackOptions={
+              performerCopyTrackOptions.filter(
+                (option) =>
+                  option.trackId !==
+                  performerCopySource.document.trackId,
+              )
+            }
+            onClose={() =>
+              setPerformerCopySource(null)
+            }
+            onComplete={completePerformerCopy}
+          />
+        )}
 
       <section
         className={[
@@ -8637,6 +9408,9 @@ function ReleaseMetadataDetailView({
           onTechnicalCreditDraftChange={
             updateTechnicalCreditDraft
           }
+          onCopyPerformerCredits={() => {
+            // Release documents do not expose track performer-copy actions.
+          }}
           metadataRegistry={
             metadataRegistry
           }
@@ -8714,6 +9488,15 @@ function ReleaseMetadataDetailView({
             }
             onTechnicalCreditDraftChange={
               updateTechnicalCreditDraft
+            }
+            onCopyPerformerCredits={(
+              document,
+              records,
+            ) =>
+              setPerformerCopySource({
+                document,
+                records,
+              })
             }
             metadataRegistry={
               metadataRegistry
@@ -9104,6 +9887,7 @@ function MetadataDocumentSection({
   onDraftValueChange,
   onPerformerDraftChange,
   onTechnicalCreditDraftChange,
+  onCopyPerformerCredits,
   metadataRegistry,
   activeMetadataTab,
   savingDocumentPath,
@@ -9138,6 +9922,10 @@ function MetadataDocumentSection({
     records: PerformerRecordDraft[],
   ) => void;
   onTechnicalCreditDraftChange: (
+    document: ParsedMetadataDocument,
+    records: PerformerRecordDraft[],
+  ) => void;
+  onCopyPerformerCredits: (
     document: ParsedMetadataDocument,
     records: PerformerRecordDraft[],
   ) => void;
@@ -9329,6 +10117,14 @@ function MetadataDocumentSection({
                 records,
               ) =>
                 onTechnicalCreditDraftChange(
+                  document,
+                  records,
+                )
+              }
+              onCopyPerformerCredits={(
+                records,
+              ) =>
+                onCopyPerformerCredits(
                   document,
                   records,
                 )
@@ -10256,6 +11052,22 @@ function MetadataValueCell({
     );
   }
 
+  const supportsArtistSortNameInheritance =
+    isArtistSortNameInheritancePath(
+      row.path,
+    ) && inheritedValue !== undefined;
+  const restoreReleaseValuePending =
+    supportsArtistSortNameInheritance &&
+    changed &&
+    isBlankMetadataValue(currentValue) &&
+    !isBlankMetadataValue(originalValue);
+  const showUseReleaseValue =
+    supportsArtistSortNameInheritance &&
+    (
+      changed ||
+      !isBlankMetadataValue(originalValue)
+    );
+
   return (
     <label className="metadata-editor-field">
       <input
@@ -10271,6 +11083,34 @@ function MetadataValueCell({
         }
       />
 
+      {supportsArtistSortNameInheritance && (
+        <span className="metadata-inheritance-actions">
+          <small className="metadata-provenance-note metadata-inherited-note">
+            Release value: {formatMetadataValue(inheritedValue)}
+          </small>
+
+          {showUseReleaseValue && (
+            <button
+              type="button"
+              className="metadata-use-release-value-button"
+              disabled={restoreReleaseValuePending}
+              onClick={() =>
+                onDraftValueChange(
+                  document,
+                  row.path,
+                  originalValue,
+                  "",
+                )
+              }
+            >
+              {restoreReleaseValuePending
+                ? "Release value selected"
+                : "Use release value"}
+            </button>
+          )}
+        </span>
+      )}
+
       {usingInheritedValue &&
         !changed && (
         <span className="metadata-provenance-note metadata-inherited-note">
@@ -10280,9 +11120,11 @@ function MetadataValueCell({
 
       {changed && (
         <span className="changed-indicator">
-          {usingInheritedValue
-            ? "Track override"
-            : "Modified"}
+          {restoreReleaseValuePending
+            ? "Restore release value"
+            : usingInheritedValue
+              ? "Track override"
+              : "Modified"}
         </span>
       )}
     </label>
@@ -10549,6 +11391,7 @@ function metadataStorageRoleForFilename(
 function PerformerRecordEditor({
   document,
   records,
+  releasePrimaryArtistName,
   editMode,
   metadataRegistry,
   relatedOpen,
@@ -10557,6 +11400,7 @@ function PerformerRecordEditor({
 }: {
   document: ParsedMetadataDocument;
   records: PerformerRecordDraft[];
+  releasePrimaryArtistName: string;
   editMode: boolean;
   metadataRegistry: MetadataFieldDefinition[];
   relatedOpen: boolean;
@@ -10672,13 +11516,16 @@ function PerformerRecordEditor({
   };
 
   const groupedRecords =
-    groupPersonRoleDisplayRecords(
-      records.map((record) => ({
-        key: record.key,
-        name: record.name,
-        role: record.role,
-        sortName: record.sortName,
-      })),
+    prioritizeReleaseArtistDisplay(
+      groupPersonRoleDisplayRecords(
+        records.map((record) => ({
+          key: record.key,
+          name: record.name,
+          role: record.role,
+          sortName: record.sortName,
+        })),
+      ),
+      releasePrimaryArtistName,
     );
   const showSortNames =
     editMode
@@ -11640,6 +12487,7 @@ function MetadataDocumentTable({
   onDraftValueChange,
   onPerformerDraftChange,
   onTechnicalCreditDraftChange,
+  onCopyPerformerCredits,
   metadataRegistry,
   activeMetadataTab,
   saving,
@@ -11672,6 +12520,9 @@ function MetadataDocumentTable({
     records: PerformerRecordDraft[],
   ) => void;
   onTechnicalCreditDraftChange: (
+    records: PerformerRecordDraft[],
+  ) => void;
+  onCopyPerformerCredits: (
     records: PerformerRecordDraft[],
   ) => void;
   metadataRegistry: MetadataFieldDefinition[];
@@ -12056,9 +12907,23 @@ function MetadataDocumentTable({
     document.filename ===
       "track-credits.toml" &&
     activeMetadataTab === "credits";
+  const savedPerformerRecords =
+    readPerformerRecords(document);
   const performerRecords =
     performerDraft ??
-    readPerformerRecords(document);
+    savedPerformerRecords;
+  const releasePrimaryArtistValue =
+    document.scope === "track"
+      ? findMetadataValueAcrossDocuments(
+          releaseDocuments,
+          "release.primary_artist.name",
+        )
+      : undefined;
+  const releasePrimaryArtistName =
+    typeof releasePrimaryArtistValue ===
+    "string"
+      ? releasePrimaryArtistValue
+      : "";
   const supportsTechnicalCreditRecords =
     activeMetadataTab === "recording" &&
     (
@@ -13174,6 +14039,36 @@ function MetadataDocumentTable({
                             }`}
                   </small>
 
+                  {section.group === "Performers" &&
+                    supportsPerformerRecords &&
+                    savedPerformerRecords.length > 0 && (
+                      <button
+                        type="button"
+                        className="metadata-section-copy-button"
+                        disabled={
+                          performerDraft !== undefined ||
+                          (editMode &&
+                            !canFinishEditing)
+                        }
+                        title={
+                          performerDraft !== undefined ||
+                          (editMode &&
+                            !canFinishEditing)
+                            ? "Save or discard browser edits before copying performer credits."
+                            : "Copy selected saved performer credits to other tracks in this release"
+                        }
+                        onClick={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          onCopyPerformerCredits(
+                            savedPerformerRecords,
+                          );
+                        }}
+                      >
+                        Copy credits
+                      </button>
+                    )}
+
                   {renderSectionEditButton()}
                 </span>
               </summary>
@@ -13219,6 +14114,9 @@ function MetadataDocumentTable({
                     document={document}
                     records={
                       performerRecords
+                    }
+                    releasePrimaryArtistName={
+                      releasePrimaryArtistName
                     }
                     editMode={editMode}
                     metadataRegistry={

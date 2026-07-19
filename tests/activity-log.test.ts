@@ -136,3 +136,23 @@ test(
     );
   },
 );
+
+
+test(
+  "accepts performer-copy activity receipts",
+  () => {
+    const entry = {
+      ...createEntry(3),
+      action: "copy-performers" as const,
+      scope: "track" as const,
+      trackId: "destination-track",
+      message:
+        "2 performer credits copied and verified.",
+    };
+
+    assert.deepEqual(
+      normalizeMetadataActivityLog([entry]),
+      [entry],
+    );
+  },
+);

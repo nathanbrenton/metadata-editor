@@ -631,3 +631,28 @@ test(
     }
   },
 );
+
+test(
+  "registers identity-matched track artist sort-name inheritance",
+  () => {
+    const field = findMetadataField(
+      "track.primary_artist.sort_name",
+    );
+
+    assert.ok(field);
+    assert.equal(
+      field.label,
+      "Track Artist Sort Name",
+    );
+    assert.equal(field.scope, "credit");
+    assert.equal(
+      field.storageFileRole,
+      "track-credits",
+    );
+    assert.equal(field.inherited, true);
+    assert.equal(
+      field.presentation?.group,
+      "Artists",
+    );
+  },
+);

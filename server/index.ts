@@ -33,6 +33,13 @@ import {
   resolveMediaRoot,
 } from "./media-root.js";
 import { readReleaseMetadataDetail } from "./metadata-reader.js";
+import {
+  buildPerformerReplacementInputs,
+  planPerformerCopyToTarget,
+  readCopyablePerformerRecords,
+  selectPerformerRecords,
+  type PerformerCopyTargetPlan,
+} from "./performer-copy.js";
 import { saveScalarMetadataChanges } from "./metadata-saver.js";
 import {
   getReleaseNumberingTotalsFromChanges,
@@ -877,6 +884,553 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown starter metadata creation error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/copy-performer-credits"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          throw new Error(
+            "Expected a JSON object.",
+          );
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : "";
+        const sourceTrackId =
+          "sourceTrackId" in body &&
+          typeof body.sourceTrackId === "string"
+            ? body.sourceTrackId
+            : "";
+        const sourceOriginalSha256 =
+          "sourceOriginalSha256" in body &&
+          typeof body.sourceOriginalSha256 === "string"
+            ? body.sourceOriginalSha256
+            : "";
+        const selectedSourceIndexes =
+          "selectedSourceIndexes" in body &&
+          Array.isArray(body.selectedSourceIndexes)
+            ? body.selectedSourceIndexes
+            : null;
+        const destinationTrackIds =
+          "destinationTrackIds" in body &&
+          Array.isArray(body.destinationTrackIds)
+            ? body.destinationTrackIds
+            : null;
+        const execute =
+          "execute" in body &&
+          body.execute === true;
+
+        if (
+          !releaseId ||
+          !sourceTrackId ||
+          !/^[a-f0-9]{64}$/.test(
+            sourceOriginalSha256,
+          ) ||
+          !selectedSourceIndexes ||
+          !selectedSourceIndexes.every(
+            (value: unknown) =>
+              typeof value === "number" &&
+              Number.isSafeInteger(value),
+          ) ||
+          !destinationTrackIds ||
+          !destinationTrackIds.every(
+            (value: unknown) =>
+              typeof value === "string" &&
+              Boolean(value),
+          )
+        ) {
+          throw new Error(
+            "releaseId, sourceTrackId, sourceOriginalSha256, selectedSourceIndexes, and destinationTrackIds are required.",
+          );
+        }
+
+        const uniqueDestinationTrackIds =
+          Array.from(
+            new Set(
+              destinationTrackIds as string[],
+            ),
+          );
+
+        if (
+          uniqueDestinationTrackIds.length === 0
+        ) {
+          throw new Error(
+            "Select at least one destination track.",
+          );
+        }
+
+        if (
+          uniqueDestinationTrackIds.includes(
+            sourceTrackId,
+          )
+        ) {
+          throw new Error(
+            "The source track cannot also be a destination.",
+          );
+        }
+
+        const mediaRoot =
+          await resolveMediaRoot();
+        let release =
+          await scanReleaseById(
+            mediaRoot,
+            releaseId,
+          );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        let detail =
+          await readReleaseMetadataDetail(
+            mediaRoot,
+            release,
+          );
+        const sourceDocument =
+          detail.documents.find(
+            (document) =>
+              document.trackId ===
+                sourceTrackId &&
+              document.filename ===
+                "track-credits.toml",
+          );
+
+        if (!sourceDocument) {
+          throw new Error(
+            "The source track requires a readable track-credits.toml document.",
+          );
+        }
+
+        if (
+          sourceDocument.sha256 !==
+          sourceOriginalSha256
+        ) {
+          throw new Error(
+            "The source performer credits changed after the dialog opened. Refresh and review the copy again.",
+          );
+        }
+
+        const sourceRecords =
+          readCopyablePerformerRecords(
+            sourceDocument,
+          );
+        const selectedRecords =
+          selectPerformerRecords(
+            sourceRecords,
+            selectedSourceIndexes as number[],
+          );
+
+        const destinationPlans =
+          uniqueDestinationTrackIds.map(
+            (trackId) => {
+              const track =
+                release?.tracks.find(
+                  (candidate) =>
+                    candidate.id === trackId,
+                );
+
+              if (!track) {
+                return {
+                  trackId,
+                  relativePath: "",
+                  documentExists: false,
+                  addCount: 0,
+                  duplicateCount: 0,
+                  resultingCount: 0,
+                  status: "blocked" as const,
+                  reason:
+                    "Destination track was not found in the selected release.",
+                  additions: [],
+                };
+              }
+
+              const creditsFile =
+                track.metadataFiles.find(
+                  (file) =>
+                    file.filename ===
+                      "track-credits.toml",
+                );
+
+              if (!creditsFile) {
+                return {
+                  trackId,
+                  relativePath: "",
+                  documentExists: false,
+                  addCount: 0,
+                  duplicateCount: 0,
+                  resultingCount: 0,
+                  status: "blocked" as const,
+                  reason:
+                    "Destination track has no track-credits metadata slot.",
+                  additions: [],
+                };
+              }
+
+              const targetDocument =
+                detail.documents.find(
+                  (document) =>
+                    document.trackId ===
+                      trackId &&
+                    document.filename ===
+                      "track-credits.toml",
+                );
+
+              if (
+                creditsFile.exists &&
+                !targetDocument
+              ) {
+                return {
+                  trackId,
+                  relativePath:
+                    creditsFile.relativePath,
+                  documentExists: true,
+                  addCount: 0,
+                  duplicateCount: 0,
+                  resultingCount: 0,
+                  status: "blocked" as const,
+                  reason:
+                    "Destination track-credits.toml could not be parsed safely.",
+                  additions: [],
+                };
+              }
+
+              return planPerformerCopyToTarget(
+                selectedRecords,
+                targetDocument
+                  ? readCopyablePerformerRecords(
+                      targetDocument,
+                    )
+                  : [],
+                {
+                  trackId,
+                  relativePath:
+                    creditsFile.relativePath,
+                  documentExists:
+                    Boolean(targetDocument),
+                },
+              );
+            },
+          );
+
+        const publicPlans =
+          destinationPlans.map(
+            ({ additions: _additions, ...plan }) =>
+              plan,
+          );
+        const planSummary = {
+          selectedCreditCount:
+            selectedRecords.length,
+          destinationCount:
+            destinationPlans.length,
+          readyCount:
+            destinationPlans.filter(
+              (plan) =>
+                plan.status === "ready",
+            ).length,
+          blockedCount:
+            destinationPlans.filter(
+              (plan) =>
+                plan.status === "blocked",
+            ).length,
+          addCount:
+            destinationPlans.reduce(
+              (total, plan) =>
+                total + plan.addCount,
+              0,
+            ),
+          duplicateCount:
+            destinationPlans.reduce(
+              (total, plan) =>
+                total +
+                plan.duplicateCount,
+              0,
+            ),
+        };
+
+        if (!execute) {
+          sendJson(response, 200, {
+            releaseId,
+            sourceTrackId,
+            sourceRelativePath:
+              sourceDocument.relativePath,
+            sourceSha256:
+              sourceDocument.sha256,
+            selectedCredits:
+              selectedRecords,
+            destinations: publicPlans,
+            summary: planSummary,
+          });
+          return;
+        }
+
+        const missingTargets =
+          destinationPlans.filter(
+            (plan) =>
+              plan.status === "ready" &&
+              plan.addCount > 0 &&
+              !plan.documentExists,
+          );
+
+        if (missingTargets.length > 0) {
+          await executeMetadataCreationPlan(
+            mediaRoot,
+            {
+              releaseId,
+              scope: "track",
+              items: missingTargets.map(
+                (plan) => ({
+                  storageRole:
+                    "track-credits" as const,
+                  filename:
+                    "track-credits.toml",
+                  relativePath:
+                    plan.relativePath,
+                  action: "create" as const,
+                  reason:
+                    "Create a track credits document before copying selected performer credits.",
+                  content:
+                    "[track]\nperformers = []\ncontributors = []\n",
+                  validated: true,
+                }),
+              ),
+              summary: {
+                createCount:
+                  missingTargets.length,
+                blockedCount: 0,
+              },
+              warnings: [],
+            },
+          );
+
+          release = await scanReleaseById(
+            mediaRoot,
+            releaseId,
+          );
+
+          if (!release) {
+            throw new Error(
+              "Release disappeared after creating destination credit documents.",
+            );
+          }
+
+          detail =
+            await readReleaseMetadataDetail(
+              mediaRoot,
+              release,
+            );
+        }
+
+        const executionTargets: Array<
+          PerformerCopyTargetPlan & {
+            createdDocument: boolean;
+            receipt?: Awaited<
+              ReturnType<
+                typeof saveScalarMetadataChanges
+              >
+            >;
+            error?: string;
+          }
+        > = [];
+
+        for (const initialPlan of destinationPlans) {
+          if (initialPlan.status === "blocked") {
+            executionTargets.push({
+              ...publicPlans.find(
+                (plan) =>
+                  plan.trackId ===
+                    initialPlan.trackId,
+              )!,
+              createdDocument: false,
+              error: initialPlan.reason,
+            });
+            continue;
+          }
+
+          const targetDocument =
+            detail.documents.find(
+              (document) =>
+                document.trackId ===
+                  initialPlan.trackId &&
+                document.filename ===
+                  "track-credits.toml",
+            );
+
+          if (!targetDocument) {
+            executionTargets.push({
+              ...publicPlans.find(
+                (plan) =>
+                  plan.trackId ===
+                    initialPlan.trackId,
+              )!,
+              status: "blocked",
+              createdDocument:
+                !initialPlan.documentExists,
+              error:
+                "Destination track-credits.toml is unavailable after preflight.",
+            });
+            continue;
+          }
+
+          const latestExistingRecords =
+            readCopyablePerformerRecords(
+              targetDocument,
+            );
+          const latestPlan =
+            planPerformerCopyToTarget(
+              selectedRecords,
+              latestExistingRecords,
+              {
+                trackId:
+                  initialPlan.trackId,
+                relativePath:
+                  targetDocument.relativePath,
+                documentExists: true,
+              },
+            );
+
+          if (latestPlan.status === "blocked") {
+            const {
+              additions: _additions,
+              ...blockedPlan
+            } = latestPlan;
+            executionTargets.push({
+              ...blockedPlan,
+              createdDocument:
+                !initialPlan.documentExists,
+              error: latestPlan.reason,
+            });
+            continue;
+          }
+
+          if (latestPlan.addCount === 0) {
+            const {
+              additions: _additions,
+              ...skippedPlan
+            } = latestPlan;
+            executionTargets.push({
+              ...skippedPlan,
+              createdDocument:
+                !initialPlan.documentExists,
+            });
+            continue;
+          }
+
+          try {
+            const receipt =
+              await saveScalarMetadataChanges(
+                mediaRoot,
+                release,
+                targetDocument.relativePath,
+                targetDocument.sha256,
+                [],
+                false,
+                buildPerformerReplacementInputs(
+                  latestExistingRecords,
+                  latestPlan.additions,
+                ),
+              );
+            const {
+              additions: _additions,
+              ...savedPlan
+            } = latestPlan;
+            executionTargets.push({
+              ...savedPlan,
+              createdDocument:
+                !initialPlan.documentExists,
+              receipt,
+            });
+          } catch (error) {
+            const {
+              additions: _additions,
+              ...failedPlan
+            } = latestPlan;
+            executionTargets.push({
+              ...failedPlan,
+              status: "blocked",
+              createdDocument:
+                !initialPlan.documentExists,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Unknown performer-copy error",
+            });
+          }
+        }
+
+        const failedCount =
+          executionTargets.filter(
+            (target) => Boolean(target.error),
+          ).length;
+        const writtenTargets =
+          executionTargets.filter(
+            (target) => Boolean(target.receipt),
+          );
+        const execution = {
+          status:
+            failedCount === 0
+              ? "verified"
+              : writtenTargets.length > 0
+                ? "partial"
+                : "failed",
+          targets: executionTargets,
+          addedCount:
+            writtenTargets.reduce(
+              (total, target) =>
+                total + target.addCount,
+              0,
+            ),
+          duplicateCount:
+            executionTargets.reduce(
+              (total, target) =>
+                total +
+                target.duplicateCount,
+              0,
+            ),
+          failedCount,
+        };
+
+        sendJson(
+          response,
+          failedCount > 0 ? 207 : 200,
+          {
+            releaseId,
+            sourceTrackId,
+            sourceRelativePath:
+              sourceDocument.relativePath,
+            sourceSha256:
+              sourceDocument.sha256,
+            selectedCredits:
+              selectedRecords,
+            destinations: publicPlans,
+            summary: planSummary,
+            execution,
+          },
+        );
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown performer-credit copy error",
         });
       }
 

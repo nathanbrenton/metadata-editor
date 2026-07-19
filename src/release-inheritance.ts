@@ -80,6 +80,27 @@ export const trackReleaseInheritancePaths =
     ],
   ]);
 
+const primaryArtistSortNamePath =
+  "track.primary_artist.sort_name";
+const releasePrimaryArtistNamePath =
+  "release.primary_artist.name";
+const releasePrimaryArtistSortNamePath =
+  "release.primary_artist.sort_name";
+const indexedAlbumArtistSortNamePattern =
+  /^track\.album_artists\[(\d+)\]\.sort_name$/;
+
+export function isArtistSortNameInheritancePath(
+  metadataPath: string,
+): boolean {
+  return (
+    metadataPath ===
+      primaryArtistSortNamePath ||
+    indexedAlbumArtistSortNamePattern.test(
+      metadataPath,
+    )
+  );
+}
+
 export function isBlankMetadataValue(
   value: unknown,
 ): boolean {
@@ -134,24 +155,159 @@ export function findMetadataValueAcrossDocuments(
   return undefined;
 }
 
-export function resolveInheritedReleaseValue(
+function findDocumentStringValue(
   document: MetadataDocumentLike,
-  row: FlattenedMetadataRow,
+  metadataPath: string,
+): string | undefined {
+  const row = flattenMetadata(
+    document.parsed,
+  ).find(
+    (candidate) =>
+      candidate.path === metadataPath,
+  );
+
+  return typeof row?.value === "string"
+    ? row.value
+    : undefined;
+}
+
+function normalizeArtistIdentity(
+  value: string,
+): string {
+  return value
+    .normalize("NFKC")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase();
+}
+
+function artistIdentitiesMatch(
+  left: string,
+  right: string,
+): boolean {
+  return (
+    normalizeArtistIdentity(left) ===
+    normalizeArtistIdentity(right)
+  );
+}
+
+/*
+ * Sort names may inherit only as part of a matching artist identity.
+ * This prevents a local artist such as Kateri Lirio from accidentally
+ * receiving the release artist's "Brenton, Nathan" sort value.
+ */
+function resolveArtistSortNameReleaseValue(
+  document: MetadataDocumentLike,
+  metadataPath: string,
   releaseDocuments: MetadataDocumentLike[],
 ): {
   sourcePath: string;
   value: InheritedMetadataValue;
 } | null {
+  const releaseArtistName =
+    findMetadataValueAcrossDocuments(
+      releaseDocuments,
+      releasePrimaryArtistNamePath,
+    );
+  const releaseSortName =
+    findMetadataValueAcrossDocuments(
+      releaseDocuments,
+      releasePrimaryArtistSortNamePath,
+    );
+
   if (
-    document.scope !== "track" ||
-    !isBlankMetadataValue(row.value)
+    typeof releaseArtistName !== "string" ||
+    typeof releaseSortName !== "string"
   ) {
     return null;
   }
 
+  let trackArtistName: string | undefined;
+
+  if (
+    metadataPath ===
+    primaryArtistSortNamePath
+  ) {
+    trackArtistName =
+      findDocumentStringValue(
+        document,
+        "track.primary_artist.name",
+      );
+
+    /*
+     * A blank track artist name already means that the release artist is
+     * inherited, so its matching sort name may inherit as well.
+     */
+    if (
+      trackArtistName?.trim() &&
+      !artistIdentitiesMatch(
+        trackArtistName,
+        releaseArtistName,
+      )
+    ) {
+      return null;
+    }
+  } else {
+    const albumArtistMatch =
+      metadataPath.match(
+        indexedAlbumArtistSortNamePattern,
+      );
+
+    if (!albumArtistMatch) {
+      return null;
+    }
+
+    trackArtistName =
+      findDocumentStringValue(
+        document,
+        `track.album_artists[${albumArtistMatch[1]}].name`,
+      );
+
+    if (
+      !trackArtistName?.trim() ||
+      !artistIdentitiesMatch(
+        trackArtistName,
+        releaseArtistName,
+      )
+    ) {
+      return null;
+    }
+  }
+
+  return {
+    sourcePath:
+      releasePrimaryArtistSortNamePath,
+    value: releaseSortName,
+  };
+}
+
+function resolveReleaseValueForPath(
+  document: MetadataDocumentLike,
+  metadataPath: string,
+  releaseDocuments: MetadataDocumentLike[],
+): {
+  sourcePath: string;
+  value: InheritedMetadataValue;
+} | null {
+  if (document.scope !== "track") {
+    return null;
+  }
+
+  if (
+    isArtistSortNameInheritancePath(
+      metadataPath,
+    )
+  ) {
+    return resolveArtistSortNameReleaseValue(
+      document,
+      metadataPath,
+      releaseDocuments,
+    );
+  }
+
   const sourcePath =
     trackReleaseInheritancePaths.get(
-      row.path,
+      metadataPath,
     );
 
   if (!sourcePath) {
@@ -170,6 +326,26 @@ export function resolveInheritedReleaseValue(
         sourcePath,
         value,
       };
+}
+
+/*
+ * Resolve the applicable release value even when a local override exists.
+ * Callers decide whether the local or inherited value is effective. Keeping
+ * the source available enables an explicit "Use release value" action.
+ */
+export function resolveInheritedReleaseValue(
+  document: MetadataDocumentLike,
+  row: FlattenedMetadataRow,
+  releaseDocuments: MetadataDocumentLike[],
+): {
+  sourcePath: string;
+  value: InheritedMetadataValue;
+} | null {
+  return resolveReleaseValueForPath(
+    document,
+    row.path,
+    releaseDocuments,
+  );
 }
 
 function normalizeFlattenedValueType(
@@ -205,7 +381,13 @@ export function buildMissingInheritedMetadataRows(
   return metadataRegistry.flatMap(
     (field) => {
       if (
-        field.scope !== "track" ||
+        field.scope !== "track" &&
+        field.scope !== "credit"
+      ) {
+        return [];
+      }
+
+      if (
         field.storageFileRole !==
           storageFileRole ||
         !field.inherited ||
@@ -216,22 +398,14 @@ export function buildMissingInheritedMetadataRows(
         return [];
       }
 
-      const sourcePath =
-        trackReleaseInheritancePaths.get(
-          field.tomlPath,
-        );
-
-      if (!sourcePath) {
-        return [];
-      }
-
       const inheritedValue =
-        findMetadataValueAcrossDocuments(
+        resolveReleaseValueForPath(
+          document,
+          field.tomlPath,
           releaseDocuments,
-          sourcePath,
         );
 
-      if (inheritedValue === undefined) {
+      if (!inheritedValue) {
         return [];
       }
 

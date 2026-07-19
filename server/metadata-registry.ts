@@ -1022,6 +1022,33 @@ export const metadataFieldRegistry:
       displayPolicy: "auto",
     },
     {
+      id: "track.primary_artist.sort_name",
+      canonicalName:
+        "track.primary_artist.sort_name",
+      label: "Track Artist Sort Name",
+      description:
+        "Optional alphabetical sort form for the track artist.",
+      scope: "credit",
+      storageFileRole: "track-credits",
+      tomlPath:
+        "track.primary_artist.sort_name",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: true,
+      presentation: {
+        group: "Artists",
+        order: 30,
+        examples: [
+          "First Last → Last, First",
+          "The Example Band → Example Band, The",
+        ],
+        help:
+          "Inherit the release artist sort name only when Track Artist matches the release artist. Enter a local value only when this track needs a different alphabetical sort form.",
+      },
+      displayPolicy: "auto",
+    },
+    {
       id: "track.numbering.track_number",
       canonicalName:
         "track.numbering.track_number",

@@ -25,7 +25,11 @@ export type MetadataActivityEntry = {
   documentFilename: string;
   scope: "release" | "track";
   trackId?: string;
-  action: "save" | "add-fields" | "remove-fields";
+  action:
+    | "save"
+    | "add-fields"
+    | "remove-fields"
+    | "copy-performers";
   status: MetadataActivityStatus;
   message: string;
   receipt?: MetadataActivityReceipt;
@@ -87,7 +91,8 @@ export function isMetadataActivityEntry(
   const actionIsValid =
     value.action === "save" ||
     value.action === "add-fields" ||
-    value.action === "remove-fields";
+    value.action === "remove-fields" ||
+    value.action === "copy-performers";
   const statusIsValid =
     value.status === "verified" ||
     value.status === "failed";
