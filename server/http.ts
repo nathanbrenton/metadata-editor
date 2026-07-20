@@ -2,7 +2,7 @@ import type {
   IncomingMessage,
 } from "node:http";
 
-const maximumBodyBytes = 16_384;
+const maximumBodyBytes = 512 * 1024;
 
 export async function readJsonBody(
   request: IncomingMessage,

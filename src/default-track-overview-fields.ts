@@ -15,12 +15,51 @@ const defaultTrackOverviewFieldPathSet =
     defaultTrackOverviewFieldPaths,
   );
 
+/*
+ * Sort Title is a derived identity default. Keep it visible in track Overview
+ * even when an older track.toml does not yet contain the optional path.
+ */
+export const defaultTrackIdentityFieldPaths = [
+  "track.sort_title",
+] as const;
+
+const defaultTrackIdentityFieldPathSet =
+  new Set<string>(
+    defaultTrackIdentityFieldPaths,
+  );
+
+export function isDefaultTrackIdentityFieldPath(
+  path: string,
+): boolean {
+  return defaultTrackIdentityFieldPathSet.has(
+    path,
+  );
+}
+
 export function isDefaultTrackOverviewFieldPath(
   path: string,
 ): boolean {
   return defaultTrackOverviewFieldPathSet.has(
     path,
   );
+}
+
+/*
+ * Existing and not-yet-created Musical Analysis rows share this one slot
+ * order so creating an optional field replaces its Add row in place.
+ */
+export function getDefaultTrackOverviewFieldOrder(
+  path: string,
+): number {
+  const fieldIndex =
+    defaultTrackOverviewFieldPaths.indexOf(
+      path as
+        (typeof defaultTrackOverviewFieldPaths)[number],
+    );
+
+  return fieldIndex >= 0
+    ? fieldIndex
+    : Number.MAX_SAFE_INTEGER;
 }
 
 export function shouldShowDefaultTrackOverviewFields({

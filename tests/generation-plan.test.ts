@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildMetadataGenerationPlan } from "../server/generation-plan.js";
+import {
+  buildMetadataGenerationPlan,
+  buildSingleMetadataDocumentPlan,
+} from "../server/generation-plan.js";
 import { buildMetadataPreview } from "../server/inference.js";
 import { buildGeneratedTomlPreview } from "../server/toml-preview.js";
 import type { ReleaseScanResult } from "../server/types.js";
@@ -274,6 +277,75 @@ test(
           },
         ),
       /Track not found/,
+    );
+  },
+);
+
+
+test(
+  "plans one exact missing metadata document",
+  () => {
+    const release = createRelease(false);
+    const generated = buildGeneratedTomlPreview(
+      release,
+      buildMetadataPreview(release),
+    );
+    const relativePath =
+      `${release.relativePath}/release-production-notes.toml`;
+
+    const plan = buildSingleMetadataDocumentPlan(
+      release,
+      generated,
+      relativePath,
+    );
+
+    assert.equal(plan.items.length, 1);
+    assert.equal(plan.items[0]?.relativePath, relativePath);
+    assert.equal(plan.summary.createCount, 1);
+    assert.equal(plan.summary.blockedCount, 0);
+  },
+);
+
+test(
+  "blocks exact document creation when the file exists",
+  () => {
+    const release = createRelease(true);
+    const generated = buildGeneratedTomlPreview(
+      release,
+      buildMetadataPreview(release),
+    );
+    const relativePath =
+      `${release.relativePath}/release-settings.toml`;
+
+    const plan = buildSingleMetadataDocumentPlan(
+      release,
+      generated,
+      relativePath,
+    );
+
+    assert.equal(plan.items[0]?.action, "blocked");
+    assert.equal(plan.summary.createCount, 0);
+    assert.equal(plan.summary.blockedCount, 1);
+  },
+);
+
+test(
+  "rejects a path outside the generated document set",
+  () => {
+    const release = createRelease(false);
+    const generated = buildGeneratedTomlPreview(
+      release,
+      buildMetadataPreview(release),
+    );
+
+    assert.throws(
+      () =>
+        buildSingleMetadataDocumentPlan(
+          release,
+          generated,
+          `${release.relativePath}/unknown.toml`,
+        ),
+      /not found/,
     );
   },
 );

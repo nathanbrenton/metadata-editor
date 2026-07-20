@@ -29,7 +29,8 @@ export type MetadataActivityEntry = {
     | "save"
     | "add-fields"
     | "remove-fields"
-    | "copy-performers";
+    | "copy-performers"
+    | "create-document";
   status: MetadataActivityStatus;
   message: string;
   receipt?: MetadataActivityReceipt;
@@ -92,7 +93,8 @@ export function isMetadataActivityEntry(
     value.action === "save" ||
     value.action === "add-fields" ||
     value.action === "remove-fields" ||
-    value.action === "copy-performers";
+    value.action === "copy-performers" ||
+    value.action === "create-document";
   const statusIsValid =
     value.status === "verified" ||
     value.status === "failed";

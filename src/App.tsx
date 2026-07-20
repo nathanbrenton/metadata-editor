@@ -1,6 +1,8 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -44,11 +46,14 @@ import {
 } from "./release-inheritance.js";
 
 import {
+  groupMatchingPerformerRoleSets,
   prioritizeReleaseArtistDisplay,
 } from "./performer-display-order.js";
 
 import {
+  getDefaultTrackOverviewFieldOrder,
   getMissingTrackOverviewFieldPresentation,
+  isDefaultTrackIdentityFieldPath,
   isDefaultTrackOverviewFieldPath,
   shouldShowDefaultTrackOverviewFields,
 } from "./default-track-overview-fields.js";
@@ -60,6 +65,7 @@ import {
 
 import {
   deriveTrackSaveChanges,
+  generateTrackSortTitle,
 } from "./track-derived-metadata.js";
 
 import {
@@ -67,6 +73,53 @@ import {
   inferTrackTitleMetadata,
   recommendedTrackVersionOptions,
 } from "../shared/track-title.js";
+
+import {
+  buildArtworkGallery,
+  selectPreferredReleaseArtwork,
+  type ArtworkGalleryItem,
+} from "./artwork-gallery.js";
+
+import {
+  filterPresentableMetadataRows,
+  unmappedMetadataGroup,
+} from "./metadata-presentation.js";
+
+import {
+  lyricsMetadataGroupOrder,
+  resolveEffectiveTrackLanguage,
+} from "./lyrics-language.js";
+
+import {
+  buildMetadataReadiness,
+  readinessBadgeLabel,
+  readinessTone,
+  summarizeMissingMetadataDocuments,
+  summarizeReleaseScanReadiness,
+  type MetadataReadinessScope,
+  type MetadataReadinessSummary,
+  type MissingMetadataDocument,
+  type RequiredFieldIssue,
+} from "./metadata-readiness.js";
+
+import {
+  addReadinessSkip,
+  readReadinessSkips,
+  removeReadinessSkip,
+  writeReadinessSkips,
+} from "./readiness-skips.js";
+
+import type {
+  IngestCandidateInspection,
+  IngestCandidateSummary,
+  IngestEvidence,
+  IngestFileInspection,
+  IngestScanResult,
+} from "../shared/ingest-types.js";
+
+import {
+  IngestReleaseBuilder,
+} from "./IngestReleaseBuilder.js";
 
 type MetadataFileStatus = {
   filename: string;
@@ -304,6 +357,7 @@ type MetadataRegistryResponse = {
 
 type ApplicationView =
   | "library"
+  | "ingest"
   | "compatibility";
 
 type ToastMessage = {
@@ -324,6 +378,20 @@ type ReleaseMetadataTab =
   | "developer"
   | "settings"
   | "raw";
+
+type ReadinessNavigationTarget =
+  | {
+      kind: "document";
+      scopeId: string;
+      tab: ReleaseMetadataTab;
+      file: MissingMetadataDocument;
+    }
+  | {
+      kind: "field";
+      scopeId: string;
+      tab: ReleaseMetadataTab;
+      field: RequiredFieldIssue;
+    };
 
 type CompatibilityStatusFilter =
   | "all"
@@ -527,9 +595,46 @@ function formatMetadataValue(
   return String(value);
 }
 
+function formatByteSize(sizeBytes: number): string {
+  if (sizeBytes < 1024) {
+    return `${sizeBytes} B`;
+  }
+
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = sizeBytes / 1024;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+function formatDuration(seconds: number): string {
+  const wholeSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(wholeSeconds / 60);
+  const remainder = wholeSeconds % 60;
+
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
 export function App() {
   const [scan, setScan] =
     useState<LibraryScanResult | null>(null);
+  const [ingestScan, setIngestScan] =
+    useState<IngestScanResult | null>(null);
+  const [ingestError, setIngestError] =
+    useState<string | null>(null);
+  const [ingestLoading, setIngestLoading] =
+    useState(false);
+  const [ingestInspection, setIngestInspection] =
+    useState<IngestCandidateInspection | null>(null);
+  const [ingestInspectionError, setIngestInspectionError] =
+    useState<string | null>(null);
+  const [ingestInspectionLoading, setIngestInspectionLoading] =
+    useState(false);
   const [error, setError] =
     useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -705,9 +810,114 @@ export function App() {
     }
   }, [notify]);
 
+  const refreshIngest = useCallback(async (
+    announce = false,
+  ) => {
+    setIngestLoading(true);
+    setIngestError(null);
+
+    try {
+      const response = await fetch(
+        "/api/ingest/scan",
+      );
+      const result = (await response.json()) as
+        | IngestScanResult
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error ??
+                `Ingest scan failed: HTTP ${response.status}`
+            : `Ingest scan failed: HTTP ${response.status}`,
+        );
+      }
+
+      setIngestScan(result as IngestScanResult);
+
+      if (announce) {
+        notify(
+          "Ingest drop refreshed",
+          "success",
+        );
+      }
+    } catch (scanError) {
+      const message =
+        scanError instanceof Error
+          ? scanError.message
+          : "Unknown ingest scan error";
+
+      setIngestError(message);
+
+      if (announce) {
+        notify(
+          "Ingest drop refresh failed",
+          "error",
+        );
+      }
+    } finally {
+      setIngestLoading(false);
+    }
+  }, [notify]);
+
+  const inspectCandidate = useCallback(async (
+    candidateId: string,
+  ) => {
+    setIngestInspectionLoading(true);
+    setIngestInspectionError(null);
+
+    try {
+      const query = new URLSearchParams({
+        candidate: candidateId,
+      });
+      const response = await fetch(
+        `/api/ingest/candidate?${query.toString()}`,
+      );
+      const result = (await response.json()) as
+        | IngestCandidateInspection
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error ??
+                `Inspection failed: HTTP ${response.status}`
+            : `Inspection failed: HTTP ${response.status}`,
+        );
+      }
+
+      setIngestInspection(
+        result as IngestCandidateInspection,
+      );
+    } catch (inspectionError) {
+      setIngestInspectionError(
+        inspectionError instanceof Error
+          ? inspectionError.message
+          : "Unknown ingest inspection error",
+      );
+    } finally {
+      setIngestInspectionLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void refreshLibrary();
   }, [refreshLibrary]);
+
+  useEffect(() => {
+    if (
+      applicationView === "ingest" &&
+      ingestScan === null &&
+      !ingestLoading
+    ) {
+      void refreshIngest();
+    }
+  }, [
+    applicationView,
+    ingestLoading,
+    ingestScan,
+    refreshIngest,
+  ]);
 
 
   useEffect(() => {
@@ -785,7 +995,9 @@ export function App() {
     }
 
     let trackCount = 0;
-    let missingMetadataCount = 0;
+    let missingCoreMetadataCount = 0;
+    let missingCreditMetadataCount = 0;
+    let missingSupplementalMetadataCount = 0;
     let audioMasterCount = 0;
     let artworkMasterCount = 0;
 
@@ -794,17 +1006,19 @@ export function App() {
       artworkMasterCount +=
         release.artworkMasters.length;
 
-      missingMetadataCount +=
-        release.metadataFiles.filter(
-          (file) => !file.exists,
-        ).length;
+      const releaseReadiness =
+        summarizeReleaseScanReadiness(
+          release,
+        );
+
+      missingCoreMetadataCount +=
+        releaseReadiness.core;
+      missingCreditMetadataCount +=
+        releaseReadiness.credits;
+      missingSupplementalMetadataCount +=
+        releaseReadiness.supplemental;
 
       for (const track of release.tracks) {
-        missingMetadataCount +=
-          track.metadataFiles.filter(
-            (file) => !file.exists,
-          ).length;
-
         audioMasterCount +=
           track.audioMasters.length;
         artworkMasterCount +=
@@ -815,7 +1029,13 @@ export function App() {
     return {
       releaseCount: scan.releases.length,
       trackCount,
-      missingMetadataCount,
+      missingMetadataCount:
+        missingCoreMetadataCount +
+        missingCreditMetadataCount +
+        missingSupplementalMetadataCount,
+      missingCoreMetadataCount,
+      missingCreditMetadataCount,
+      missingSupplementalMetadataCount,
       audioMasterCount,
       artworkMasterCount,
     };
@@ -856,17 +1076,41 @@ export function App() {
               <p className="subtitle">
                 {applicationView === "library"
                   ? "Library discovery and metadata editing"
-                  : "Metadata field reference and player mappings"}
+                  : applicationView === "ingest"
+                    ? "Source inspection and staging release creation"
+                    : "Metadata field reference and player mappings"}
               </p>
             </div>
 
             <div className="page-header-actions">
               {applicationView === "library" &&
                 scan && (
+                  <>
+                    <p className="scan-time">
+                      Last scan:{" "}
+                      {new Date(
+                        scan.scannedAt,
+                      ).toLocaleString()}
+                    </p>
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => {
+                        setApplicationView("ingest");
+                        setIngestInspection(null);
+                      }}
+                    >
+                      Ingest
+                    </button>
+                  </>
+                )}
+
+              {applicationView === "ingest" &&
+                ingestScan && (
                   <p className="scan-time">
-                    Last scan:{" "}
+                    Drop scan:{" "}
                     {new Date(
-                      scan.scannedAt,
+                      ingestScan.scannedAt,
                     ).toLocaleString()}
                   </p>
                 )}
@@ -905,6 +1149,24 @@ export function App() {
                     {loading
                       ? "Scanning…"
                       : "Refresh library"}
+                  </button>
+                </section>
+              )}
+
+              {applicationView === "ingest" && (
+                <section className="menu-card">
+                  <h2>Refresh Ingest Drop</h2>
+                  <button
+                    type="button"
+                    disabled={ingestLoading}
+                    onClick={() => {
+                      void refreshIngest(true);
+                      setMenuOpen(false);
+                    }}
+                  >
+                    {ingestLoading
+                      ? "Inspecting drop…"
+                      : "Refresh drop point"}
                   </button>
                 </section>
               )}
@@ -968,6 +1230,24 @@ export function App() {
 
             <button
               type="button"
+              className={
+                applicationView === "ingest"
+                  ? "active"
+                  : undefined
+              }
+              aria-pressed={
+                applicationView === "ingest"
+              }
+              onClick={() => {
+                setApplicationView("ingest");
+                setIngestInspection(null);
+              }}
+            >
+              Ingest
+            </button>
+
+            <button
+              type="button"
               className={[
                 "tag-search-tab",
                 applicationView ===
@@ -998,6 +1278,40 @@ export function App() {
               releases={
                 scan?.releases ?? []
               }
+            />
+          ) : applicationView === "ingest" ? (
+            <IngestView
+              scan={ingestScan}
+              error={ingestError}
+              loading={ingestLoading}
+              inspection={ingestInspection}
+              inspectionError={
+                ingestInspectionError
+              }
+              inspectionLoading={
+                ingestInspectionLoading
+              }
+              onRefresh={() =>
+                void refreshIngest(true)
+              }
+              onInspect={(candidateId) =>
+                void inspectCandidate(candidateId)
+              }
+              onBackToCandidates={() =>
+                setIngestInspection(null)
+              }
+              onReleaseCreated={async (
+                releaseId,
+              ) => {
+                setIngestInspection(null);
+                setApplicationView(
+                  "library",
+                );
+                await refreshLibrary();
+                await openReleaseDetail(
+                  releaseId,
+                );
+              }}
             />
           ) : (
             <>
@@ -1085,9 +1399,15 @@ export function App() {
             {" · "}
             {summary.artworkMasterCount} artwork
             files
-            {" · "}
-            {summary.missingMetadataCount} missing
-            TOMLs
+            {summary.missingMetadataCount > 0 && (
+              <>
+                {" · "}
+                {summary.missingCoreMetadataCount > 0 ||
+                summary.missingCreditMetadataCount > 0
+                  ? `${summary.missingMetadataCount} missing TOMLs (${summary.missingCoreMetadataCount} core · ${summary.missingCreditMetadataCount} credits · ${summary.missingSupplementalMetadataCount} optional)`
+                  : `${summary.missingSupplementalMetadataCount} optional TOMLs not created`}
+              </>
+            )}
           </p>
         )}
 
@@ -3047,6 +3367,806 @@ function CompatibilityPlayerCell({
   );
 }
 
+function IngestView({
+  scan,
+  error,
+  loading,
+  inspection,
+  inspectionError,
+  inspectionLoading,
+  onRefresh,
+  onInspect,
+  onBackToCandidates,
+  onReleaseCreated,
+}: {
+  scan: IngestScanResult | null;
+  error: string | null;
+  loading: boolean;
+  inspection: IngestCandidateInspection | null;
+  inspectionError: string | null;
+  inspectionLoading: boolean;
+  onRefresh: () => void;
+  onInspect: (candidateId: string) => void;
+  onBackToCandidates: () => void;
+  onReleaseCreated: (
+    releaseId: string,
+  ) => void | Promise<void>;
+}) {
+  if (inspection) {
+    return (
+      <IngestCandidateInspectionView
+        inspection={inspection}
+        onBack={onBackToCandidates}
+        onReleaseCreated={onReleaseCreated}
+      />
+    );
+  }
+
+  return (
+    <section className="ingest-view">
+      <header className="ingest-view-header">
+        <div>
+          <p className="eyebrow">
+            Source inspection and staging
+          </p>
+          <h2>Ingest drop</h2>
+          <p>
+            Inspect top-level folders and loose media,
+            then build a reviewed staging release.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          disabled={loading}
+          onClick={onRefresh}
+        >
+          {loading
+            ? "Inspecting drop…"
+            : "Refresh drop point"}
+        </button>
+      </header>
+
+      <div className="ingest-safety-banner">
+        <strong>Source files stay untouched</strong>
+        <span>
+          Inspection is read-only. The release builder
+          copies selected bytes into a fresh staging
+          directory only after an explicit review.
+        </span>
+      </div>
+
+      {error && (
+        <p className="message error">{error}</p>
+      )}
+
+      {inspectionError && (
+        <p className="message error">
+          {inspectionError}
+        </p>
+      )}
+
+      {inspectionLoading && (
+        <p className="message">
+          Probing candidate media with ffprobe and
+          MediaInfo…
+        </p>
+      )}
+
+      {scan && (
+        <>
+          <section
+            className="ingest-table-panel"
+            aria-labelledby="ingest-drop-summary-heading"
+          >
+            <header className="ingest-table-panel-header">
+              <h3 id="ingest-drop-summary-heading">
+                Drop summary
+              </h3>
+            </header>
+            <div className="ingest-table-scroll">
+              <table className="ingest-table ingest-drop-summary-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Drop point</th>
+                    <th scope="col" className="numeric">
+                      Candidates
+                    </th>
+                    <th scope="col" className="numeric">
+                      Files
+                    </th>
+                    <th scope="col">ffprobe</th>
+                    <th scope="col">MediaInfo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <code>{scan.configuredRoot}</code>
+                    </td>
+                    <td className="numeric">
+                      {scan.candidateCount}
+                    </td>
+                    <td className="numeric">
+                      {scan.fileCount}
+                    </td>
+                    <td>
+                      {scan.capabilities.ffprobe.available
+                        ? "Available"
+                        : "Unavailable"}
+                    </td>
+                    <td>
+                      {scan.capabilities.mediainfo.available
+                        ? "Available"
+                        : "Unavailable"}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {scan.warnings.length > 0 && (
+            <section className="warning-panel">
+              <h3>Inspection capabilities</h3>
+              <ul>
+                {scan.warnings.map((warning) => (
+                  <li key={warning}>{warning}</li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {scan.candidates.length === 0 ? (
+            <p className="message">
+              No eligible top-level folders or loose
+              files were found.
+            </p>
+          ) : (
+            <IngestCandidateTable
+              candidates={scan.candidates}
+              disabled={inspectionLoading}
+              onInspect={onInspect}
+            />
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function IngestCandidateTable({
+  candidates,
+  disabled,
+  onInspect,
+}: {
+  candidates: IngestCandidateSummary[];
+  disabled: boolean;
+  onInspect: (candidateId: string) => void;
+}) {
+  return (
+    <section
+      className="ingest-table-panel"
+      aria-labelledby="ingest-candidates-heading"
+    >
+      <header className="ingest-table-panel-header">
+        <div>
+          <h3 id="ingest-candidates-heading">
+            Ingest candidates
+          </h3>
+          <p>
+            Each top-level folder or loose media file is
+            treated as one read-only candidate.
+          </p>
+        </div>
+        <strong>
+          {candidates.length}{" "}
+          {candidates.length === 1
+            ? "candidate"
+            : "candidates"}
+        </strong>
+      </header>
+
+      <div className="ingest-table-scroll">
+        <table className="ingest-table ingest-candidate-table">
+          <thead>
+            <tr>
+              <th scope="col">Candidate</th>
+              <th scope="col">Type</th>
+              <th scope="col" className="numeric">
+                Files
+              </th>
+              <th scope="col" className="numeric">
+                Audio
+              </th>
+              <th scope="col" className="numeric">
+                Images
+              </th>
+              <th scope="col" className="numeric">
+                Text
+              </th>
+              <th scope="col" className="numeric">
+                Size
+              </th>
+              <th scope="col">Extensions</th>
+              <th scope="col">Date evidence</th>
+              <th scope="col" className="action-column">
+                Action
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {candidates.map((candidate) => (
+              <tr key={candidate.id}>
+                <th scope="row" className="ingest-sticky-column">
+                  <strong>{candidate.displayTitle}</strong>
+                  <code>{candidate.relativePath}</code>
+                  {candidate.warnings.length > 0 && (
+                    <span className="ingest-row-warning">
+                      {candidate.warnings.length}{" "}
+                      {candidate.warnings.length === 1
+                        ? "warning"
+                        : "warnings"}
+                    </span>
+                  )}
+                </th>
+                <td>
+                  {candidate.kind === "folder"
+                    ? "Folder"
+                    : "Loose file"}
+                </td>
+                <td className="numeric">
+                  {candidate.fileCount}
+                </td>
+                <td className="numeric">
+                  {candidate.audioCount}
+                </td>
+                <td className="numeric">
+                  {candidate.imageCount}
+                </td>
+                <td className="numeric">
+                  {candidate.textCount}
+                </td>
+                <td className="numeric">
+                  {formatByteSize(
+                    candidate.totalSizeBytes,
+                  )}
+                </td>
+                <td>
+                  {candidate.extensions.length > 0
+                    ? candidate.extensions.join(", ")
+                    : "—"}
+                </td>
+                <td>
+                  {candidate.dateCandidates.length > 0
+                    ? candidate.dateCandidates.join(", ")
+                    : "—"}
+                </td>
+                <td className="action-column">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={disabled}
+                    onClick={() =>
+                      onInspect(candidate.id)
+                    }
+                  >
+                    Inspect
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+function IngestCandidateInspectionView({
+  inspection,
+  onBack,
+  onReleaseCreated,
+}: {
+  inspection: IngestCandidateInspection;
+  onBack: () => void;
+  onReleaseCreated: (
+    releaseId: string,
+  ) => void | Promise<void>;
+}) {
+  const { candidate } = inspection;
+  const [builderOpen, setBuilderOpen] =
+    useState(false);
+  const [expandedFiles, setExpandedFiles] = useState<
+    string[]
+  >([]);
+
+  const toggleFile = (relativePath: string) => {
+    setExpandedFiles((current) =>
+      current.includes(relativePath)
+        ? current.filter(
+            (path) => path !== relativePath,
+          )
+        : [...current, relativePath],
+    );
+  };
+
+  if (builderOpen) {
+    return (
+      <IngestReleaseBuilder
+        inspection={inspection}
+        onCancel={() =>
+          setBuilderOpen(false)
+        }
+        onReleaseCreated={
+          onReleaseCreated
+        }
+      />
+    );
+  }
+
+  return (
+    <section className="ingest-view ingest-inspection-view">
+      <header
+        className="ingest-view-header ingest-inspection-header"
+      >
+        <div className="ingest-inspection-identity">
+          <button
+            type="button"
+            className="metadata-detail-back-button"
+            aria-label="Back to ingest candidates"
+            title="Back to ingest candidates"
+            onClick={onBack}
+          >
+            <span aria-hidden="true">←</span>
+          </button>
+
+          <div>
+            <p className="eyebrow">
+              Candidate inspection
+            </p>
+            <h2>{candidate.displayTitle}</h2>
+            <code>{candidate.relativePath}</code>
+          </div>
+        </div>
+        <div className="ingest-inspection-actions">
+          <span className="badge">
+            {candidate.kind === "folder"
+              ? "Folder candidate"
+              : "Loose-file candidate"}
+          </span>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={candidate.audioCount === 0}
+            onClick={() =>
+              setBuilderOpen(true)
+            }
+          >
+            Build staging release
+          </button>
+        </div>
+      </header>
+
+      <div className="ingest-safety-banner">
+        <strong>Source-safe inspection</strong>
+        <span>
+          Review evidence here, then use the staged
+          builder to confirm metadata and copy files.
+          The ingest source is never modified.
+        </span>
+      </div>
+
+      <section
+        className="ingest-table-panel"
+        aria-labelledby="candidate-summary-heading"
+      >
+        <header className="ingest-table-panel-header">
+          <h3 id="candidate-summary-heading">
+            Candidate summary
+          </h3>
+        </header>
+        <div className="ingest-table-scroll">
+          <table className="ingest-table ingest-summary-table">
+            <thead>
+              <tr>
+                <th scope="col">Candidate type</th>
+                <th scope="col" className="numeric">
+                  Files
+                </th>
+                <th scope="col" className="numeric">
+                  Audio
+                </th>
+                <th scope="col" className="numeric">
+                  Images
+                </th>
+                <th scope="col" className="numeric">
+                  Text
+                </th>
+                <th scope="col" className="numeric">
+                  Total size
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  {candidate.kind === "folder"
+                    ? "Folder"
+                    : "Loose file"}
+                </td>
+                <td className="numeric">
+                  {candidate.fileCount}
+                </td>
+                <td className="numeric">
+                  {candidate.audioCount}
+                </td>
+                <td className="numeric">
+                  {candidate.imageCount}
+                </td>
+                <td className="numeric">
+                  {candidate.textCount}
+                </td>
+                <td className="numeric">
+                  {formatByteSize(
+                    candidate.totalSizeBytes,
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section
+        className="ingest-table-panel"
+        aria-labelledby="candidate-evidence-heading"
+      >
+        <header className="ingest-table-panel-header">
+          <div>
+            <h3 id="candidate-evidence-heading">
+              Inferred metadata
+            </h3>
+            <p>
+              Deterministic local rules report suggestions,
+              not authoritative metadata.
+            </p>
+          </div>
+        </header>
+        <IngestEvidenceTable
+          evidence={candidate.evidence}
+        />
+      </section>
+
+      {inspection.warnings.length > 0 && (
+        <section className="warning-panel">
+          <h3>Inspection warnings</h3>
+          <ul>
+            {inspection.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <section
+        className="ingest-table-panel"
+        aria-labelledby="source-files-heading"
+      >
+        <header className="ingest-table-panel-header">
+          <div>
+            <h3 id="source-files-heading">
+              Source files
+            </h3>
+            <p>
+              Technical properties and embedded tags are
+              collected without modifying the files.
+            </p>
+          </div>
+          <strong>
+            {inspection.files.length}{" "}
+            {inspection.files.length === 1
+              ? "file"
+              : "files"}
+          </strong>
+        </header>
+
+        <div className="ingest-table-scroll">
+          <table className="ingest-table ingest-source-table">
+            <thead>
+              <tr>
+                <th scope="col">Filename</th>
+                <th scope="col">Type</th>
+                <th scope="col">Container</th>
+                <th scope="col">Codec</th>
+                <th scope="col" className="numeric">
+                  Duration
+                </th>
+                <th scope="col" className="numeric">
+                  Sample rate
+                </th>
+                <th scope="col" className="numeric">
+                  Channels
+                </th>
+                <th scope="col" className="numeric">
+                  Size
+                </th>
+                <th scope="col">Probe</th>
+                <th scope="col" className="action-column">
+                  Details
+                </th>
+              </tr>
+            </thead>
+            {inspection.files.map((file) => {
+              const expanded = expandedFiles.includes(
+                file.relativePath,
+              );
+
+              return (
+                <tbody key={file.relativePath}>
+                  <tr>
+                    <th
+                      scope="row"
+                      className="ingest-sticky-column"
+                    >
+                      <strong>{file.filename}</strong>
+                      <code>{file.relativePath}</code>
+                      {file.warnings.length > 0 && (
+                        <span className="ingest-row-warning">
+                          {file.warnings.length}{" "}
+                          {file.warnings.length === 1
+                            ? "warning"
+                            : "warnings"}
+                        </span>
+                      )}
+                    </th>
+                    <td>{file.mediaKind}</td>
+                    <td>
+                      {file.technical.container ?? "—"}
+                    </td>
+                    <td>
+                      {file.technical.codec ?? "—"}
+                    </td>
+                    <td className="numeric">
+                      {file.technical.durationSeconds !==
+                      undefined
+                        ? formatDuration(
+                            file.technical
+                              .durationSeconds,
+                          )
+                        : "—"}
+                    </td>
+                    <td className="numeric">
+                      {file.technical.sampleRateHz !==
+                      undefined
+                        ? `${file.technical.sampleRateHz.toLocaleString()} Hz`
+                        : "—"}
+                    </td>
+                    <td className="numeric">
+                      {file.technical.channels ?? "—"}
+                    </td>
+                    <td className="numeric">
+                      {formatByteSize(file.sizeBytes)}
+                    </td>
+                    <td>{file.detectedBy}</td>
+                    <td className="action-column">
+                      <button
+                        type="button"
+                        aria-expanded={expanded}
+                        onClick={() =>
+                          toggleFile(file.relativePath)
+                        }
+                      >
+                        {expanded
+                          ? "Hide"
+                          : "Details"}
+                      </button>
+                    </td>
+                  </tr>
+
+                  {expanded && (
+                    <tr className="ingest-detail-row">
+                      <td colSpan={10}>
+                        <IngestFileInspectionDetail
+                          file={file}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              );
+            })}
+          </table>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function IngestEvidenceTable({
+  evidence,
+}: {
+  evidence: IngestEvidence[];
+}) {
+  if (evidence.length === 0) {
+    return (
+      <p className="metadata-empty-value ingest-table-empty">
+        No title or date patterns were inferred.
+      </p>
+    );
+  }
+
+  return (
+    <div className="ingest-table-scroll">
+      <table className="ingest-table ingest-evidence-table">
+        <thead>
+          <tr>
+            <th scope="col">Metadata field</th>
+            <th scope="col">Inferred value</th>
+            <th scope="col">Evidence</th>
+            <th scope="col">Inference confidence</th>
+            <th scope="col">Rule</th>
+          </tr>
+        </thead>
+        <tbody>
+          {evidence.map((item, index) => (
+            <tr
+              key={`${item.field}:${item.rule}:${index}`}
+            >
+              <th
+                scope="row"
+                className="ingest-sticky-column"
+              >
+                {item.field}
+              </th>
+              <td>{String(item.value)}</td>
+              <td>
+                <span className="ingest-evidence-source">
+                  {item.source}
+                </span>
+                <code>{item.rawValue}</code>
+              </td>
+              <td>{formatInferenceConfidence(item.confidence)}</td>
+              <td>
+                <code>{item.rule}</code>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function IngestFileInspectionDetail({
+  file,
+}: {
+  file: IngestFileInspection;
+}) {
+  const technicalEntries = Object.entries(
+    file.technical,
+  ).filter(([, value]) => value !== undefined);
+  const embeddedEntries = Object.entries(
+    file.embeddedMetadata,
+  );
+
+  return (
+    <div className="ingest-file-detail">
+      <div className="ingest-file-detail-columns">
+        <section>
+          <h4>Technical properties</h4>
+          {technicalEntries.length === 0 ? (
+            <p className="metadata-empty-value">
+              No normalized technical properties were
+              reported.
+            </p>
+          ) : (
+            <table className="ingest-property-table">
+              <tbody>
+                {technicalEntries.map(
+                  ([key, value]) => (
+                    <tr key={key}>
+                      <th scope="row">{key}</th>
+                      <td>
+                        {formatIngestTechnicalValue(
+                          key,
+                          value,
+                        )}
+                      </td>
+                    </tr>
+                  ),
+                )}
+              </tbody>
+            </table>
+          )}
+        </section>
+
+        <section>
+          <h4>Embedded metadata</h4>
+          {embeddedEntries.length === 0 ? (
+            <p className="metadata-empty-value">
+              No embedded tags were reported.
+            </p>
+          ) : (
+            <table className="ingest-property-table">
+              <tbody>
+                {embeddedEntries.map(
+                  ([key, value]) => (
+                    <tr key={key}>
+                      <th scope="row">{key}</th>
+                      <td>{value}</td>
+                    </tr>
+                  ),
+                )}
+              </tbody>
+            </table>
+          )}
+        </section>
+      </div>
+
+      <section className="ingest-file-evidence">
+        <h4>Filename and embedded evidence</h4>
+        <IngestEvidenceTable
+          evidence={file.evidence}
+        />
+      </section>
+
+      {file.warnings.length > 0 && (
+        <ul className="ingest-warning-list">
+          {file.warnings.map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function formatInferenceConfidence(
+  confidence: IngestEvidence["confidence"],
+): string {
+  return (
+    confidence.charAt(0).toUpperCase() +
+    confidence.slice(1)
+  );
+}
+
+function formatIngestTechnicalValue(
+  key: string,
+  value: string | number,
+): string {
+  if (
+    key === "durationSeconds" &&
+    typeof value === "number"
+  ) {
+    return formatDuration(value);
+  }
+
+  if (
+    key === "sampleRateHz" &&
+    typeof value === "number"
+  ) {
+    return `${value.toLocaleString()} Hz`;
+  }
+
+  if (
+    key === "bitRate" &&
+    typeof value === "number"
+  ) {
+    return `${Math.round(value / 1000)} kb/s`;
+  }
+
+  if (
+    (key === "width" || key === "height") &&
+    typeof value === "number"
+  ) {
+    return `${value} px`;
+  }
+
+  return String(value);
+}
+
+
 function ReleaseCard({
   release,
   onLibraryChanged,
@@ -3291,17 +4411,9 @@ function ReleaseCard({
     }
   };
 
-  const missingCount =
-    release.metadataFiles.filter(
-      (file) => !file.exists,
-    ).length +
-    release.tracks.reduce(
-      (total, track) =>
-        total +
-        track.metadataFiles.filter(
-          (file) => !file.exists,
-        ).length,
-      0,
+  const metadataReadiness =
+    summarizeReleaseScanReadiness(
+      release,
     );
 
   const releaseDateMatch =
@@ -3320,7 +4432,9 @@ function ReleaseCard({
     : "Release date not identified";
 
   const releaseArtwork =
-    release.artworkMasters[0];
+    selectPreferredReleaseArtwork(
+      release.artworkMasters,
+    );
 
   const audioMasters =
     release.tracks.flatMap(
@@ -3391,15 +4505,18 @@ function ReleaseCard({
 
         <div className="release-status-actions">
           <span
-            className={
-              missingCount > 0
-                ? "badge missing"
-                : "badge complete"
+            className={`badge ${readinessTone(
+              metadataReadiness,
+            )}`}
+            title={
+              metadataReadiness.total > 0
+                ? `${metadataReadiness.core} core · ${metadataReadiness.credits} credits · ${metadataReadiness.supplemental} optional`
+                : "All expected metadata documents are present"
             }
           >
-            {missingCount > 0
-              ? `${missingCount} missing`
-              : "Metadata complete"}
+            {readinessBadgeLabel(
+              metadataReadiness,
+            )}
           </span>
 
           {showAdminTools && (
@@ -4696,17 +5813,15 @@ const contributorRoleGroups: Array<{
 
 const metadataGroupOrder = [
   "Release & Track Identity",
+  "Track & Disc Numbering",
   "Artists",
   "Music Business & Rights",
   "Dates",
   "Musical Analysis",
-  "Track & Disc Numbering",
   "Movement & Work",
   "Performers",
   "Writing, Lyrics & Language",
-  "Language & Writing System",
-  "Lyrics",
-  "Lyrics Rights & Source",
+  ...lyricsMetadataGroupOrder,
   "Arrangement",
   "Production",
   "Recording and Editing",
@@ -4717,6 +5832,7 @@ const metadataGroupOrder = [
   "Artwork",
   "Technical Audio",
   "Files and Sources",
+  unmappedMetadataGroup,
   "Developer / Advanced",
 ] as const;
 
@@ -4799,7 +5915,8 @@ function isRelatedMetadataTagPath(
 
   if (
     normalizedPath ===
-      "release.primary_artist.sort_name"
+      "release.primary_artist.sort_name" ||
+    normalizedPath === "track.sort_title"
   ) {
     return false;
   }
@@ -5200,10 +6317,11 @@ function resolveMetadataRowGroup(
   }
 
   /*
-   * Unknown authored fields remain visible, but no generic Core
-   * section is created. Identity is the safest user-facing fallback.
+   * Unknown authored fields remain visible without being mistaken for core
+   * identity metadata. The neutral disclosure makes their registration
+   * status and source document explicit.
    */
-  return "Release & Track Identity";
+  return unmappedMetadataGroup;
 }
 
 function MetadataFieldModal({
@@ -5380,7 +6498,10 @@ function MetadataActivityLogModal({
                       : entry.action ===
                           "copy-performers"
                         ? "Copied performer credits"
-                        : "Saved metadata"}
+                        : entry.action ===
+                            "create-document"
+                          ? "Created metadata document"
+                          : "Saved metadata"}
                 </span>
               </p>
 
@@ -6312,13 +7433,20 @@ function getSupplementalFieldGuidance(
         commonValues: [
           "album",
           "single",
-          "ep",
+          "EP",
+          "broadcast",
+          "audio drama",
+          "audiobook",
           "compilation",
-          "soundtrack",
-          "live",
           "demo",
+          "DJ mix",
+          "field recording",
+          "interview",
+          "live",
           "mixtape",
           "remix",
+          "soundtrack",
+          "spoken word",
           "other",
         ],
       },
@@ -6769,20 +7897,7 @@ function MetadataFieldControls({
   );
 }
 
-function MetadataFieldPairControls({
-  title,
-  description,
-  nameField,
-  namePath,
-  roleField,
-  rolePath,
-  nameGuidance,
-  roleGuidance,
-  nameExample,
-  roleExample,
-  commonRoleValues,
-  fieldOrder = "name-role",
-}: {
+type MetadataFieldPairHelpProps = {
   title: string;
   description: string;
   nameField:
@@ -6799,9 +7914,25 @@ function MetadataFieldPairControls({
   roleExample: string;
   commonRoleValues: string[];
   fieldOrder?: "name-role" | "role-name";
+};
+
+function MetadataFieldPairHelpModal({
+  title,
+  description,
+  nameField,
+  namePath,
+  roleField,
+  rolePath,
+  nameGuidance,
+  roleGuidance,
+  nameExample,
+  roleExample,
+  commonRoleValues,
+  fieldOrder = "name-role",
+  onClose,
+}: MetadataFieldPairHelpProps & {
+  onClose: () => void;
 }) {
-  const [modalOpen, setModalOpen] =
-    useState(false);
   const nameSpec: MetadataFieldHelpSpec = {
     label: nameField?.label ?? "Name",
     field: nameField,
@@ -6836,92 +7967,525 @@ function MetadataFieldPairControls({
       : [pairFields.name, pairFields.role];
 
   return (
+    <MetadataFieldModal
+      title={`${title} — Help`}
+      onClose={onClose}
+    >
+      <section className="metadata-field-guidance metadata-field-examples">
+        <h4>Example</h4>
+        <div className="metadata-field-pair-example-grid">
+          {orderedPairFields.map(
+            (field) => (
+              <div key={field.key}>
+                <span>{field.label}</span>
+                <code>{field.example}</code>
+              </div>
+            ),
+          )}
+        </div>
+      </section>
+
+      <section className="metadata-field-guidance metadata-field-pair-about">
+        <h4>About this pair</h4>
+        <p>{description}</p>
+      </section>
+
+      <section className="metadata-field-guidance metadata-field-pair-guidance">
+        <h4>Field guidance</h4>
+        <div className="metadata-field-pair-guidance-grid">
+          {orderedPairFields.map(
+            (field) => (
+              <article key={field.key}>
+                <h5>{field.label}</h5>
+                <p>{field.guidance}</p>
+              </article>
+            ),
+          )}
+        </div>
+      </section>
+
+      {commonRoleValues.length > 0 && (
+        <section className="metadata-field-guidance metadata-field-common-values">
+          <h4>Common role values</h4>
+          <ul className="metadata-field-modal-values">
+            {commonRoleValues.map(
+              (value) => (
+                <li key={value}>
+                  <code>{value}</code>
+                </li>
+              ),
+            )}
+          </ul>
+          <p className="metadata-field-guidance-note">
+            Choose a standard role when it matches the credit.
+            Select Other… to preserve custom liner-note wording.
+          </p>
+        </section>
+      )}
+
+      <section className="metadata-field-guidance metadata-field-technical-details">
+        <h4>Technical details</h4>
+        <div className="metadata-field-pair-facts-grid">
+          {orderedPairFields.map(
+            (field) => (
+              <article key={field.key}>
+                <h5>{field.label} field</h5>
+                <MetadataFieldFacts
+                  spec={field.spec}
+                />
+              </article>
+            ),
+          )}
+        </div>
+      </section>
+    </MetadataFieldModal>
+  );
+}
+
+function MetadataFieldPairControls(
+  props: MetadataFieldPairHelpProps,
+) {
+  const [modalOpen, setModalOpen] =
+    useState(false);
+
+  return (
     <>
       <button
         type="button"
         className="metadata-field-control"
-        aria-label={`Help and field information for ${title}`}
-        title={`Help for ${title}`}
+        aria-label={`Help and field information for ${props.title}`}
+        title={`Help for ${props.title}`}
         onClick={() => setModalOpen(true)}
       >
         ?
       </button>
 
       {modalOpen && (
-        <MetadataFieldModal
-          title={`${title} — Help`}
+        <MetadataFieldPairHelpModal
+          {...props}
           onClose={() => setModalOpen(false)}
-        >
-          <section className="metadata-field-guidance metadata-field-examples">
-            <h4>Example</h4>
-            <div className="metadata-field-pair-example-grid">
-              {orderedPairFields.map(
-                (field) => (
-                  <div key={field.key}>
-                    <span>{field.label}</span>
-                    <code>{field.example}</code>
-                  </div>
-                ),
-              )}
-            </div>
-          </section>
-
-          <section className="metadata-field-guidance metadata-field-pair-about">
-            <h4>About this pair</h4>
-            <p>{description}</p>
-          </section>
-
-          <section className="metadata-field-guidance metadata-field-pair-guidance">
-            <h4>Field guidance</h4>
-            <div className="metadata-field-pair-guidance-grid">
-              {orderedPairFields.map(
-                (field) => (
-                  <article key={field.key}>
-                    <h5>{field.label}</h5>
-                    <p>{field.guidance}</p>
-                  </article>
-                ),
-              )}
-            </div>
-          </section>
-
-          {commonRoleValues.length > 0 && (
-            <section className="metadata-field-guidance metadata-field-common-values">
-              <h4>Common role values</h4>
-              <ul className="metadata-field-modal-values">
-                {commonRoleValues.map(
-                  (value) => (
-                    <li key={value}>
-                      <code>{value}</code>
-                    </li>
-                  ),
-                )}
-              </ul>
-              <p className="metadata-field-guidance-note">
-                Choose a standard role when it matches the credit.
-                Select Other… to preserve custom liner-note wording.
-              </p>
-            </section>
-          )}
-
-          <section className="metadata-field-guidance metadata-field-technical-details">
-            <h4>Technical details</h4>
-            <div className="metadata-field-pair-facts-grid">
-              {orderedPairFields.map(
-                (field) => (
-                  <article key={field.key}>
-                    <h5>{field.label} field</h5>
-                    <MetadataFieldFacts
-                      spec={field.spec}
-                    />
-                  </article>
-                ),
-              )}
-            </div>
-          </section>
-        </MetadataFieldModal>
+        />
       )}
     </>
+  );
+}
+
+function activeReadinessDocuments(
+  scope: MetadataReadinessScope,
+  skippedPaths: ReadonlySet<string>,
+): MissingMetadataDocument[] {
+  return scope.missingDocuments.filter(
+    (file) =>
+      file.importance !== "supplemental" ||
+      !skippedPaths.has(file.relativePath),
+  );
+}
+
+function ReadinessNavBadge({
+  scope,
+  skippedPaths,
+}: {
+  scope?: MetadataReadinessScope;
+  skippedPaths: ReadonlySet<string>;
+}) {
+  if (!scope) {
+    return null;
+  }
+
+  const documents = activeReadinessDocuments(
+    scope,
+    skippedPaths,
+  );
+  const documentSummary =
+    summarizeMissingMetadataDocuments(documents);
+  const count =
+    documentSummary.total +
+    scope.missingRequiredFields.length;
+
+  if (count === 0) {
+    return null;
+  }
+
+  const tone =
+    scope.missingRequiredFields.length > 0 ||
+    documentSummary.core > 0
+      ? "missing"
+      : documentSummary.credits > 0
+        ? "warning"
+        : "supplemental";
+  const details = [
+    ...documents.map((file) => file.filename),
+    ...scope.missingRequiredFields.map(
+      (field) => field.label,
+    ),
+  ].join(", ");
+
+  return (
+    <small
+      className={`readiness-count ${tone}`}
+      title={`Needs attention: ${details}`}
+    >
+      {count}
+    </small>
+  );
+}
+
+function MetadataReadinessPanel({
+  summary,
+  trackLabels,
+  open,
+  skippedPaths,
+  onToggle,
+  onNavigate,
+  onSkip,
+  onRestore,
+}: {
+  summary: MetadataReadinessSummary;
+  trackLabels: Map<string, string>;
+  open: boolean;
+  skippedPaths: ReadonlySet<string>;
+  onToggle: () => void;
+  onNavigate: (target: ReadinessNavigationTarget) => void;
+  onSkip: (file: MissingMetadataDocument) => void;
+  onRestore: (file: MissingMetadataDocument) => void;
+}) {
+  const scopesWithGaps = summary.scopes
+    .map((scope) => ({
+      ...scope,
+      missingDocuments: activeReadinessDocuments(
+        scope,
+        skippedPaths,
+      ),
+    }))
+    .filter(
+      (scope) =>
+        scope.missingDocuments.length > 0 ||
+        scope.missingRequiredFields.length > 0,
+    );
+  const skippedDocuments = summary.scopes.flatMap(
+    (scope) =>
+      scope.missingDocuments
+        .filter(
+          (file) =>
+            file.importance === "supplemental" &&
+            skippedPaths.has(file.relativePath),
+        )
+        .map((file) => ({ scope, file })),
+  );
+
+  return (
+    <section className="metadata-readiness-panel">
+      <header className="metadata-readiness-header">
+        <div>
+          <h2>Metadata readiness</h2>
+          <p>
+            Work on a gap to jump directly to its release or track and the relevant editor. Optional files may also be skipped in this browser.
+          </p>
+        </div>
+
+        <div className="metadata-readiness-summary">
+          <span
+            className={`badge ${
+              summary.missingCoreDocuments > 0
+                ? "missing"
+                : "complete"
+            }`}
+          >
+            {summary.missingCoreDocuments > 0
+              ? `${summary.missingCoreDocuments} core missing`
+              : "Core documents complete"}
+          </span>
+          <span
+            className={`badge ${
+              summary.missingRequiredFields > 0
+                ? "warning"
+                : "complete"
+            }`}
+          >
+            {summary.missingRequiredFields > 0
+              ? `${summary.missingRequiredFields} required fields missing`
+              : "Required fields complete"}
+          </span>
+          {summary.missingCreditDocuments > 0 && (
+            <span className="badge warning">
+              {summary.missingCreditDocuments} credit {summary.missingCreditDocuments === 1 ? "file" : "files"} missing
+            </span>
+          )}
+          {summary.missingSupplementalDocuments - skippedDocuments.length > 0 && (
+            <span className="badge supplemental">
+              {summary.missingSupplementalDocuments - skippedDocuments.length} optional to review
+            </span>
+          )}
+          {skippedDocuments.length > 0 && (
+            <span className="badge skipped">
+              {skippedDocuments.length} skipped
+            </span>
+          )}
+          <button
+            type="button"
+            className="metadata-readiness-toggle"
+            aria-expanded={open}
+            onClick={onToggle}
+          >
+            {open ? "Hide details" : "Review gaps"}
+          </button>
+        </div>
+      </header>
+
+      {open && scopesWithGaps.length > 0 && (
+        <div className="metadata-readiness-scopes">
+          {scopesWithGaps.map((scope) => (
+            <section
+              key={scope.id}
+              className="metadata-readiness-scope"
+            >
+              <header>
+                <strong>
+                  {scope.kind === "release"
+                    ? "Release"
+                    : trackLabels.get(scope.id) ?? scope.id}
+                </strong>
+                <span>
+                  {scope.missingDocuments.length + scope.missingRequiredFields.length} {scope.missingDocuments.length + scope.missingRequiredFields.length === 1 ? "item" : "items"}
+                </span>
+              </header>
+
+              {scope.missingDocuments.map((file) => (
+                <ReadinessDocumentRow
+                  key={file.relativePath}
+                  scope={scope}
+                  file={file}
+                  onNavigate={onNavigate}
+                  onSkip={onSkip}
+                />
+              ))}
+
+              {scope.missingRequiredFields.map((field) => (
+                <ReadinessFieldRow
+                  key={field.tomlPath}
+                  scope={scope}
+                  field={field}
+                  onNavigate={onNavigate}
+                />
+              ))}
+            </section>
+          ))}
+        </div>
+      )}
+
+      {open && skippedDocuments.length > 0 && (
+        <details className="metadata-readiness-skipped">
+          <summary>
+            {skippedDocuments.length} optional {skippedDocuments.length === 1 ? "item" : "items"} skipped in this browser
+          </summary>
+          <div>
+            {skippedDocuments.map(({ scope, file }) => (
+              <div
+                key={file.relativePath}
+                className="metadata-readiness-item is-skipped"
+              >
+                <div>
+                  <strong>{file.filename}</strong>
+                  <small>
+                    {scope.kind === "release"
+                      ? "Release"
+                      : trackLabels.get(scope.id) ?? scope.id}
+                  </small>
+                  <code>{file.relativePath}</code>
+                </div>
+                <span className="readiness-kind supplemental">
+                  Skipped
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onRestore(file)}
+                >
+                  Restore
+                </button>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+    </section>
+  );
+}
+
+function ReadinessDocumentRow({
+  scope,
+  file,
+  onNavigate,
+  onSkip,
+}: {
+  scope: MetadataReadinessScope;
+  file: MissingMetadataDocument;
+  onNavigate: (target: ReadinessNavigationTarget) => void;
+  onSkip: (file: MissingMetadataDocument) => void;
+}) {
+  return (
+    <div className="metadata-readiness-item">
+      <div>
+        <strong>{file.filename}</strong>
+        <small>{file.description}</small>
+        <code>{file.relativePath}</code>
+      </div>
+      <span className={`readiness-kind ${file.importance}`}>
+        {file.importance === "core"
+          ? "Core"
+          : file.importance === "credits"
+            ? "Credits"
+            : "Optional"}
+      </span>
+      <div className="metadata-readiness-item-actions">
+        {file.importance === "supplemental" && (
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => onSkip(file)}
+          >
+            Skip for now
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() =>
+            onNavigate({
+              kind: "document",
+              scopeId: scope.id,
+              tab: file.tab,
+              file,
+            })
+          }
+        >
+          Work on this
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReadinessFieldRow({
+  scope,
+  field,
+  onNavigate,
+}: {
+  scope: MetadataReadinessScope;
+  field: RequiredFieldIssue;
+  onNavigate: (target: ReadinessNavigationTarget) => void;
+}) {
+  return (
+    <div className="metadata-readiness-item">
+      <div>
+        <strong>{field.label}</strong>
+        <small>Required metadata field is blank or absent.</small>
+        <code>{field.tomlPath}</code>
+      </div>
+      <span className="readiness-kind required">
+        Required
+      </span>
+      <button
+        type="button"
+        onClick={() =>
+          onNavigate({
+            kind: "field",
+            scopeId: scope.id,
+            tab: field.tab,
+            field,
+          })
+        }
+      >
+        Edit field
+      </button>
+    </div>
+  );
+}
+
+function MetadataReadinessWorkItem({
+  target,
+  creating,
+  onCreate,
+  onSkip,
+  onEditField,
+  onClose,
+}: {
+  target: ReadinessNavigationTarget;
+  creating: boolean;
+  onCreate: (file: MissingMetadataDocument) => void;
+  onSkip: (file: MissingMetadataDocument) => void;
+  onEditField: (field: RequiredFieldIssue) => void;
+  onClose: () => void;
+}) {
+  return (
+    <section
+      id="metadata-readiness-work-item"
+      className="metadata-readiness-work-item"
+      tabIndex={-1}
+    >
+      <header>
+        <div>
+          <span className="eyebrow">Readiness task</span>
+          <h2>
+            {target.kind === "document"
+              ? target.file.filename
+              : target.field.label}
+          </h2>
+        </div>
+        <button
+          type="button"
+          className="metadata-readiness-work-close"
+          aria-label="Close readiness task"
+          onClick={onClose}
+        >
+          ×
+        </button>
+      </header>
+
+      {target.kind === "document" ? (
+        <>
+          <p>{target.file.description}</p>
+          <code>{target.file.relativePath}</code>
+          <p className="metadata-readiness-work-guidance">
+            Create this document to expose its fields in the current tab. Creation uses the existing validated, no-overwrite metadata workflow; the editor opens immediately afterward.
+          </p>
+          <div className="metadata-readiness-work-actions">
+            {target.file.importance === "supplemental" && (
+              <button
+                type="button"
+                className="secondary"
+                disabled={creating}
+                onClick={() => onSkip(target.file)}
+              >
+                Skip optional file
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={creating}
+              onClick={() => onCreate(target.file)}
+            >
+              {creating
+                ? "Creating…"
+                : "Create and edit"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <p>
+            This required field is blank or absent. Open edit mode and the interface will move to its metadata row.
+          </p>
+          <code>{target.field.tomlPath}</code>
+          <div className="metadata-readiness-work-actions">
+            <button
+              type="button"
+              onClick={() => onEditField(target.field)}
+            >
+              Edit this field
+            </button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -7032,6 +8596,31 @@ function ReleaseMetadataDetailView({
     detailMenuOpen,
     setDetailMenuOpen,
   ] = useState(false);
+  const [readinessOpen, setReadinessOpen] =
+    useState(true);
+  const [
+    readinessTarget,
+    setReadinessTarget,
+  ] = useState<ReadinessNavigationTarget | null>(
+    null,
+  );
+  const [
+    creatingReadinessPath,
+    setCreatingReadinessPath,
+  ] = useState<string | null>(null);
+  const [
+    pendingReadinessDocumentPath,
+    setPendingReadinessDocumentPath,
+  ] = useState<string | null>(null);
+  const [
+    skippedReadinessPaths,
+    setSkippedReadinessPaths,
+  ] = useState<string[]>(() =>
+    readReadinessSkips(
+      window.localStorage,
+      detail.releaseId,
+    ),
+  );
   const detailMenuRef =
     useRef<HTMLElement>(null);
 
@@ -7061,6 +8650,53 @@ function ReleaseMetadataDetailView({
       window.sessionStorage,
     );
     setMetadataActivityEntries([]);
+  };
+
+  const persistSkippedReadinessPaths = (
+    nextPaths: string[],
+  ) => {
+    writeReadinessSkips(
+      window.localStorage,
+      detail.releaseId,
+      nextPaths,
+    );
+    setSkippedReadinessPaths(nextPaths);
+  };
+
+  const skipReadinessDocument = (
+    file: MissingMetadataDocument,
+  ) => {
+    if (file.importance !== "supplemental") {
+      return;
+    }
+
+    persistSkippedReadinessPaths(
+      addReadinessSkip(
+        skippedReadinessPaths,
+        file.relativePath,
+      ),
+    );
+    setReadinessTarget(null);
+    setReadinessOpen(true);
+    onNotify(
+      `${file.filename} skipped in this browser`,
+      "info",
+    );
+  };
+
+  const restoreReadinessDocument = (
+    file: MissingMetadataDocument,
+  ) => {
+    persistSkippedReadinessPaths(
+      removeReadinessSkip(
+        skippedReadinessPaths,
+        file.relativePath,
+      ),
+    );
+    onNotify(
+      `${file.filename} restored to readiness`,
+      "info",
+    );
   };
 
 
@@ -7119,6 +8755,7 @@ function ReleaseMetadataDetailView({
     setActiveDocumentGroup("release");
     setActiveMetadataTab("overview");
     setDetailMenuOpen(false);
+    setReadinessOpen(true);
     setActivityLogOpen(false);
     setPerformerCopySource(null);
     setSetupMode(false);
@@ -7127,6 +8764,15 @@ function ReleaseMetadataDetailView({
     setStarterCreationError(null);
     setPendingInitialTechnicalCreditPath(
       null,
+    );
+    setReadinessTarget(null);
+    setCreatingReadinessPath(null);
+    setPendingReadinessDocumentPath(null);
+    setSkippedReadinessPaths(
+      readReadinessSkips(
+        window.localStorage,
+        detail.releaseId,
+      ),
     );
   }, [detail.releaseId]);
 
@@ -7180,6 +8826,46 @@ function ReleaseMetadataDetailView({
   ]);
 
   useEffect(() => {
+    if (!pendingReadinessDocumentPath) {
+      return;
+    }
+
+    const createdDocument = detail.documents.find(
+      (candidate) =>
+        candidate.relativePath ===
+        pendingReadinessDocumentPath,
+    );
+
+    if (!createdDocument) {
+      return;
+    }
+
+    setReadinessTarget(null);
+    setPendingReadinessDocumentPath(null);
+
+    window.requestAnimationFrame(() => {
+      const element = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          "[data-metadata-document-path]",
+        ),
+      ).find(
+        (candidate) =>
+          candidate.dataset.metadataDocumentPath ===
+          createdDocument.relativePath,
+      );
+
+      element?.scrollIntoView({
+        block: "start",
+        behavior: "smooth",
+      });
+      element?.focus({ preventScroll: true });
+    });
+  }, [
+    detail.documents,
+    pendingReadinessDocumentPath,
+  ]);
+
+  useEffect(() => {
     if (
       !showAdminTools &&
       [
@@ -7187,12 +8873,14 @@ function ReleaseMetadataDetailView({
         "developer",
         "settings",
         "raw",
-      ].includes(activeMetadataTab)
+      ].includes(activeMetadataTab) &&
+      readinessTarget?.tab !== activeMetadataTab
     ) {
       setActiveMetadataTab("overview");
     }
   }, [
     activeMetadataTab,
+    readinessTarget,
     showAdminTools,
   ]);
 
@@ -7827,6 +9515,7 @@ function ReleaseMetadataDetailView({
                     field,
                     document,
                     draft,
+                    releaseDocuments,
                   ),
               }),
             ),
@@ -8085,6 +9774,141 @@ function ReleaseMetadataDetailView({
     }
   };
 
+  const createReadinessDocument = async (
+    file: MissingMetadataDocument,
+  ) => {
+    setCreatingReadinessPath(
+      file.relativePath,
+    );
+    setSaveError(null);
+
+    try {
+      const response = await fetch(
+        "/api/library/create-metadata-document",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type":
+              "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: detail.releaseId,
+            relativePath: file.relativePath,
+            confirmation:
+              "CREATE_METADATA_DOCUMENT",
+          }),
+        },
+      );
+
+      const result = (await response.json()) as {
+        created?: string[];
+        receipts?: Array<{
+          relativePath: string;
+          bytes: number;
+          sha256: string;
+          verifiedAt: string;
+        }>;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(
+          result.error ??
+            `Metadata document creation failed: HTTP ${response.status}`,
+        );
+      }
+
+      persistSkippedReadinessPaths(
+        removeReadinessSkip(
+          skippedReadinessPaths,
+          file.relativePath,
+        ),
+      );
+
+      const receipt = result.receipts?.find(
+        (candidate) =>
+          candidate.relativePath ===
+          file.relativePath,
+      );
+      const occurredAt =
+        receipt?.verifiedAt ??
+        new Date().toISOString();
+
+      recordMetadataActivity({
+        id: [
+          occurredAt,
+          file.relativePath,
+          "create-document",
+          Math.random().toString(36).slice(2),
+        ].join(":"),
+        occurredAt,
+        releaseId: detail.releaseId,
+        documentRelativePath:
+          file.relativePath,
+        documentFilename: file.filename,
+        scope:
+          activeDocumentGroup === "release"
+            ? "release"
+            : "track",
+        ...(activeDocumentGroup !== "release"
+          ? { trackId: activeDocumentGroup }
+          : {}),
+        action: "create-document",
+        status: "verified",
+        message: receipt
+          ? `${file.filename} created and verified (${receipt.bytes} bytes; SHA-256 ${receipt.sha256}).`
+          : `${file.filename} created and verified.`,
+      });
+
+      setPendingReadinessDocumentPath(
+        file.relativePath,
+      );
+      setEditMode(true);
+      await Promise.resolve(onRefresh());
+      onNotify(
+        `${file.filename} created and ready to edit`,
+        "success",
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown metadata document creation error";
+
+      recordMetadataActivity({
+        id: [
+          new Date().toISOString(),
+          file.relativePath,
+          "create-document",
+          "failed",
+          Math.random().toString(36).slice(2),
+        ].join(":"),
+        occurredAt: new Date().toISOString(),
+        releaseId: detail.releaseId,
+        documentRelativePath:
+          file.relativePath,
+        documentFilename: file.filename,
+        scope:
+          activeDocumentGroup === "release"
+            ? "release"
+            : "track",
+        ...(activeDocumentGroup !== "release"
+          ? { trackId: activeDocumentGroup }
+          : {}),
+        action: "create-document",
+        status: "failed",
+        message,
+      });
+      setSaveError(message);
+      onNotify(
+        "Metadata document could not be created",
+        "error",
+      );
+    } finally {
+      setCreatingReadinessPath(null);
+    }
+  };
+
   const discardDraft = () => {
     setDraft({});
     setPerformerDrafts({});
@@ -8245,7 +10069,9 @@ function ReleaseMetadataDetailView({
   const releaseDateLabel =
     formatReleaseDate(detail.releaseId);
   const releaseArtwork =
-    release?.artworkMasters[0] ?? null;
+    selectPreferredReleaseArtwork(
+      release?.artworkMasters ?? [],
+    );
   const isMetadataEmpty =
     detail.documents.length === 0;
   const inferredReleaseTitle =
@@ -8293,6 +10119,15 @@ function ReleaseMetadataDetailView({
       };
     });
 
+  const readinessTrackLabels = new Map(
+    performerCopyTrackOptions.map(
+      (option) => [
+        option.trackId,
+        option.label,
+      ],
+    ),
+  );
+
   const performerCopySourceLabel =
     performerCopySource?.document.trackId
       ? performerCopyTrackOptions.find(
@@ -8308,23 +10143,116 @@ function ReleaseMetadataDetailView({
       inferredTracks,
     );
 
+  const skippedReadinessPathSet = useMemo(
+    () => new Set(skippedReadinessPaths),
+    [skippedReadinessPaths],
+  );
+
+  const metadataReadiness = release
+    ? buildMetadataReadiness({
+        release,
+        documents: detail.documents,
+        fields: metadataRegistry,
+      })
+    : null;
+  const fallbackMissingSummary =
+    summarizeMissingMetadataDocuments(
+      detail.missingFiles,
+    );
+  const detailMissingSummary =
+    metadataReadiness
+      ? {
+          core:
+            metadataReadiness.missingCoreDocuments,
+          credits:
+            metadataReadiness.missingCreditDocuments,
+          supplemental:
+            metadataReadiness.missingSupplementalDocuments,
+          total:
+            metadataReadiness.totalMissingDocuments,
+        }
+      : fallbackMissingSummary;
+  const releaseReadinessScope =
+    metadataReadiness?.scopes.find(
+      (scope) => scope.id === "release",
+    );
+
   const metadataHealthLabel =
     isMetadataEmpty
       ? "Not started"
       : detail.warnings.length > 0
         ? "Needs review"
-        : detail.missingFiles.length > 0
+        : metadataReadiness?.actionableCount
           ? "Partial"
-          : "Parsed";
+          : "Core complete";
 
   const metadataHealthTone =
     isMetadataEmpty
       ? "missing"
       : detail.warnings.length > 0
         ? "warning"
-        : detail.missingFiles.length > 0
+        : metadataReadiness?.actionableCount
           ? "preview"
           : "complete";
+
+  const navigateToReadinessItem = (
+    target: ReadinessNavigationTarget,
+  ) => {
+    if (
+      target.tab === "settings" &&
+      !showAdminTools
+    ) {
+      onShowAdminToolsChange(true);
+    }
+
+    setActiveDocumentGroup(target.scopeId);
+    setActiveMetadataTab(target.tab);
+    setReadinessTarget(target);
+    setReadinessOpen(false);
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const workItem = document.getElementById(
+          "metadata-readiness-work-item",
+        );
+
+        workItem?.scrollIntoView({
+          block: "center",
+          behavior: "smooth",
+        });
+        workItem?.focus({
+          preventScroll: true,
+        });
+      });
+    });
+  };
+
+  const editReadinessField = (
+    field: RequiredFieldIssue,
+  ) => {
+    setEditMode(true);
+    setReadinessTarget(null);
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const row = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            "[data-metadata-path]",
+          ),
+        ).find(
+          (candidate) =>
+            candidate.dataset.metadataPath ===
+            field.tomlPath,
+        );
+
+        row?.scrollIntoView({
+          block: "center",
+          behavior: "smooth",
+        });
+        row?.focus({ preventScroll: true });
+      });
+    });
+  };
 
   const beginStarterSetup = () => {
     setStarterDraft({
@@ -8618,8 +10546,13 @@ function ReleaseMetadataDetailView({
               <span className="metadata-health-count">
                 {detail.documents.length} parsed
               </span>
-              <span className="metadata-health-count">
-                {detail.missingFiles.length} missing
+              <span
+                className="metadata-health-count"
+                title={`${detailMissingSummary.core} core · ${detailMissingSummary.credits} credits · ${detailMissingSummary.supplemental} optional`}
+              >
+                {readinessBadgeLabel(
+                  detailMissingSummary,
+                )}
               </span>
               <span className="metadata-health-count">
                 {detail.warnings.length} warnings
@@ -8723,6 +10656,21 @@ function ReleaseMetadataDetailView({
           </aside>
         )}
       </header>
+
+      {metadataReadiness && (
+        <MetadataReadinessPanel
+          summary={metadataReadiness}
+          trackLabels={readinessTrackLabels}
+          open={readinessOpen}
+          skippedPaths={skippedReadinessPathSet}
+          onToggle={() =>
+            setReadinessOpen((current) => !current)
+          }
+          onNavigate={navigateToReadinessItem}
+          onSkip={skipReadinessDocument}
+          onRestore={restoreReadinessDocument}
+        />
+      )}
 
       {activityLogOpen && (
         <MetadataActivityLogModal
@@ -9291,6 +11239,11 @@ function ReleaseMetadataDetailView({
             {releaseDocuments.length}
           </small>
 
+          <ReadinessNavBadge
+            scope={releaseReadinessScope}
+            skippedPaths={skippedReadinessPathSet}
+          />
+
           {releaseDraftCount > 0 && (
             <small
               className="unsaved-count"
@@ -9314,6 +11267,10 @@ function ReleaseMetadataDetailView({
           const trackDraftCount =
             countDraftChangesForDocuments(
               trackDocuments,
+            );
+          const trackReadinessScope =
+            metadataReadiness?.scopes.find(
+              (scope) => scope.id === trackId,
             );
 
           return (
@@ -9360,6 +11317,11 @@ function ReleaseMetadataDetailView({
                 {trackDocumentCount}
               </small>
 
+              <ReadinessNavBadge
+                scope={trackReadinessScope}
+                skippedPaths={skippedReadinessPathSet}
+              />
+
               {trackDraftCount > 0 && (
                 <small
                   className="unsaved-count"
@@ -9374,6 +11336,34 @@ function ReleaseMetadataDetailView({
         </nav>
 
         <div className="release-metadata-content">
+          {readinessTarget &&
+            readinessTarget.scopeId === activeDocumentGroup &&
+            readinessTarget.tab === activeMetadataTab && (
+              <MetadataReadinessWorkItem
+                target={readinessTarget}
+                creating={
+                  readinessTarget.kind === "document" &&
+                  creatingReadinessPath ===
+                    readinessTarget.file.relativePath
+                }
+                onCreate={(file) =>
+                  void createReadinessDocument(file)
+                }
+                onSkip={skipReadinessDocument}
+                onEditField={editReadinessField}
+                onClose={() => setReadinessTarget(null)}
+              />
+            )}
+
+          {activeMetadataTab === "artwork" && (
+            <ArtworkGallery
+              release={release}
+              activeDocumentGroup={
+                activeDocumentGroup
+              }
+            />
+          )}
+
           {activeDocumentGroup ===
             "release" && (
         <MetadataDocumentSection
@@ -9549,33 +11539,6 @@ function ReleaseMetadataDetailView({
 
         </div>
       </div>
-
-      {showAdminTools &&
-        detail.missingFiles.length > 0 && (
-        <section className="metadata-detail-section">
-          <header>
-            <h2>Missing metadata files</h2>
-            <span className="badge missing">
-              {detail.missingFiles.length}
-            </span>
-          </header>
-
-          <div className="metadata-file-rows">
-            {detail.missingFiles.map((file) => (
-              <div
-                key={file.relativePath}
-                className="metadata-file-row"
-              >
-                <strong>{file.filename}</strong>
-                <code>{file.relativePath}</code>
-                <span className="status-text missing">
-                  Missing
-                </span>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {detail.warnings.length > 0 && (
         <section className="warning-panel">
@@ -10582,6 +12545,8 @@ function MetadataValueCell({
   field,
   inheritedValue,
   inheritedSourcePath,
+  generatedFallbackValue,
+  generatedFallbackNote,
   editMode,
   draft,
   onDraftValueChange,
@@ -10591,6 +12556,8 @@ function MetadataValueCell({
   field?: MetadataFieldDefinition;
   inheritedValue?: EditableMetadataValue;
   inheritedSourcePath?: string;
+  generatedFallbackValue?: EditableMetadataValue;
+  generatedFallbackNote?: string;
   editMode: boolean;
   draft: MetadataDraft;
   onDraftValueChange: (
@@ -10613,7 +12580,29 @@ function MetadataValueCell({
     inheritedValue !== undefined &&
     isBlankMetadataValue(originalValue);
 
-  const generatedValue =
+  const generatedSortTitle =
+    row.path === "track.sort_title" &&
+    typeof originalValue === "string" &&
+    !originalValue.trim()
+      ? generateTrackSortTitle({
+          title: readDocumentDraftString(
+            document,
+            "track.title",
+            draft,
+          ),
+          version: readDocumentDraftString(
+            document,
+            "track.version",
+            draft,
+          ),
+          displayTitle: readDocumentDraftString(
+            document,
+            "track.display_title",
+            draft,
+          ),
+        })
+      : null;
+  const internallyGeneratedValue =
     row.path === "track.display_title" &&
     typeof originalValue === "string" &&
     !originalValue.trim()
@@ -10627,28 +12616,55 @@ function MetadataValueCell({
         ? camelotKeyForMusicalKey(
             readDocumentDraftString(document, "track.audio.key", draft),
           ) ?? ""
-        : "";
-  const usingGeneratedValue = Boolean(generatedValue);
+        : generatedSortTitle?.value ?? "";
+  const internallyGeneratedNote =
+    row.path === "track.audio.camelot_key"
+      ? "Generated from Key"
+      : row.path === "track.sort_title"
+        ? generatedSortTitle?.source
+          ? `Generated from ${generatedSortTitle.source}`
+          : ""
+        : "Generated from Track Title";
+  const usingInternallyGeneratedValue =
+    Boolean(internallyGeneratedValue);
 
   const effectiveValue = usingInheritedValue
     ? inheritedValue
-    : usingGeneratedValue
-      ? generatedValue
+    : usingInternallyGeneratedValue
+      ? internallyGeneratedValue
       : originalValue;
 
   const draftKey = buildDocumentDraftKey(
     document,
     row.path,
   );
-
-  const currentValue =
-    draft[draftKey] ?? effectiveValue;
-
   const changed =
     Object.prototype.hasOwnProperty.call(
       draft,
       draftKey,
     );
+  const authoredCurrentValue = changed
+    ? draft[draftKey]
+    : effectiveValue;
+  const usingFallbackGeneratedValue =
+    generatedFallbackValue !== undefined &&
+    !isBlankMetadataValue(
+      generatedFallbackValue,
+    ) &&
+    isBlankMetadataValue(
+      authoredCurrentValue,
+    );
+  const usingGeneratedValue =
+    usingInternallyGeneratedValue ||
+    usingFallbackGeneratedValue;
+  const generatedNote =
+    usingFallbackGeneratedValue
+      ? generatedFallbackNote ?? "Generated value"
+      : internallyGeneratedNote;
+  const currentValue =
+    usingFallbackGeneratedValue
+      ? generatedFallbackValue
+      : authoredCurrentValue;
 
   if (!editMode) {
     return (
@@ -10673,9 +12689,7 @@ function MetadataValueCell({
 
         {usingGeneratedValue && (
           <small className="metadata-provenance-note metadata-derived-note">
-            {row.path === "track.audio.camelot_key"
-              ? "Generated from Key"
-              : "Generated from Track Title"}
+            {generatedNote}
           </small>
         )}
 
@@ -10932,6 +12946,30 @@ function MetadataValueCell({
       : null;
 
   if (controlledVocabulary) {
+    const supportsTrackLanguageDefault =
+      row.path ===
+        "track.text.lyrics_language" &&
+      typeof generatedFallbackValue ===
+        "string" &&
+      Boolean(generatedFallbackValue.trim());
+    const restoreTrackLanguagePending =
+      supportsTrackLanguageDefault &&
+      changed &&
+      isBlankMetadataValue(
+        draft[draftKey],
+      ) &&
+      !isBlankMetadataValue(
+        originalValue,
+      );
+    const showUseTrackLanguage =
+      supportsTrackLanguageDefault &&
+      (
+        changed ||
+        !isBlankMetadataValue(
+          originalValue,
+        )
+      );
+
     return (
       <label className="metadata-editor-field controlled-vocabulary-field">
         <SelectOrCustomMetadataInput
@@ -10956,6 +12994,38 @@ function MetadataValueCell({
           }
         />
 
+        {showUseTrackLanguage && (
+          <span className="metadata-inheritance-actions">
+            <small className="metadata-provenance-note metadata-derived-note">
+              Track Language: {generatedFallbackValue}
+            </small>
+
+            <button
+              type="button"
+              className="metadata-use-release-value-button"
+              disabled={restoreTrackLanguagePending}
+              onClick={() =>
+                onDraftValueChange(
+                  document,
+                  row.path,
+                  originalValue,
+                  "",
+                )
+              }
+            >
+              {restoreTrackLanguagePending
+                ? "Track Language selected"
+                : "Use Track Language"}
+            </button>
+          </span>
+        )}
+
+        {usingGeneratedValue && (
+          <span className="metadata-provenance-note metadata-derived-note">
+            {generatedNote}
+          </span>
+        )}
+
         {usingInheritedValue &&
           !changed && (
           <span className="metadata-provenance-note metadata-inherited-note">
@@ -10965,9 +13035,13 @@ function MetadataValueCell({
 
         {changed && (
           <span className="changed-indicator">
-            {usingInheritedValue
-              ? "Track override"
-              : "Modified"}
+            {restoreTrackLanguagePending
+              ? "Use Track Language"
+              : usingInheritedValue
+                ? "Track override"
+                : supportsTrackLanguageDefault
+                  ? "Local override"
+                  : "Modified"}
           </span>
         )}
       </label>
@@ -11108,6 +13182,13 @@ function MetadataValueCell({
                 : "Use release value"}
             </button>
           )}
+        </span>
+      )}
+
+      {usingGeneratedValue &&
+        !changed && (
+        <span className="metadata-provenance-note metadata-derived-note">
+          {generatedNote}
         </span>
       )}
 
@@ -11341,7 +13422,29 @@ function getInitialMetadataFieldValue(
   field: MetadataFieldDefinition,
   document: ParsedMetadataDocument,
   draft: MetadataDraft,
+  releaseDocuments: ParsedMetadataDocument[] = [],
 ): EditableMetadataValue {
+  if (field.tomlPath === "track.text.lyrics_language") {
+    const releaseLanguageValue =
+      findMetadataValueAcrossDocuments(
+        releaseDocuments,
+        "release.language",
+      );
+    const effectiveTrackLanguage =
+      resolveEffectiveTrackLanguage({
+        trackLanguage: readDocumentDraftString(
+          document,
+          "track.language",
+          draft,
+        ),
+        releaseLanguage:
+          typeof releaseLanguageValue === "string"
+            ? releaseLanguageValue
+            : "",
+      });
+
+    return effectiveTrackLanguage.value;
+  }
   if (field.tomlPath === "track.audio.time_signature") return "4/4";
   if (field.tomlPath === "track.audio.tuning_hz") return 440;
   if (field.tomlPath === "track.audio.camelot_key") {
@@ -11354,6 +13457,25 @@ function getInitialMetadataFieldValue(
       readDocumentDraftString(document, "track.title", draft),
       readDocumentDraftString(document, "track.version", draft),
     );
+  }
+  if (field.tomlPath === "track.sort_title") {
+    return generateTrackSortTitle({
+      title: readDocumentDraftString(
+        document,
+        "track.title",
+        draft,
+      ),
+      version: readDocumentDraftString(
+        document,
+        "track.version",
+        draft,
+      ),
+      displayTitle: readDocumentDraftString(
+        document,
+        "track.display_title",
+        draft,
+      ),
+    }).value;
   }
 
   switch (field.valueType) {
@@ -11413,11 +13535,6 @@ function PerformerRecordEditor({
     records: PerformerRecordDraft[],
   ) => void;
 }) {
-  const nameField =
-    findRegisteredMetadataField(
-      metadataRegistry,
-      "track.performers[0].name",
-    );
   const roleField =
     findRegisteredMetadataField(
       metadataRegistry,
@@ -11515,7 +13632,7 @@ function PerformerRecordEditor({
     );
   };
 
-  const groupedRecords =
+  const personGroupedRecords =
     prioritizeReleaseArtistDisplay(
       groupPersonRoleDisplayRecords(
         records.map((record) => ({
@@ -11527,13 +13644,18 @@ function PerformerRecordEditor({
       ),
       releasePrimaryArtistName,
     );
+  const groupedRecords =
+    groupMatchingPerformerRoleSets(
+      personGroupedRecords,
+      releasePrimaryArtistName,
+    );
   const showSortNames =
     editMode
       ? records.some(
           (record) =>
             record.sortName.trim(),
         ) || records.length > 0
-      : groupedRecords.some(
+      : personGroupedRecords.some(
           (record) =>
             record.sortNames.length > 0,
         );
@@ -11546,33 +13668,9 @@ function PerformerRecordEditor({
 
   return (
     <div className="performer-record-editor">
-      <div className="performer-record-toolbar">
-        <div>
-          <div className="credit-pair-help-heading">
-            <strong>Performer name and role</strong>
-            <MetadataFieldPairControls
-              title="Performer name and role"
-              description="Each performer record keeps one credited name paired with one performance role. Repeat the same name in edit mode when one performer has several roles; read-only mode groups those roles into one summary row."
-              nameField={nameField}
-              namePath="track.performers[].name"
-              roleField={roleField}
-              rolePath="track.performers[].role"
-              nameGuidance="Enter the performer name exactly as supplied by the artist, liner notes, or release documentation."
-              roleGuidance="Enter one performed role per record. Add another record with the same name when the performer has another instrument or vocal role."
-              nameExample="Nathan Brenton"
-              roleExample="vocals"
-              commonRoleValues={
-                performanceRoleOptions
-              }
-            />
-          </div>
-          <p>
-            Keep each performer name paired with
-            the role they performed.
-          </p>
-
-          {editMode &&
-            incompleteCount > 0 && (
+      {editMode && (
+        <div className="performer-record-toolbar">
+          {incompleteCount > 0 ? (
             <p className="performer-validation-message">
               {incompleteCount} incomplete{" "}
               {incompleteCount === 1
@@ -11580,10 +13678,10 @@ function PerformerRecordEditor({
                 : "records need"}{" "}
               both a name and role before saving.
             </p>
+          ) : (
+            <span aria-hidden="true" />
           )}
-        </div>
 
-        {editMode && (
           <button
             type="button"
             className="performer-add-button"
@@ -11593,8 +13691,8 @@ function PerformerRecordEditor({
             <span aria-hidden="true">+</span>
             <span>Add performer</span>
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       {records.length === 0 ? (
         <div className="performer-empty-state">
@@ -11800,7 +13898,7 @@ function PerformerRecordEditor({
                     </label>
                   ),
                 )
-              : groupedRecords
+              : personGroupedRecords
                   .filter(
                     (record) =>
                       record.sortNames.length > 0,
@@ -12540,8 +14638,9 @@ function MetadataDocumentTable({
     field: MetadataFieldDefinition,
   ) => void;
 }) {
-  const rows = flattenMetadata(
-    document.parsed,
+  const rows = filterPresentableMetadataRows(
+    flattenMetadata(document.parsed),
+    metadataRegistry,
   );
   const [
     selectedMissingFieldPaths,
@@ -12554,8 +14653,106 @@ function MetadataDocumentTable({
     field: MetadataFieldDefinition;
     row: FlattenedMetadataRow;
   } | null>(null);
+  const [
+    performerHelpOpen,
+    setPerformerHelpOpen,
+  ] = useState(false);
   const metadataSectionsRef =
     useRef<HTMLDivElement>(null);
+  const pendingMetadataSectionViewport =
+    useRef<{
+      sectionId: string;
+      viewportTop: number;
+    } | null>(null);
+
+  const findMetadataSection = (
+    sectionId: string,
+  ): HTMLDetailsElement | null => {
+    const sections =
+      metadataSectionsRef.current
+        ?.querySelectorAll<HTMLDetailsElement>(
+          "details[data-metadata-section]",
+        );
+
+    return sections
+      ? Array.from(sections).find(
+          (section) =>
+            section.dataset.metadataSectionId ===
+            sectionId,
+        ) ?? null
+      : null;
+  };
+
+  /*
+   * Optional-field creation refreshes the canonical document. Preserve the
+   * active disclosure's viewport position across both the loading render and
+   * the refreshed-document render instead of relying on a fixed scroll value.
+   */
+  const preserveMetadataSectionViewport = (
+    sectionId: string,
+    action: () => void,
+  ) => {
+    const section =
+      findMetadataSection(sectionId);
+
+    if (section) {
+      pendingMetadataSectionViewport.current = {
+        sectionId,
+        viewportTop:
+          section.getBoundingClientRect().top,
+      };
+    }
+
+    action();
+  };
+
+  useLayoutEffect(() => {
+    const anchor =
+      pendingMetadataSectionViewport.current;
+
+    if (!anchor) {
+      return;
+    }
+
+    const restoreViewport = () => {
+      const section =
+        findMetadataSection(
+          anchor.sectionId,
+        );
+
+      if (!section) {
+        return;
+      }
+
+      const offset =
+        section.getBoundingClientRect().top -
+        anchor.viewportTop;
+
+      if (Math.abs(offset) > 0.5) {
+        window.scrollBy({
+          top: offset,
+          left: 0,
+          behavior: "auto",
+        });
+      }
+    };
+
+    restoreViewport();
+
+    if (addingFields) {
+      return;
+    }
+
+    const frame =
+      window.requestAnimationFrame(() => {
+        restoreViewport();
+        pendingMetadataSectionViewport.current =
+          null;
+      });
+
+    return () =>
+      window.cancelAnimationFrame(frame);
+  }, [addingFields, document.sha256]);
 
   /*
    * Each TOML document and category keeps an independent disclosure
@@ -12756,6 +14953,28 @@ function MetadataDocumentTable({
     );
   };
 
+  const releaseLanguageValue =
+    findMetadataValueAcrossDocuments(
+      releaseDocuments,
+      "release.language",
+    );
+  const effectiveTrackLanguage =
+    document.scope === "track"
+      ? resolveEffectiveTrackLanguage({
+          trackLanguage:
+            readDocumentDraftString(
+              document,
+              "track.language",
+              draft,
+            ),
+          releaseLanguage:
+            typeof releaseLanguageValue ===
+            "string"
+              ? releaseLanguageValue
+              : "",
+        }).value
+      : "";
+
   const inheritedOnlyRows =
     buildMissingInheritedMetadataRows(
       document,
@@ -12875,12 +15094,14 @@ function MetadataDocumentTable({
    * Musical-analysis fields are important track metadata, so keep them
    * visible in Overview even before optional TOML paths have been created.
    */
-  const defaultTrackOverviewMissingFields =
+  const showDefaultTrackOverviewFields =
     shouldShowDefaultTrackOverviewFields({
       scope: document.scope,
       filename: document.filename,
       activeTab: activeMetadataTab,
-    })
+    });
+  const defaultTrackOverviewMissingFields =
+    showDefaultTrackOverviewFields
       ? allMissingCategoryFields.filter(
           (field) =>
             isDefaultTrackOverviewFieldPath(
@@ -12888,18 +15109,43 @@ function MetadataDocumentTable({
             ),
         )
       : [];
+  const defaultTrackIdentityMissingFields =
+    showDefaultTrackOverviewFields
+      ? allMissingCategoryFields.filter(
+          (field) =>
+            isDefaultTrackIdentityFieldPath(
+              field.tomlPath,
+            ),
+        )
+      : [];
+  const defaultLyricsLanguageMissingFields =
+    document.scope === "track" &&
+    document.filename === "track.toml" &&
+    activeMetadataTab === "lyrics"
+      ? allMissingCategoryFields.filter(
+          (field) =>
+            field.tomlPath ===
+              "track.text.lyrics_language",
+        )
+      : [];
 
   const missingCategoryFields =
     allMissingCategoryFields.filter(
       (field) =>
-        !isDefaultTrackOverviewFieldPath(
-          field.tomlPath,
+        (
+          !isDefaultTrackOverviewFieldPath(
+            field.tomlPath,
+          ) &&
+          !isDefaultTrackIdentityFieldPath(
+            field.tomlPath,
+          ) &&
+          field.tomlPath !==
+            "track.text.lyrics_language"
         ) ||
-        !shouldShowDefaultTrackOverviewFields({
-          scope: document.scope,
-          filename: document.filename,
-          activeTab: activeMetadataTab,
-        }),
+        (
+          !showDefaultTrackOverviewFields &&
+          activeMetadataTab !== "lyrics"
+        ),
     );
 
   const supportsPerformerRecords =
@@ -12912,6 +15158,35 @@ function MetadataDocumentTable({
   const performerRecords =
     performerDraft ??
     savedPerformerRecords;
+  const performerNameField =
+    findRegisteredMetadataField(
+      metadataRegistry,
+      "track.performers[0].name",
+    );
+  const performerRoleField =
+    findRegisteredMetadataField(
+      metadataRegistry,
+      "track.performers[0].role",
+    );
+  const performerHelpProps: MetadataFieldPairHelpProps = {
+    title: "Performers",
+    description:
+      "Keep each performer name paired with the role they performed. Each performer record stores one credited name with one performance role. Repeat the same name when one performer has several roles; read-only mode groups matching credits into concise summary rows.",
+    nameField: performerNameField,
+    namePath: "track.performers[].name",
+    roleField: performerRoleField,
+    rolePath: "track.performers[].role",
+    nameGuidance:
+      "Enter the performer name exactly as supplied by the artist, liner notes, or release documentation.",
+    roleGuidance:
+      "Enter one performed role per record. Add another record with the same name when the performer has another instrument or vocal role.",
+    nameExample: "Nathan Brenton",
+    roleExample: "vocals",
+    commonRoleValues:
+      performerRoleField?.editor?.options ??
+      performerRoleField?.presentation?.commonValues ??
+      [],
+  };
   const releasePrimaryArtistValue =
     document.scope === "track"
       ? findMetadataValueAcrossDocuments(
@@ -13103,6 +15378,7 @@ function MetadataDocumentTable({
               ["track.version", 20],
               ["track.subtitle", 30],
               ["track.display_title", 40],
+              ["track.sort_title", 45],
               ["track.explicit", 50],
               ["track.classification.genres", 100],
               ["track.classification.styles", 110],
@@ -13370,6 +15646,50 @@ function MetadataDocumentTable({
   }
 
   if (
+    defaultLyricsLanguageMissingFields.length >
+      0 &&
+    !displayStandardSections.some(
+      (section) =>
+        section.group ===
+          "Language & Writing System",
+    )
+  ) {
+    const languageGroupRank =
+      metadataGroupRank.get(
+        "Language & Writing System",
+      ) ?? Number.MAX_SAFE_INTEGER;
+    const insertionIndex =
+      displayStandardSections.findIndex(
+        (section) =>
+          (
+            metadataGroupRank.get(
+              section.group as
+                typeof metadataGroupOrder[number],
+            ) ??
+            Number.MAX_SAFE_INTEGER
+          ) > languageGroupRank,
+      );
+    const normalizedInsertionIndex =
+      insertionIndex >= 0
+        ? insertionIndex
+        : displayStandardSections.length;
+
+    displayStandardSections = [
+      ...displayStandardSections.slice(
+        0,
+        normalizedInsertionIndex,
+      ),
+      {
+        group: "Language & Writing System",
+        rows: [],
+      },
+      ...displayStandardSections.slice(
+        normalizedInsertionIndex,
+      ),
+    ];
+  }
+
+  if (
     supportsTechnicalCreditRecords
   ) {
     const summarySection = {
@@ -13425,6 +15745,8 @@ function MetadataDocumentTable({
       ]
         .filter(Boolean)
         .join(" ")}
+      data-metadata-path={row.path}
+      tabIndex={-1}
     >
       <div className="metadata-key">
         <div className="metadata-key-heading">
@@ -13529,6 +15851,18 @@ function MetadataDocumentTable({
           inheritedSourcePath={
             inherited?.sourcePath
           }
+          generatedFallbackValue={
+            row.path ===
+              "track.text.lyrics_language"
+              ? effectiveTrackLanguage
+              : undefined
+          }
+          generatedFallbackNote={
+            row.path ===
+              "track.text.lyrics_language"
+              ? "Generated from Track Language"
+              : undefined
+          }
           editMode={editMode}
           draft={draft}
           onDraftValueChange={
@@ -13538,6 +15872,229 @@ function MetadataDocumentTable({
       )}
     </div>
     );
+  };
+
+  const renderDefaultMissingField = (
+    field: MetadataFieldDefinition,
+  ) => {
+    const initialValue =
+      getInitialMetadataFieldValue(
+        field,
+        document,
+        draft,
+        releaseDocuments,
+      );
+    const generatedSortTitle =
+      field.tomlPath === "track.sort_title"
+        ? generateTrackSortTitle({
+            title: readDocumentDraftString(
+              document,
+              "track.title",
+              draft,
+            ),
+            version: readDocumentDraftString(
+              document,
+              "track.version",
+              draft,
+            ),
+            displayTitle: readDocumentDraftString(
+              document,
+              "track.display_title",
+              draft,
+            ),
+          })
+        : null;
+    const presentation =
+      field.tomlPath === "track.sort_title"
+        ? {
+            generatedValue:
+              generatedSortTitle?.value || null,
+            generatedNote:
+              generatedSortTitle?.source
+                ? `Generated from ${generatedSortTitle.source}`
+                : null,
+            actionLabel: "Override Sort Title",
+          }
+        : field.tomlPath ===
+            "track.text.lyrics_language"
+          ? {
+              generatedValue:
+                effectiveTrackLanguage || null,
+              generatedNote:
+                effectiveTrackLanguage
+                  ? "Generated from Track Language"
+                  : null,
+              actionLabel:
+                effectiveTrackLanguage
+                  ? "Override Lyrics Language"
+                  : "Add Lyrics Language",
+            }
+          : getMissingTrackOverviewFieldPresentation({
+              path: field.tomlPath,
+              label: field.label,
+              initialValue,
+            });
+
+    return (
+      <div
+        key={field.tomlPath}
+        className="metadata-table-row metadata-default-missing-row"
+      >
+        <div className="metadata-key">
+          <div className="metadata-key-heading">
+            <strong>{field.label}</strong>
+
+            <MetadataFieldControls
+              field={field}
+              path={field.tomlPath}
+              valueType={field.valueType}
+            />
+          </div>
+        </div>
+
+        <div
+          className={[
+            "metadata-default-missing-value",
+            presentation.generatedValue
+              ? "has-derived-value"
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
+          {presentation.generatedValue && (
+            <span className="metadata-value metadata-derived-default-value">
+              <span>{presentation.generatedValue}</span>
+              <small className="metadata-provenance-note metadata-derived-note">
+                {presentation.generatedNote}
+              </small>
+            </span>
+          )}
+
+          {editMode ? (
+            <button
+              type="button"
+              className="metadata-default-field-add-button"
+              disabled={saving || addingFields}
+              onClick={() =>
+                preserveMetadataSectionViewport(
+                  field.presentation?.group ??
+                    "Musical Analysis",
+                  () =>
+                    onAddFields(
+                      document,
+                      [field],
+                    ),
+                )
+              }
+            >
+              {addingFields
+                ? "Adding field…"
+                : presentation.actionLabel}
+            </button>
+          ) : !presentation.generatedValue ? (
+            <span className="metadata-default-missing-placeholder">
+              (not set)
+            </span>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
+  const renderSectionPrimaryRows = (
+    section: (typeof displayStandardSections)[number],
+  ) => {
+    const existingRows =
+      section.rows.filter(
+        ({ row }) =>
+          !isPerformerRecordPath(
+            row.path,
+          ) &&
+          getReleaseContributorRecordIndex(
+            row.path,
+          ) === null &&
+          !isRelatedMetadataTagPath(
+            row.path,
+          ),
+      );
+
+    if (
+      section.group ===
+        "Language & Writing System" &&
+      defaultLyricsLanguageMissingFields.length >
+        0
+    ) {
+      return [
+        ...existingRows.map((item) => ({
+          order:
+            item.fieldDefinition
+              ?.presentation?.order ??
+            Number.MAX_SAFE_INTEGER,
+          sourceIndex: item.sourceIndex,
+          content: renderMetadataRow(item),
+        })),
+        ...defaultLyricsLanguageMissingFields.map(
+          (field, missingIndex) => ({
+            order:
+              field.presentation?.order ??
+              Number.MAX_SAFE_INTEGER,
+            sourceIndex:
+              rows.length + missingIndex,
+            content:
+              renderDefaultMissingField(
+                field,
+              ),
+          }),
+        ),
+      ]
+        .sort(
+          (left, right) =>
+            left.order - right.order ||
+            left.sourceIndex -
+              right.sourceIndex,
+        )
+        .map(({ content }) => content);
+    }
+
+    if (
+      section.group !==
+      "Musical Analysis"
+    ) {
+      return existingRows.map(
+        renderMetadataRow,
+      );
+    }
+
+    /*
+     * Present and missing analysis fields share one ordered slot list. A
+     * verified Add operation therefore replaces its synthetic row in place.
+     */
+    return [
+      ...existingRows.map((item) => ({
+        path: item.row.path,
+        content: renderMetadataRow(item),
+      })),
+      ...defaultTrackOverviewMissingFields.map(
+        (field) => ({
+          path: field.tomlPath,
+          content:
+            renderDefaultMissingField(
+              field,
+            ),
+        }),
+      ),
+    ]
+      .sort(
+        (left, right) =>
+          getDefaultTrackOverviewFieldOrder(
+            left.path,
+          ) -
+          getDefaultTrackOverviewFieldOrder(
+            right.path,
+          ),
+      )
+      .map(({ content }) => content);
   };
 
   const documentChangeCount =
@@ -13568,6 +16125,10 @@ function MetadataDocumentTable({
     groupedRows.length === 0 &&
     defaultTrackOverviewMissingFields.length ===
       0 &&
+    defaultTrackIdentityMissingFields.length ===
+      0 &&
+    defaultLyricsLanguageMissingFields.length ===
+      0 &&
     !(
       editMode &&
       missingCategoryFields.length > 0
@@ -13595,138 +16156,20 @@ function MetadataDocumentTable({
     );
   }
 
-  return (
-    <article className="metadata-document-table">
-      {editMode && (
-        <header className="document-edit-actions">
-          <div className="document-save-controls">
-            <span
-              className={
-                documentChangeCount > 0
-                  ? "badge preview"
-                  : "badge complete"
-              }
-            >
-              {documentChangeCount > 0
-                ? `${documentChangeCount} modified`
-                : "No changes"}
-            </span>
+  const hasIdentitySection =
+    displayStandardSections.some(
+      (section) =>
+        section.group ===
+        "Release & Track Identity",
+    );
+  const hasDatesSection =
+    displayStandardSections.some(
+      (section) =>
+        section.group === "Dates",
+    );
 
-            <button
-              type="button"
-              disabled={
-                saving ||
-                documentChangeCount === 0
-              }
-              onClick={onSave}
-            >
-              {saving
-                ? "Saving…"
-                : "Save changes"}
-            </button>
-          </div>
-        </header>
-      )}
-
-      {editMode &&
-        missingCategoryFields.length > 0 && (
-        <section className="missing-metadata-fields">
-          <header>
-            <div>
-              <span className="eyebrow">
-                Add metadata fields
-              </span>
-              <h3>
-                Available fields for this category
-              </h3>
-              <p>
-                Select only the fields you need.
-                New fields are created in{" "}
-                <code>{document.filename}</code>.
-              </p>
-            </div>
-          </header>
-
-          <div className="missing-metadata-field-list">
-            {missingCategoryFields.map(
-              (field) => (
-                <label
-                  key={field.tomlPath}
-                  className="missing-metadata-field-option"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedMissingFieldPaths.includes(
-                      field.tomlPath,
-                    )}
-                    onChange={(event) =>
-                      setSelectedMissingFieldPaths(
-                        (current) =>
-                          event.target.checked
-                            ? [
-                                ...current,
-                                field.tomlPath,
-                              ]
-                            : current.filter(
-                                (path) =>
-                                  path !==
-                                  field.tomlPath,
-                              ),
-                      )
-                    }
-                  />
-
-                  <span>
-                    <strong>
-                      {field.label}
-                    </strong>
-                    <small>
-                      {field.description}
-                    </small>
-                  </span>
-                </label>
-              ),
-            )}
-          </div>
-
-          <div className="missing-metadata-field-actions">
-            <button
-              type="button"
-              disabled={
-                selectedMissingFieldPaths.length === 0 ||
-                addingFields ||
-                saving
-              }
-              onClick={() =>
-                onAddFields(
-                  document,
-                  missingCategoryFields.filter(
-                    (field) =>
-                      selectedMissingFieldPaths.includes(
-                        field.tomlPath,
-                      ),
-                  ),
-                )
-              }
-            >
-              {addingFields
-                ? "Adding fields…"
-                : `Add selected fields (${selectedMissingFieldPaths.length})`}
-            </button>
-          </div>
-        </section>
-      )}
-
-      <div className="metadata-table-header">
-        <span>Metadata key</span>
-        <span>Value</span>
-      </div>
-
-      <div
-        ref={metadataSectionsRef}
-        className="metadata-table-body"
-      >
-        {numberingRows.length > 0 && (
+  const numberingSection =
+    numberingRows.length > 0 ? (
           <details
             className="metadata-section metadata-numbering-group"
             data-metadata-section
@@ -13959,12 +16402,151 @@ function MetadataDocumentTable({
               </details>
             )}
           </details>
-        )}
+    ) : null;
 
+  return (
+    <article
+      className="metadata-document-table"
+      data-metadata-document-path={document.relativePath}
+      tabIndex={-1}
+    >
+      {editMode && (
+        <header className="document-edit-actions">
+          <div className="document-save-controls">
+            <span
+              className={
+                documentChangeCount > 0
+                  ? "badge preview"
+                  : "badge complete"
+              }
+            >
+              {documentChangeCount > 0
+                ? `${documentChangeCount} modified`
+                : "No changes"}
+            </span>
+
+            <button
+              type="button"
+              disabled={
+                saving ||
+                documentChangeCount === 0
+              }
+              onClick={onSave}
+            >
+              {saving
+                ? "Saving…"
+                : "Save changes"}
+            </button>
+          </div>
+        </header>
+      )}
+
+      {editMode &&
+        missingCategoryFields.length > 0 && (
+        <section className="missing-metadata-fields">
+          <header>
+            <div>
+              <span className="eyebrow">
+                Add metadata fields
+              </span>
+              <h3>
+                Available fields for this category
+              </h3>
+              <p>
+                Select only the fields you need.
+                New fields are created in{" "}
+                <code>{document.filename}</code>.
+              </p>
+            </div>
+          </header>
+
+          <div className="missing-metadata-field-list">
+            {missingCategoryFields.map(
+              (field) => (
+                <label
+                  key={field.tomlPath}
+                  className="missing-metadata-field-option"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedMissingFieldPaths.includes(
+                      field.tomlPath,
+                    )}
+                    onChange={(event) =>
+                      setSelectedMissingFieldPaths(
+                        (current) =>
+                          event.target.checked
+                            ? [
+                                ...current,
+                                field.tomlPath,
+                              ]
+                            : current.filter(
+                                (path) =>
+                                  path !==
+                                  field.tomlPath,
+                              ),
+                      )
+                    }
+                  />
+
+                  <span>
+                    <strong>
+                      {field.label}
+                    </strong>
+                    <small>
+                      {field.description}
+                    </small>
+                  </span>
+                </label>
+              ),
+            )}
+          </div>
+
+          <div className="missing-metadata-field-actions">
+            <button
+              type="button"
+              disabled={
+                selectedMissingFieldPaths.length === 0 ||
+                addingFields ||
+                saving
+              }
+              onClick={() =>
+                onAddFields(
+                  document,
+                  missingCategoryFields.filter(
+                    (field) =>
+                      selectedMissingFieldPaths.includes(
+                        field.tomlPath,
+                      ),
+                  ),
+                )
+              }
+            >
+              {addingFields
+                ? "Adding fields…"
+                : `Add selected fields (${selectedMissingFieldPaths.length})`}
+            </button>
+          </div>
+        </section>
+      )}
+
+      <div className="metadata-table-header">
+        <span>Metadata key</span>
+        <span>Value</span>
+      </div>
+
+      <div
+        ref={metadataSectionsRef}
+        className="metadata-table-body"
+      >
         {displayStandardSections.map(
           (section) => (
-            <details
-              key={section.group}
+            <Fragment key={section.group}>
+              {!hasIdentitySection &&
+                section.group === "Dates" &&
+                numberingSection}
+
+              <details
               className="metadata-section"
               data-metadata-section
               data-metadata-section-id={
@@ -13992,13 +16574,38 @@ function MetadataDocumentTable({
                   aria-hidden="true"
                 />
 
-                <strong>
-                  {section.group}
-                </strong>
+                <span className="metadata-section-heading">
+                  <strong>
+                    {section.group}
+                  </strong>
+
+                  {section.group === "Performers" && (
+                    <button
+                      type="button"
+                      className="metadata-field-control"
+                      aria-label="Help and field information for Performers"
+                      title="Help for Performers"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setPerformerHelpOpen(true);
+                      }}
+                    >
+                      ?
+                    </button>
+                  )}
+                </span>
 
                 <span className="metadata-section-summary-actions">
                   <small>
                     {section.group ===
+                    unmappedMetadataGroup
+                      ? `${document.filename} · ${section.rows.length} ${
+                          section.rows.length === 1
+                            ? "field"
+                            : "fields"
+                        }`
+                      : section.group ===
                     "Performers"
                       ? editMode
                         ? `${performerRecords.length} ${
@@ -14025,12 +16632,28 @@ function MetadataDocumentTable({
                                 : "people"
                             }`
                         : section.group ===
+                            "Release & Track Identity" &&
+                          defaultTrackIdentityMissingFields.length >
+                            0
+                          ? `${section.rows.length} of ${
+                              section.rows.length +
+                              defaultTrackIdentityMissingFields.length
+                            } fields`
+                        : section.group ===
                             "Musical Analysis" &&
                           defaultTrackOverviewMissingFields.length >
                             0
                           ? `${section.rows.length} of ${
                               section.rows.length +
                               defaultTrackOverviewMissingFields.length
+                            } fields`
+                        : section.group ===
+                            "Language & Writing System" &&
+                          defaultLyricsLanguageMissingFields.length >
+                            0
+                          ? `${section.rows.length} of ${
+                              section.rows.length +
+                              defaultLyricsLanguageMissingFields.length
                             } fields`
                           : `${section.rows.length} ${
                               section.rows.length === 1
@@ -14139,112 +16762,28 @@ function MetadataDocumentTable({
                   />
                 )}
 
-                {section.rows
-                  .filter(
-                    ({ row }) =>
-                      !isPerformerRecordPath(
-                        row.path,
-                      ) &&
-                      getReleaseContributorRecordIndex(
-                        row.path,
-                      ) === null &&
-                      !isRelatedMetadataTagPath(
-                        row.path,
-                      ),
-                  )
-                  .map(renderMetadataRow)}
+                {section.group ===
+                  unmappedMetadataGroup && (
+                  <div className="metadata-unmapped-guidance">
+                    <strong>
+                      Preserved from {document.filename}
+                    </strong>
+                    <p>
+                      These authored fields are not yet registered with a
+                      dedicated editor. Their canonical paths remain visible
+                      and their values are preserved unchanged.
+                    </p>
+                  </div>
+                )}
+
+                {renderSectionPrimaryRows(
+                  section,
+                )}
 
                 {section.group ===
-                  "Musical Analysis" &&
-                  defaultTrackOverviewMissingFields.map(
-                    (field) => {
-                      const initialValue =
-                        getInitialMetadataFieldValue(
-                          field,
-                          document,
-                          draft,
-                        );
-                      const presentation =
-                        getMissingTrackOverviewFieldPresentation({
-                          path: field.tomlPath,
-                          label: field.label,
-                          initialValue,
-                        });
-
-                      return (
-                        <div
-                          key={field.tomlPath}
-                          className="metadata-table-row metadata-default-missing-row"
-                        >
-                          <div className="metadata-key">
-                            <div className="metadata-key-heading">
-                              <strong>
-                                {field.label}
-                              </strong>
-
-                              <MetadataFieldControls
-                                field={field}
-                                path={field.tomlPath}
-                                valueType={
-                                  field.valueType
-                                }
-                              />
-                            </div>
-                          </div>
-
-                          <div
-                            className={[
-                              "metadata-default-missing-value",
-                              presentation.generatedValue
-                                ? "has-derived-value"
-                                : "",
-                            ]
-                              .filter(Boolean)
-                              .join(" ")}
-                          >
-                            {presentation.generatedValue && (
-                              <span className="metadata-value metadata-derived-default-value">
-                                <span>
-                                  {
-                                    presentation.generatedValue
-                                  }
-                                </span>
-                                <small className="metadata-provenance-note metadata-derived-note">
-                                  {
-                                    presentation.generatedNote
-                                  }
-                                </small>
-                              </span>
-                            )}
-
-                            {editMode ? (
-                              <button
-                                type="button"
-                                className="metadata-default-field-add-button"
-                                disabled={
-                                  saving ||
-                                  addingFields
-                                }
-                                onClick={() =>
-                                  onAddFields(
-                                    document,
-                                    [field],
-                                  )
-                                }
-                              >
-                                {addingFields
-                                  ? "Adding field…"
-                                  : presentation.actionLabel}
-                              </button>
-                            ) : !presentation.generatedValue ? (
-                              <span className="metadata-default-missing-placeholder">
-                                (not set)
-                              </span>
-                            ) : null}
-                          </div>
-                        </div>
-                      );
-                    },
+                  "Release & Track Identity" &&
+                  defaultTrackIdentityMissingFields.map(
+                    renderDefaultMissingField,
                   )}
 
                 {section.rows.some(
@@ -14514,10 +17053,28 @@ function MetadataDocumentTable({
                     </div>
                   )}
               </div>
-            </details>
+              </details>
+
+              {section.group ===
+                "Release & Track Identity" &&
+                numberingSection}
+            </Fragment>
           ),
         )}
+
+        {!hasIdentitySection &&
+          !hasDatesSection &&
+          numberingSection}
       </div>
+
+      {performerHelpOpen && (
+        <MetadataFieldPairHelpModal
+          {...performerHelpProps}
+          onClose={() =>
+            setPerformerHelpOpen(false)
+          }
+        />
+      )}
 
       {pendingFieldRemoval && (
         <MetadataFieldModal
@@ -15059,6 +17616,210 @@ function MetadataPanel({
         ))}
       </ul>
     </section>
+  );
+}
+
+function artworkAssetUrl(
+  relativePath: string,
+): string {
+  return `/api/library/artwork?${new URLSearchParams({
+    path: relativePath,
+  }).toString()}`;
+}
+
+function ArtworkGallery({
+  release,
+  activeDocumentGroup,
+}: {
+  release: ReleaseScanResult | null;
+  activeDocumentGroup: string;
+}) {
+  const isTrackScope =
+    activeDocumentGroup !== "release";
+  const activeTrack = isTrackScope
+    ? release?.tracks.find(
+        (track) =>
+          track.id === activeDocumentGroup,
+      ) ?? null
+    : null;
+  const scope = isTrackScope
+    ? "track"
+    : "release";
+  const items = buildArtworkGallery({
+    scope,
+    releaseArtwork:
+      release?.artworkMasters ?? [],
+    trackArtwork:
+      activeTrack?.artworkMasters ?? [],
+  });
+  const inherited = items.some(
+    (item) => item.inherited,
+  );
+
+  return (
+    <section className="metadata-artwork-gallery-panel">
+      <header className="metadata-artwork-gallery-header">
+        <div>
+          <span className="metadata-artwork-gallery-eyebrow">
+            {scope === "release"
+              ? "Release artwork"
+              : "Track artwork"}
+          </span>
+          <h2>
+            {scope === "release"
+              ? "Available release artwork"
+              : `Artwork for ${formatReleaseTitle(
+                  activeTrack?.id ??
+                    activeDocumentGroup,
+                )}`}
+          </h2>
+          <p>
+            {scope === "release"
+              ? "Release-scoped artwork only. Track-specific images are intentionally excluded from this view."
+              : inherited
+                ? "No track-specific artwork was found. The release front artwork is shown as an inherited fallback."
+                : "All artwork discovered inside this track is shown below."}
+          </p>
+        </div>
+
+        <span className="metadata-artwork-gallery-count">
+          {items.length} {items.length === 1
+            ? "artwork file"
+            : "artwork files"}
+        </span>
+      </header>
+
+      {items.length === 0 ? (
+        <div className="metadata-artwork-gallery-empty">
+          <strong>No artwork detected</strong>
+          <p>
+            {scope === "release"
+              ? "Add release artwork under an artwork role directory such as front, back, disc, booklet, or alternate."
+              : "This track has no local artwork and no release front artwork is available to inherit."}
+          </p>
+        </div>
+      ) : (
+        <div className="metadata-artwork-gallery-grid">
+          {items.map((item) => (
+            <ArtworkGalleryCard
+              key={`${item.source}:${item.asset.relativePath}`}
+              item={item}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ArtworkGalleryCard({
+  item,
+}: {
+  item: ArtworkGalleryItem;
+}) {
+  const [dimensions, setDimensions] =
+    useState<string | null>(null);
+  const assetUrl = artworkAssetUrl(
+    item.asset.relativePath,
+  );
+  const extension = item.asset.extension
+    .replace(/^\./, "")
+    .toUpperCase() || "FILE";
+  const sourceLabel =
+    item.source === "track"
+      ? "Track-specific artwork"
+      : item.source === "release"
+        ? "Release artwork"
+        : "Release front fallback";
+
+  return (
+    <article
+      className={[
+        "metadata-artwork-card",
+        item.inherited
+          ? "is-inherited"
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <a
+        className="metadata-artwork-preview"
+        href={assetUrl}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open ${item.roleLabel} artwork: ${item.asset.filename}`}
+      >
+        {item.previewable ? (
+          <img
+            src={assetUrl}
+            alt={`${item.roleLabel} artwork`}
+            loading="lazy"
+            onLoad={(event) => {
+              const image = event.currentTarget;
+              setDimensions(
+                `${image.naturalWidth} × ${image.naturalHeight}`,
+              );
+            }}
+          />
+        ) : (
+          <span className="metadata-artwork-preview-placeholder">
+            <strong>{extension}</strong>
+            <small>
+              Open original to inspect
+            </small>
+          </span>
+        )}
+      </a>
+
+      <div className="metadata-artwork-card-body">
+        <header>
+          <div>
+            <span className="metadata-artwork-role">
+              {item.roleLabel}
+            </span>
+            {item.inherited && (
+              <small className="metadata-provenance-note metadata-inherited-note">
+                Inherited from release
+              </small>
+            )}
+          </div>
+          <span className="metadata-artwork-format">
+            {extension}
+          </span>
+        </header>
+
+        <strong className="metadata-artwork-filename">
+          {item.asset.filename}
+        </strong>
+
+        <dl className="metadata-artwork-facts">
+          <div>
+            <dt>Source</dt>
+            <dd>{sourceLabel}</dd>
+          </div>
+          {dimensions && (
+            <div>
+              <dt>Dimensions</dt>
+              <dd>{dimensions}</dd>
+            </div>
+          )}
+        </dl>
+
+        <code className="metadata-artwork-path">
+          {item.asset.relativePath}
+        </code>
+
+        <a
+          className="metadata-artwork-open-link"
+          href={assetUrl}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open original
+        </a>
+      </div>
+    </article>
   );
 }
 

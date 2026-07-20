@@ -205,7 +205,7 @@ export const metadataFieldRegistry:
       canonicalName: "release.type",
       label: "Release Type",
       description:
-        "Editorial or commercial format used to classify the release.",
+        "Recognized release or release-group classification used to describe the release.",
       scope: "release",
       storageFileRole: "release",
       tomlPath: "release.type",
@@ -224,11 +224,11 @@ export const metadataFieldRegistry:
         commonValues: [...releaseTypeOptions],
         examples: [
           "album",
-          "single",
-          "demo",
+          "EP",
+          "field recording",
         ],
         help:
-          "Choose one concise lowercase value and use it consistently across the library. These values are project recommendations rather than a universal embedded-tag standard.",
+          "Choose a recognized release classification when one fits. Use production notes or tags for working-session context such as a jam, rehearsal, or writing session. Existing custom authored values remain supported.",
       },
       displayPolicy: "auto",
     },
@@ -969,6 +969,31 @@ export const metadataFieldRegistry:
       displayPolicy: "auto",
     },
     {
+      id: "track.sort_title",
+      canonicalName: "track.sort_title",
+      label: "Track Sort Title",
+      description:
+        "Alphabetical sort value for the track title.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.sort_title",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Release & Track Identity",
+        order: 45,
+        examples: [
+          "Good To Me All The Time",
+          "Nebula (Original Mix)",
+        ],
+        help:
+          "Defaults to Track Display Title when available, otherwise Track Title. Override it only when the intended alphabetical sort wording differs. Automatic article movement is not applied because article rules depend on language and editorial policy.",
+      },
+      displayPolicy: "auto",
+    },
+    {
       id: "track.primary_artist.name",
       canonicalName:
         "track.primary_artist.name",
@@ -1349,7 +1374,7 @@ export const metadataFieldRegistry:
       canonicalName: "track.text.lyrics_language",
       label: "Lyrics Language",
       description:
-        "Primary language of the complete lyrical text, preferably as an ISO 639-1 code.",
+        "Primary language of the complete lyrical text. The editor defaults to the effective Track Language until a local Lyrics Language override is created.",
       scope: "track",
       storageFileRole: "track",
       tomlPath: "track.text.lyrics_language",
@@ -1368,7 +1393,7 @@ export const metadataFieldRegistry:
         commonValues: [...languageCodeOptions],
         examples: ["en", "es", "zxx"],
         help:
-          "Use the language of track.text.lyrics. Use zxx when the text intentionally has no linguistic content.",
+          "Defaults to the effective Track Language, including a language inherited from the release. Create a local override only when the lyrics use a different language; use zxx when the text intentionally has no linguistic content.",
       },
       displayPolicy: "auto",
     },

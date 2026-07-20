@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  defaultTrackIdentityFieldPaths,
   defaultTrackOverviewFieldPaths,
+  getDefaultTrackOverviewFieldOrder,
   getMissingTrackOverviewFieldPresentation,
+  isDefaultTrackIdentityFieldPath,
   isDefaultTrackOverviewFieldPath,
   shouldShowDefaultTrackOverviewFields,
 } from "../src/default-track-overview-fields.js";
@@ -33,6 +36,38 @@ test(
         "release.audio.bpm",
       ),
       false,
+    );
+  },
+);
+
+test(
+  "keeps present and missing musical-analysis fields in one stable order",
+  () => {
+    const paths = [
+      "track.audio.tuning_hz",
+      "track.audio.bpm",
+      "track.audio.time_signature",
+      "track.audio.camelot_key",
+      "track.audio.key",
+    ].sort(
+      (left, right) =>
+        getDefaultTrackOverviewFieldOrder(
+          left,
+        ) -
+        getDefaultTrackOverviewFieldOrder(
+          right,
+        ),
+    );
+
+    assert.deepEqual(
+      paths,
+      defaultTrackOverviewFieldPaths,
+    );
+    assert.equal(
+      getDefaultTrackOverviewFieldOrder(
+        "track.audio.unknown",
+      ),
+      Number.MAX_SAFE_INTEGER,
     );
   },
 );
@@ -103,6 +138,29 @@ test(
         generatedNote: null,
         actionLabel: "Add Time Signature",
       },
+    );
+  },
+);
+
+
+test(
+  "keeps Track Sort Title discoverable as a track identity default",
+  () => {
+    assert.deepEqual(
+      defaultTrackIdentityFieldPaths,
+      ["track.sort_title"],
+    );
+    assert.equal(
+      isDefaultTrackIdentityFieldPath(
+        "track.sort_title",
+      ),
+      true,
+    );
+    assert.equal(
+      isDefaultTrackIdentityFieldPath(
+        "release.sort_title",
+      ),
+      false,
     );
   },
 );

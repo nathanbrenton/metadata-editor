@@ -656,3 +656,81 @@ test(
     );
   },
 );
+
+
+test(
+  "registers Track Sort Title as a generated track identity field",
+  () => {
+    const field = findMetadataField(
+      "track.sort_title",
+    );
+
+    assert.ok(field);
+    assert.equal(
+      field.label,
+      "Track Sort Title",
+    );
+    assert.equal(field.scope, "track");
+    assert.equal(
+      field.storageFileRole,
+      "track",
+    );
+    assert.equal(field.inherited, false);
+    assert.equal(
+      field.presentation?.group,
+      "Release & Track Identity",
+    );
+  },
+);
+
+test(
+  "offers standards-aligned release classifications",
+  () => {
+    const releaseType = findMetadataField(
+      "release.type",
+    );
+
+    assert.ok(releaseType);
+    assert.equal(
+      releaseType.editor?.control,
+      "select-or-custom",
+    );
+
+    if (
+      releaseType.editor?.control
+      !== "select-or-custom"
+    ) {
+      assert.fail(
+        "Release Type must use select-or-custom",
+      );
+    }
+
+    assert.equal(
+      releaseType.editor.options.includes(
+        "field recording",
+      ),
+      true,
+    );
+
+    assert.equal(
+      releaseType.editor.options.includes(
+        "jam",
+      ),
+      false,
+    );
+
+    assert.equal(
+      releaseType.editor.options.includes(
+        "live album",
+      ),
+      false,
+    );
+
+    assert.equal(
+      releaseType.editor.options.includes(
+        "remix album",
+      ),
+      false,
+    );
+  },
+);

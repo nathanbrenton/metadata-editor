@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   MAX_METADATA_ACTIVITY_ENTRIES,
   clearMetadataActivityLog,
+  isMetadataActivityEntry,
   normalizeMetadataActivityLog,
   prependMetadataActivityEntry,
   readMetadataActivityLog,
@@ -153,6 +154,29 @@ test(
     assert.deepEqual(
       normalizeMetadataActivityLog([entry]),
       [entry],
+    );
+  },
+);
+
+
+test(
+  "accepts metadata document creation activity",
+  () => {
+    assert.equal(
+      isMetadataActivityEntry({
+        id: "create-1",
+        occurredAt: "2026-07-20T00:00:00.000Z",
+        releaseId: "release-a",
+        documentRelativePath:
+          "releases/release-a/release-production-notes.toml",
+        documentFilename:
+          "release-production-notes.toml",
+        scope: "release",
+        action: "create-document",
+        status: "verified",
+        message: "Created and verified.",
+      }),
+      true,
     );
   },
 );

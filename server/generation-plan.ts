@@ -136,3 +136,64 @@ export function buildMetadataGenerationPlan(
     warnings: [...generatedPreview.warnings],
   };
 }
+
+export function buildSingleMetadataDocumentPlan(
+  release: ReleaseScanResult,
+  generatedPreview: GeneratedMetadataPreview,
+  relativePath: string,
+): MetadataGenerationPlan {
+  const document = generatedPreview.documents.find(
+    (candidate) => candidate.relativePath === relativePath,
+  );
+
+  if (!document) {
+    throw new Error(
+      `Generated metadata document not found: ${relativePath}`,
+    );
+  }
+
+  const existingFile = buildExistingFileMap(release).get(
+    relativePath,
+  );
+  const exists = existingFile?.exists ?? false;
+  const track = document.relativePath.includes("/tracks/")
+    ? release.tracks.find((candidate) =>
+        document.relativePath.startsWith(
+          `${candidate.relativePath}/`,
+        ),
+      )
+    : undefined;
+
+  if (
+    document.relativePath.includes("/tracks/") &&
+    !track
+  ) {
+    throw new Error(
+      `Generated track metadata document is outside the release tracks: ${relativePath}`,
+    );
+  }
+
+  return {
+    releaseId: release.id,
+    scope: track ? "track" : "release",
+    ...(track ? { trackId: track.id } : {}),
+    items: [
+      {
+        storageRole: document.storageRole,
+        filename: document.filename,
+        relativePath: document.relativePath,
+        action: exists ? "blocked" : "create",
+        reason: exists
+          ? "Target file already exists; overwrite is not allowed."
+          : "Target file is missing and may be created.",
+        content: document.content,
+        validated: document.validated,
+      },
+    ],
+    summary: {
+      createCount: exists ? 0 : 1,
+      blockedCount: exists ? 1 : 0,
+    },
+    warnings: [...generatedPreview.warnings],
+  };
+}

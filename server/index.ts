@@ -21,8 +21,26 @@ import {
 import {
   detectFfmpegCapabilities,
 } from "./ffmpeg-capabilities.js";
-import { buildMetadataGenerationPlan } from "./generation-plan.js";
+import {
+  buildMetadataGenerationPlan,
+  buildSingleMetadataDocumentPlan,
+} from "./generation-plan.js";
 import { readJsonBody } from "./http.js";
+import {
+  inspectIngestCandidate,
+  scanIngestDrop,
+} from "./ingest-scanner.js";
+import {
+  defaultIngestRoot,
+  resolveIngestRoot,
+} from "./ingest-root.js";
+import {
+  defaultIngestOutputRoot,
+  executeIngestReleaseBuild,
+  parseIngestBuildDraft,
+  prepareIngestReleaseBuild,
+  resolveIngestOutputRoot,
+} from "./ingest-builder.js";
 import { buildMetadataPreview } from "./inference.js";
 import {
   findMetadataField,
@@ -170,7 +188,9 @@ const artworkContentTypes = new Map([
   [".gif", "image/gif"],
   [".jpeg", "image/jpeg"],
   [".jpg", "image/jpeg"],
+  [".pdf", "application/pdf"],
   [".png", "image/png"],
+  [".svg", "image/svg+xml"],
   [".tif", "image/tiff"],
   [".tiff", "image/tiff"],
   [".webp", "image/webp"],
@@ -215,6 +235,19 @@ async function sendLibraryArtwork(
     "X-Content-Type-Options",
     "nosniff",
   );
+
+  // SVG files may contain active content. Serve them as downloads rather
+  // than navigating the local application origin to an inline SVG document.
+  if (extension === ".svg") {
+    const filename = path
+      .basename(relativePath)
+      .replace(/["\r\n]/g, "_");
+    response.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${filename}"`,
+    );
+  }
+
   response.end(content);
 }
 
@@ -224,6 +257,203 @@ const server = createServer(
       request.url ?? "/",
       `http://${host}:${port}`,
     );
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/ingest/scan"
+    ) {
+      try {
+        const ingestRoot = await resolveIngestRoot();
+        const configuredRoot =
+          process.env.INGEST_ROOT ?? defaultIngestRoot;
+
+        sendJson(
+          response,
+          200,
+          await scanIngestDrop(
+            ingestRoot,
+            configuredRoot,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 500, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown ingest scan error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/ingest/candidate"
+    ) {
+      const candidateId =
+        requestUrl.searchParams.get("candidate");
+
+      if (!candidateId) {
+        sendJson(response, 400, {
+          error: "Missing candidate query parameter",
+        });
+        return;
+      }
+
+      try {
+        const ingestRoot = await resolveIngestRoot();
+        const configuredRoot =
+          process.env.INGEST_ROOT ?? defaultIngestRoot;
+
+        sendJson(
+          response,
+          200,
+          await inspectIngestCandidate(
+            ingestRoot,
+            candidateId,
+            configuredRoot,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown ingest inspection error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/ingest/build-preview"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          Array.isArray(body) ||
+          !("draft" in body)
+        ) {
+          throw new Error(
+            "Request must contain an ingest build draft.",
+          );
+        }
+
+        const draft = parseIngestBuildDraft(
+          body.draft,
+        );
+        const ingestRoot =
+          await resolveIngestRoot();
+        const outputRoot =
+          await resolveIngestOutputRoot();
+        const inspection =
+          await inspectIngestCandidate(
+            ingestRoot,
+            draft.candidateId,
+            process.env.INGEST_ROOT ??
+              defaultIngestRoot,
+          );
+        const prepared =
+          await prepareIngestReleaseBuild(
+            ingestRoot,
+            outputRoot,
+            inspection,
+            draft,
+            process.env.INGEST_OUTPUT_ROOT ??
+              defaultIngestOutputRoot,
+          );
+
+        sendJson(
+          response,
+          200,
+          prepared.preview,
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown ingest build-preview error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/ingest/build"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          Array.isArray(body) ||
+          !("draft" in body) ||
+          !("confirmation" in body)
+        ) {
+          throw new Error(
+            "Request must contain an ingest build draft and confirmation.",
+          );
+        }
+
+        const draft = parseIngestBuildDraft(
+          body.draft,
+        );
+
+        if (
+          typeof body.confirmation !== "string"
+        ) {
+          throw new Error(
+            "Ingest confirmation must be text.",
+          );
+        }
+
+        const ingestRoot =
+          await resolveIngestRoot();
+        const outputRoot =
+          await resolveIngestOutputRoot();
+        const inspection =
+          await inspectIngestCandidate(
+            ingestRoot,
+            draft.candidateId,
+            process.env.INGEST_ROOT ??
+              defaultIngestRoot,
+          );
+        const result =
+          await executeIngestReleaseBuild(
+            ingestRoot,
+            outputRoot,
+            inspection,
+            draft,
+            body.confirmation,
+            process.env.INGEST_OUTPUT_ROOT ??
+              defaultIngestOutputRoot,
+          );
+
+        sendJson(response, 201, result);
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown ingest build error",
+        });
+      }
+
+      return;
+    }
 
     if (
       request.method === "GET" &&
@@ -665,6 +895,102 @@ const server = createServer(
       sendJson(response, 200, {
         status: "ok",
       });
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/create-metadata-document"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (typeof body !== "object" || body === null) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : null;
+        const relativePath =
+          "relativePath" in body &&
+          typeof body.relativePath === "string"
+            ? body.relativePath
+            : null;
+        const confirmation =
+          "confirmation" in body &&
+          typeof body.confirmation === "string"
+            ? body.confirmation
+            : null;
+
+        if (!releaseId || !relativePath) {
+          sendJson(response, 400, {
+            error: "releaseId and relativePath are required",
+          });
+          return;
+        }
+
+        if (confirmation !== "CREATE_METADATA_DOCUMENT") {
+          sendJson(response, 400, {
+            error:
+              "Explicit CREATE_METADATA_DOCUMENT confirmation is required",
+          });
+          return;
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        const release = await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        const generatedPreview = buildGeneratedTomlPreview(
+          release,
+          buildMetadataPreview(release),
+        );
+        const plan = buildSingleMetadataDocumentPlan(
+          release,
+          generatedPreview,
+          relativePath,
+        );
+
+        if (plan.summary.blockedCount > 0) {
+          sendJson(response, 409, {
+            error:
+              "Target metadata document already exists; overwrite is not allowed.",
+            plan,
+          });
+          return;
+        }
+
+        const result = await executeMetadataCreationPlan(
+          mediaRoot,
+          plan,
+        );
+
+        sendJson(response, 201, result);
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown metadata document creation error",
+        });
+      }
+
       return;
     }
 

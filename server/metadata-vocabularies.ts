@@ -7,16 +7,30 @@ import {
  * The editor always retains an Other… path, so these are recommendations
  * rather than closed enums and existing custom liner-note wording is safe.
  */
+/*
+ * Release classifications follow broadly recognized release-group
+ * terminology. Session context such as "jam" or "rehearsal" belongs
+ * in production notes or tags rather than Release Type.
+ *
+ * Existing custom values remain supported by the editor.
+ */
 export const releaseTypeOptions = [
   "album",
   "single",
   "EP",
+  "broadcast",
+  "audio drama",
+  "audiobook",
   "compilation",
-  "soundtrack",
-  "live album",
   "demo",
+  "DJ mix",
+  "field recording",
+  "interview",
+  "live",
   "mixtape",
-  "remix album",
+  "remix",
+  "soundtrack",
+  "spoken word",
 ] as const;
 
 export const releaseStatusOptions = [
