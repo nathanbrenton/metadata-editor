@@ -92,6 +92,19 @@ function buildReleaseDocuments(
         original_release: "",
       },
 
+      rights: {
+        copyright: "",
+        phonographic_copyright: "",
+        publisher: "",
+        label: "",
+        distributor: "",
+        license: "",
+      },
+
+      credits: {
+        performers: [],
+      },
+
       artwork: artworkMaster
         ? [
             {
@@ -189,8 +202,29 @@ function buildReleaseDocuments(
       },
 
       recording: {
+        production_type: "",
         location: "",
+        room: "",
+        city: "",
+        region: "",
+        country: "",
         system: "",
+        revision: "",
+        production_medium: "",
+        source_date: "",
+        notes: "",
+      },
+
+      editing: {
+        production_type: "",
+        location: "",
+        room: "",
+        city: "",
+        region: "",
+        country: "",
+        system: "",
+        revision: "",
+        production_medium: "",
         notes: "",
       },
 
@@ -275,6 +309,13 @@ function buildTrackDocuments(
         missing_file_policy: "notice",
       },
 
+      rights: {
+        copyright: "",
+        phonographic_copyright: "",
+        publisher: "",
+        license: "",
+      },
+
       numbering: {
         // This remains a TOML integer without leading zeroes.
         track_number:
@@ -351,9 +392,29 @@ function buildTrackDocuments(
       notes: "",
 
       recording: {
+        production_type: "",
         location: "",
+        room: "",
+        city: "",
+        region: "",
+        country: "",
         system: "",
         revision: "",
+        production_medium: "",
+        source_date: "",
+        notes: "",
+      },
+
+      editing: {
+        production_type: "",
+        location: "",
+        room: "",
+        city: "",
+        region: "",
+        country: "",
+        system: "",
+        revision: "",
+        production_medium: "",
         notes: "",
       },
     },

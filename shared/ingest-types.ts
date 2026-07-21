@@ -104,3 +104,7 @@ export type IngestCandidateInspection = {
   warnings: string[];
   readOnly: true;
 };
+export type IngestAttachmentOptions = {
+  candidateId: string;
+  files: IngestFileInspection[];
+};

@@ -1,20 +1,30 @@
 import {
-  useMemo,
   useState,
 } from "react";
 
 import {
-  createDefaultIngestBuildDraft,
   INGEST_BUILD_CONFIRMATION_PHRASE,
+  createArtworkAssignmentId,
+  defaultReleaseArtworkAssignment,
+  ingestArtworkRoleOptions,
+  type IngestArtworkAssignmentDraft,
   type IngestBuildAssetDraft,
   type IngestBuildDraft,
   type IngestBuildPreview,
   type IngestBuildResult,
   type IngestBuildTrackDraft,
 } from "../shared/ingest-builder.js";
+import {
+  buildBlockingSourceStatuses,
+  type IngestDraftSourceStatus,
+} from "../shared/ingest-drafts.js";
 import type {
   IngestCandidateInspection,
+  IngestFileInspection,
 } from "../shared/ingest-types.js";
+import {
+  useIngestDraft,
+} from "./useIngestDraft.js";
 
 type BuilderMode =
   | "guided"
@@ -92,6 +102,502 @@ function messageFromResponse(
   return fallback;
 }
 
+
+const browserPreviewArtworkExtensions =
+  new Set([
+    ".avif",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".webp",
+  ]);
+
+function artworkPreviewUrl(
+  sourceRelativePath: string,
+  modifiedAt?: string,
+): string {
+  const parameters = new URLSearchParams({
+    path: sourceRelativePath,
+  });
+
+  if (modifiedAt) {
+    parameters.set("version", modifiedAt);
+  }
+
+  return `/api/ingest/artwork?${parameters.toString()}`;
+}
+
+function ArtworkPreview({
+  sourceRelativePath,
+  modifiedAt,
+  label,
+}: {
+  sourceRelativePath: string;
+  modifiedAt?: string;
+  label?: string;
+}) {
+  const extension = sourceRelativePath
+    .slice(
+      sourceRelativePath.lastIndexOf("."),
+    )
+    .toLowerCase();
+
+  if (
+    !browserPreviewArtworkExtensions.has(
+      extension,
+    )
+  ) {
+    return (
+      <span className="ingest-artwork-preview-unavailable">
+        Preview unavailable
+      </span>
+    );
+  }
+
+  const source = artworkPreviewUrl(
+    sourceRelativePath,
+    modifiedAt,
+  );
+  const accessibleLabel =
+    label ?? sourceRelativePath;
+
+  return (
+    <a
+      className="ingest-artwork-preview-link"
+      href={source}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={`Open full artwork preview for ${accessibleLabel}`}
+      title="Open full local artwork preview"
+    >
+      <img
+        className="ingest-artwork-thumbnail"
+        src={source}
+        alt={`Artwork preview for ${accessibleLabel}`}
+        loading="lazy"
+      />
+    </a>
+  );
+}
+
+
+function trackLabel(
+  track: IngestBuildTrackDraft,
+): string {
+  const number = String(track.trackNumber).padStart(2, "0");
+  const version = track.version.trim()
+    ? ` (${track.version.trim()})`
+    : "";
+
+  return `Track ${number} · ${track.title || "Untitled"}${version}`;
+}
+
+function assignmentLabel(
+  assignment: IngestArtworkAssignmentDraft,
+  tracks: IngestBuildTrackDraft[],
+): string {
+  if (assignment.scope === "release") {
+    return `Release · ${assignment.role}`;
+  }
+
+  const selectedTracks = tracks.filter((track) =>
+    assignment.trackSourceRelativePaths.includes(
+      track.sourceRelativePath,
+    ),
+  );
+
+  if (selectedTracks.length === 0) {
+    return `Track level · ${assignment.role} · no tracks selected`;
+  }
+
+  return `${selectedTracks
+    .map((track) => `Track ${track.trackNumber}`)
+    .join(", ")} · ${assignment.role}`;
+}
+
+function artworkTomlTargets(
+  assignment: IngestArtworkAssignmentDraft,
+  tracks: IngestBuildTrackDraft[],
+): string[] {
+  if (assignment.scope === "release") {
+    return ["release.toml"];
+  }
+
+  return tracks
+    .filter((track) =>
+      assignment.trackSourceRelativePaths.includes(
+        track.sourceRelativePath,
+      ),
+    )
+    .map(
+      (track) =>
+        `Track ${track.trackNumber} track.toml`,
+    );
+}
+
+function ArtworkAssignmentsEditor({
+  asset,
+  tracks,
+  disabled,
+  onChange,
+}: {
+  asset: IngestBuildAssetDraft;
+  tracks: IngestBuildTrackDraft[];
+  disabled: boolean;
+  onChange: (
+    patch: Partial<IngestBuildAssetDraft>,
+  ) => void;
+}) {
+  if (asset.mediaKind !== "image") {
+    return (
+      <span className="ingest-artwork-assignment-empty">
+        Not artwork
+      </span>
+    );
+  }
+
+  const assignments = asset.artworkAssignments;
+  const roleListId =
+    `ingest-artwork-role-${asset.sourceRelativePath.replace(/[^a-z0-9]+/gi, "-")}`;
+
+  const updateAssignment = (
+    assignmentId: string,
+    patch: Partial<IngestArtworkAssignmentDraft>,
+  ) => {
+    onChange({
+      include: true,
+      artworkAssignments: assignments.map(
+        (assignment) =>
+          assignment.id === assignmentId
+            ? {
+                ...assignment,
+                ...patch,
+              }
+            : assignment,
+      ),
+    });
+  };
+
+  const removeAssignment = (
+    assignmentId: string,
+  ) => {
+    const next = assignments.filter(
+      (assignment) =>
+        assignment.id !== assignmentId,
+    );
+
+    onChange({
+      artworkAssignments: next,
+      include: next.length > 0,
+    });
+  };
+
+  const addAssignment = () => {
+    onChange({
+      include: true,
+      artworkAssignments: [
+        ...assignments,
+        {
+          id: createArtworkAssignmentId(assignments),
+          scope: "release",
+          role: assignments.length === 0
+            ? "front_cover"
+            : "alternate",
+          trackSourceRelativePaths: [],
+        },
+      ],
+    });
+  };
+
+  return (
+    <div className="ingest-artwork-assignment-editor">
+      {assignments.length === 0 ? (
+        <p className="metadata-empty-value">
+          No release-level or track-level use assigned.
+        </p>
+      ) : (
+        assignments.map((assignment) => (
+          <fieldset
+            key={assignment.id}
+            className="ingest-artwork-assignment-row"
+            disabled={disabled}
+          >
+            <legend>
+              {assignmentLabel(assignment, tracks)}
+            </legend>
+
+            <label>
+              <span>Scope</span>
+              <select
+                value={assignment.scope}
+                onChange={(event) => {
+                  const scope = event.target.value as
+                    | "release"
+                    | "track";
+
+                  updateAssignment(
+                    assignment.id,
+                    {
+                      scope,
+                      trackSourceRelativePaths:
+                        scope === "release"
+                          ? []
+                          : assignment.trackSourceRelativePaths,
+                    },
+                  );
+                }}
+              >
+                <option value="release">
+                  Release level
+                </option>
+                <option value="track">
+                  Track level
+                </option>
+              </select>
+            </label>
+
+            <label>
+              <span>Artwork role</span>
+              <input
+                type="text"
+                list={roleListId}
+                value={assignment.role}
+                onChange={(event) =>
+                  updateAssignment(
+                    assignment.id,
+                    { role: event.target.value },
+                  )
+                }
+              />
+            </label>
+
+            {assignment.scope === "track" && (
+              <div className="ingest-artwork-track-picker">
+                <strong>Apply to tracks</strong>
+                {tracks
+                  .filter((track) => track.include)
+                  .map((track) => {
+                    const selected =
+                      assignment.trackSourceRelativePaths.includes(
+                        track.sourceRelativePath,
+                      );
+
+                    return (
+                      <label key={track.sourceRelativePath}>
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={(event) => {
+                            const next = event.target.checked
+                              ? [
+                                  ...assignment.trackSourceRelativePaths,
+                                  track.sourceRelativePath,
+                                ]
+                              : assignment.trackSourceRelativePaths.filter(
+                                  (path) =>
+                                    path !== track.sourceRelativePath,
+                                );
+
+                            updateAssignment(
+                              assignment.id,
+                              {
+                                trackSourceRelativePaths: [
+                                  ...new Set(next),
+                                ],
+                              },
+                            );
+                          }}
+                        />
+                        {trackLabel(track)}
+                      </label>
+                    );
+                  })}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="link-button danger-text"
+              onClick={() =>
+                removeAssignment(assignment.id)
+              }
+            >
+              Remove assignment
+            </button>
+          </fieldset>
+        ))
+      )}
+
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={addAssignment}
+      >
+        Add assignment
+      </button>
+
+      <datalist id={roleListId}>
+        {ingestArtworkRoleOptions.map((role) => (
+          <option key={role} value={role} />
+        ))}
+      </datalist>
+    </div>
+  );
+}
+
+
+function artworkAssignmentIssues(
+  draft: IngestBuildDraft,
+): string[] {
+  const includedTrackPaths = new Set(
+    draft.tracks
+      .filter((track) => track.include)
+      .map((track) => track.sourceRelativePath),
+  );
+  const issues: string[] = [];
+
+  for (const asset of draft.assets) {
+    if (asset.mediaKind !== "image" || !asset.include) {
+      continue;
+    }
+
+    if (asset.artworkAssignments.length === 0) {
+      issues.push(
+        `${asset.sourceRelativePath}: add at least one release-level or track-level artwork assignment.`,
+      );
+      continue;
+    }
+
+    for (const assignment of asset.artworkAssignments) {
+      if (!assignment.role.trim()) {
+        issues.push(
+          `${asset.sourceRelativePath}: every artwork assignment requires a role.`,
+        );
+      }
+
+      if (assignment.scope === "release") {
+        continue;
+      }
+
+      const selectedIncludedTracks =
+        assignment.trackSourceRelativePaths.filter((trackPath) =>
+          includedTrackPaths.has(trackPath),
+        );
+
+      if (selectedIncludedTracks.length === 0) {
+        issues.push(
+          `${asset.sourceRelativePath}: ${assignment.role || "track-level artwork"} must select at least one included track.`,
+        );
+      }
+
+      if (
+        selectedIncludedTracks.length !==
+        assignment.trackSourceRelativePaths.length
+      ) {
+        issues.push(
+          `${asset.sourceRelativePath}: remove excluded tracks from the ${assignment.role || "track-level artwork"} assignment.`,
+        );
+      }
+    }
+  }
+
+  return [...new Set(issues)];
+}
+
+function ArtworkAssignmentSummary({
+  draft,
+}: {
+  draft: IngestBuildDraft;
+}) {
+  const artwork = draft.assets.filter(
+    (asset) =>
+      asset.mediaKind === "image" &&
+      asset.include,
+  );
+  const assignmentCount = artwork.reduce(
+    (total, asset) =>
+      total + asset.artworkAssignments.length,
+    0,
+  );
+
+  return (
+    <section className="ingest-artwork-summary-panel">
+      <header>
+        <div>
+          <h4>Artwork use</h4>
+          <p>
+            One physical artwork copy may be referenced by the
+            release and by one or more tracks.
+          </p>
+        </div>
+        <span className="badge">
+          {artwork.length} source{artwork.length === 1 ? "" : "s"}
+          {" · "}
+          {assignmentCount} assignment{assignmentCount === 1 ? "" : "s"}
+        </span>
+      </header>
+
+      {artwork.length === 0 ? (
+        <p className="metadata-empty-value">
+          No artwork is currently included.
+        </p>
+      ) : (
+        <div className="ingest-table-scroll">
+          <table className="ingest-table ingest-artwork-summary-table">
+            <thead>
+              <tr>
+                <th scope="col">Artwork source</th>
+                <th scope="col">Physical staged copy</th>
+                <th scope="col">Metadata assignments</th>
+                <th scope="col">TOMLs updated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {artwork.map((asset) => (
+                <tr key={asset.sourceRelativePath}>
+                  <th scope="row" className="ingest-sticky-column">
+                    <code>{asset.sourceRelativePath}</code>
+                  </th>
+                  <td>
+                    <code>{asset.destinationRelativePath}</code>
+                  </td>
+                  <td>
+                    <div className="ingest-artwork-assignment-badges">
+                      {asset.artworkAssignments.map((assignment) => (
+                        <span
+                          key={assignment.id}
+                          className="badge ingest-artwork-scope-badge"
+                        >
+                          {assignmentLabel(assignment, draft.tracks)}
+                        </span>
+                      ))}
+                    </div>
+                  </td>
+                  <td>
+                    {asset.artworkAssignments
+                      .flatMap((assignment) =>
+                        artworkTomlTargets(
+                          assignment,
+                          draft.tracks,
+                        ),
+                      )
+                      .filter(
+                        (value, index, values) =>
+                          values.indexOf(value) === index,
+                      )
+                      .join(", ") || "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function IngestReleaseBuilder({
   inspection,
   onCancel,
@@ -103,17 +609,22 @@ export function IngestReleaseBuilder({
     releaseId: string,
   ) => void | Promise<void>;
 }) {
-  const initialDraft = useMemo(
-    () =>
-      createDefaultIngestBuildDraft(
-        inspection,
-      ),
-    [inspection],
-  );
-  const [draft, setDraft] =
-    useState<IngestBuildDraft>(
-      initialDraft,
-    );
+  const {
+    draft,
+    setDraft,
+    sourceStatuses,
+    attachmentOptions,
+    saveState,
+    lastSavedAt,
+    workflowError,
+    rescanLoading,
+    rescanMessage,
+    rescan,
+    attachFile,
+    detachFile,
+    markReviewed,
+    clearStoredDraft,
+  } = useIngestDraft(inspection);
   const [mode, setMode] =
     useState<BuilderMode>("guided");
   const [guidedStep, setGuidedStep] =
@@ -134,6 +645,50 @@ export function IngestReleaseBuilder({
     useState(false);
   const [confirmed, setConfirmed] =
     useState(false);
+  const [focusedSourcePath, setFocusedSourcePath] =
+    useState<string | null>(null);
+  const blockingSources =
+    buildBlockingSourceStatuses(
+      draft,
+      sourceStatuses,
+    );
+
+  const invalidateBuildPlan = () => {
+    setPreview(null);
+    setResult(null);
+    setConfirmed(false);
+    setError(null);
+  };
+
+  const rescanCandidate = async () => {
+    invalidateBuildPlan();
+    await rescan();
+  };
+
+  const attachLooseFile = (
+    file: IngestFileInspection,
+  ) => {
+    invalidateBuildPlan();
+    attachFile(file);
+  };
+
+  const removeAssetFromDraft = (
+    sourceRelativePath: string,
+  ) => {
+    invalidateBuildPlan();
+    detachFile(sourceRelativePath);
+  };
+
+  const reviewSource = (
+    sourceRelativePath: string,
+    reviewed: boolean,
+  ) => {
+    invalidateBuildPlan();
+    markReviewed(
+      sourceRelativePath,
+      reviewed,
+    );
+  };
 
   const updateDraft = (
     updater: (
@@ -227,7 +782,10 @@ export function IngestReleaseBuilder({
             "Content-Type":
               "application/json",
           },
-          body: JSON.stringify({ draft }),
+          body: JSON.stringify({
+            draft,
+            sourceStatuses,
+          }),
         },
       );
       const responseBody =
@@ -258,6 +816,87 @@ export function IngestReleaseBuilder({
     }
   };
 
+  const resolveBlockingSource = (
+    status: IngestDraftSourceStatus,
+    include: boolean,
+  ) => {
+    const track = draft.tracks.find(
+      (item) =>
+        item.sourceRelativePath ===
+        status.sourceRelativePath,
+    );
+    const asset = draft.assets.find(
+      (item) =>
+        item.sourceRelativePath ===
+        status.sourceRelativePath,
+    );
+
+    if (track) {
+      updateTrack(status.sourceRelativePath, {
+        include,
+      });
+    }
+
+    if (asset) {
+      const artworkAssignments =
+        asset.mediaKind === "image" &&
+        include &&
+        asset.artworkAssignments.length === 0
+          ? [defaultReleaseArtworkAssignment()]
+          : include
+            ? asset.artworkAssignments
+            : [];
+
+      updateAsset(status.sourceRelativePath, {
+        include,
+        artworkAssignments,
+      });
+    }
+
+    reviewSource(
+      status.sourceRelativePath,
+      true,
+    );
+  };
+
+  const reviewBlockingSource = (
+    status: IngestDraftSourceStatus,
+  ) => {
+    const isTrack = draft.tracks.some(
+      (track) =>
+        track.sourceRelativePath ===
+        status.sourceRelativePath,
+    );
+
+    setMode("guided");
+    setGuidedStep(isTrack ? 2 : 3);
+    setFocusedSourcePath(
+      status.sourceRelativePath,
+    );
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const target = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            "[data-ingest-source-path]",
+          ),
+        ).find(
+          (element) =>
+            element.dataset.ingestSourcePath ===
+            status.sourceRelativePath,
+        );
+
+        target?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+        target?.focus({
+          preventScroll: true,
+        });
+      });
+    });
+  };
+
   const createRelease = async () => {
     if (!confirmed || !preview) {
       return;
@@ -277,6 +916,7 @@ export function IngestReleaseBuilder({
           },
           body: JSON.stringify({
             draft,
+            sourceStatuses,
             confirmation:
               INGEST_BUILD_CONFIRMATION_PHRASE,
           }),
@@ -297,6 +937,7 @@ export function IngestReleaseBuilder({
       setResult(
         responseBody as IngestBuildResult,
       );
+      await clearStoredDraft();
       setPreview(null);
       setConfirmed(false);
     } catch (buildError) {
@@ -462,9 +1103,45 @@ export function IngestReleaseBuilder({
             </code>
           </div>
         </div>
-        <span className="badge">
-          Sources remain unchanged
-        </span>
+        <div className="ingest-builder-header-actions">
+          <div className="ingest-draft-status">
+            <span
+              className={`badge ${
+                saveState === "error"
+                  ? "missing"
+                  : saveState === "saved"
+                    ? "complete"
+                    : ""
+              }`}
+            >
+              {saveState === "loading"
+                ? "Loading draft…"
+                : saveState === "saving"
+                  ? "Saving draft…"
+                  : saveState === "error"
+                    ? "Draft save failed"
+                    : "Draft saved locally"}
+            </span>
+            {lastSavedAt && (
+              <small>
+                {new Date(
+                  lastSavedAt,
+                ).toLocaleString()}
+              </small>
+            )}
+          </div>
+          <button
+            type="button"
+            disabled={rescanLoading}
+            onClick={() =>
+              void rescanCandidate()
+            }
+          >
+            {rescanLoading
+              ? "Rescanning…"
+              : "Rescan candidate"}
+          </button>
+        </div>
       </header>
 
       <div className="ingest-safety-banner">
@@ -517,6 +1194,19 @@ export function IngestReleaseBuilder({
         </p>
       )}
 
+      {workflowError && (
+        <p className="message error">
+          {workflowError}
+        </p>
+      )}
+
+      {rescanMessage && (
+        <p className="message success">
+          Rescan complete: {rescanMessage}.
+          Existing tag edits were preserved.
+        </p>
+      )}
+
       {mode === "guided" ? (
         <GuidedIngestBuilder
           draft={draft}
@@ -529,6 +1219,21 @@ export function IngestReleaseBuilder({
           onReleaseChange={updateRelease}
           onTrackChange={updateTrack}
           onAssetChange={updateAsset}
+          sourceStatuses={sourceStatuses}
+          attachmentFiles={attachmentOptions.files}
+          blockingSources={blockingSources}
+          onSourceReviewed={reviewSource}
+          onAttachFile={attachLooseFile}
+          onDetachFile={removeAssetFromDraft}
+          onRemoveAsset={removeAssetFromDraft}
+          focusedSourcePath={focusedSourcePath}
+          onAcceptBlockingSource={(status) =>
+            resolveBlockingSource(status, true)
+          }
+          onSkipBlockingSource={(status) =>
+            resolveBlockingSource(status, false)
+          }
+          onReviewBlockingSource={reviewBlockingSource}
           onPreview={() =>
             void previewBuild()
           }
@@ -549,6 +1254,21 @@ export function IngestReleaseBuilder({
           onReleaseChange={updateRelease}
           onTrackChange={updateTrack}
           onAssetChange={updateAsset}
+          sourceStatuses={sourceStatuses}
+          attachmentFiles={attachmentOptions.files}
+          blockingSources={blockingSources}
+          onSourceReviewed={reviewSource}
+          onAttachFile={attachLooseFile}
+          onDetachFile={removeAssetFromDraft}
+          onRemoveAsset={removeAssetFromDraft}
+          focusedSourcePath={focusedSourcePath}
+          onAcceptBlockingSource={(status) =>
+            resolveBlockingSource(status, true)
+          }
+          onSkipBlockingSource={(status) =>
+            resolveBlockingSource(status, false)
+          }
+          onReviewBlockingSource={reviewBlockingSource}
           onPreview={() =>
             void previewBuild()
           }
@@ -575,6 +1295,17 @@ function GuidedIngestBuilder({
   onReleaseChange,
   onTrackChange,
   onAssetChange,
+  sourceStatuses,
+  attachmentFiles,
+  blockingSources,
+  onSourceReviewed,
+  onAttachFile,
+  onDetachFile,
+  onRemoveAsset,
+  focusedSourcePath,
+  onAcceptBlockingSource,
+  onSkipBlockingSource,
+  onReviewBlockingSource,
   onPreview,
   onConfirmedChange,
   onCreate,
@@ -604,6 +1335,26 @@ function GuidedIngestBuilder({
   onAssetChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildAssetDraft>,
+  ) => void;
+  sourceStatuses: IngestDraftSourceStatus[];
+  attachmentFiles: IngestFileInspection[];
+  blockingSources: IngestDraftSourceStatus[];
+  onSourceReviewed: (
+    sourceRelativePath: string,
+    reviewed: boolean,
+  ) => void;
+  onAttachFile: (file: IngestFileInspection) => void;
+  onDetachFile: (sourceRelativePath: string) => void;
+  onRemoveAsset: (sourceRelativePath: string) => void;
+  focusedSourcePath: string | null;
+  onAcceptBlockingSource: (
+    status: IngestDraftSourceStatus,
+  ) => void;
+  onSkipBlockingSource: (
+    status: IngestDraftSourceStatus,
+  ) => void;
+  onReviewBlockingSource: (
+    status: IngestDraftSourceStatus,
   ) => void;
   onPreview: () => void;
   onConfirmedChange: (
@@ -695,7 +1446,10 @@ function GuidedIngestBuilder({
           </header>
           <TrackDraftTable
             tracks={draft.tracks}
+            sourceStatuses={sourceStatuses}
             onChange={onTrackChange}
+            onSourceReviewed={onSourceReviewed}
+            focusedSourcePath={focusedSourcePath}
           />
         </section>
       )}
@@ -716,7 +1470,15 @@ function GuidedIngestBuilder({
           </header>
           <AssetDraftTable
             assets={draft.assets}
+            tracks={draft.tracks}
+            sourceStatuses={sourceStatuses}
+            attachmentFiles={attachmentFiles}
             onChange={onAssetChange}
+            onSourceReviewed={onSourceReviewed}
+            onAttachFile={onAttachFile}
+            onDetachFile={onDetachFile}
+            onRemoveAsset={onRemoveAsset}
+            focusedSourcePath={focusedSourcePath}
           />
         </section>
       )}
@@ -736,7 +1498,14 @@ function GuidedIngestBuilder({
             </p>
           </header>
           <BuildReview
+            draft={draft}
             preview={preview}
+            sourceStatuses={sourceStatuses}
+            blockingSources={blockingSources}
+            onAcceptBlockingSource={onAcceptBlockingSource}
+            onSkipBlockingSource={onSkipBlockingSource}
+            onReviewBlockingSource={onReviewBlockingSource}
+            onRemoveAsset={onRemoveAsset}
             previewLoading={previewLoading}
             buildLoading={buildLoading}
             confirmed={confirmed}
@@ -794,6 +1563,17 @@ function QuickIngestBuilder({
   onReleaseChange,
   onTrackChange,
   onAssetChange,
+  sourceStatuses,
+  attachmentFiles,
+  blockingSources,
+  onSourceReviewed,
+  onAttachFile,
+  onDetachFile,
+  onRemoveAsset,
+  focusedSourcePath,
+  onAcceptBlockingSource,
+  onSkipBlockingSource,
+  onReviewBlockingSource,
   onPreview,
   onConfirmedChange,
   onCreate,
@@ -821,6 +1601,26 @@ function QuickIngestBuilder({
   onAssetChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildAssetDraft>,
+  ) => void;
+  sourceStatuses: IngestDraftSourceStatus[];
+  attachmentFiles: IngestFileInspection[];
+  blockingSources: IngestDraftSourceStatus[];
+  onSourceReviewed: (
+    sourceRelativePath: string,
+    reviewed: boolean,
+  ) => void;
+  onAttachFile: (file: IngestFileInspection) => void;
+  onDetachFile: (sourceRelativePath: string) => void;
+  onRemoveAsset: (sourceRelativePath: string) => void;
+  focusedSourcePath: string | null;
+  onAcceptBlockingSource: (
+    status: IngestDraftSourceStatus,
+  ) => void;
+  onSkipBlockingSource: (
+    status: IngestDraftSourceStatus,
+  ) => void;
+  onReviewBlockingSource: (
+    status: IngestDraftSourceStatus,
   ) => void;
   onPreview: () => void;
   onConfirmedChange: (
@@ -853,7 +1653,10 @@ function QuickIngestBuilder({
         </header>
         <TrackDraftTable
           tracks={draft.tracks}
+          sourceStatuses={sourceStatuses}
           onChange={onTrackChange}
+          onSourceReviewed={onSourceReviewed}
+          focusedSourcePath={focusedSourcePath}
         />
       </section>
 
@@ -863,7 +1666,15 @@ function QuickIngestBuilder({
         </header>
         <AssetDraftTable
           assets={draft.assets}
+          tracks={draft.tracks}
+          sourceStatuses={sourceStatuses}
+          attachmentFiles={attachmentFiles}
           onChange={onAssetChange}
+          onSourceReviewed={onSourceReviewed}
+          onAttachFile={onAttachFile}
+          onDetachFile={onDetachFile}
+          onRemoveAsset={onRemoveAsset}
+          focusedSourcePath={focusedSourcePath}
         />
       </section>
 
@@ -872,7 +1683,14 @@ function QuickIngestBuilder({
           <h3>Build plan</h3>
         </header>
         <BuildReview
+          draft={draft}
           preview={preview}
+          sourceStatuses={sourceStatuses}
+          blockingSources={blockingSources}
+          onAcceptBlockingSource={onAcceptBlockingSource}
+          onSkipBlockingSource={onSkipBlockingSource}
+          onReviewBlockingSource={onReviewBlockingSource}
+          onRemoveAsset={onRemoveAsset}
           previewLoading={previewLoading}
           buildLoading={buildLoading}
           confirmed={confirmed}
@@ -1014,15 +1832,89 @@ function ReleaseFields({
   );
 }
 
+function sourceStatusForPath(
+  statuses: IngestDraftSourceStatus[],
+  sourceRelativePath: string,
+): IngestDraftSourceStatus | undefined {
+  return statuses.find(
+    (status) =>
+      status.sourceRelativePath ===
+      sourceRelativePath,
+  );
+}
+
+function SourceReviewCell({
+  status,
+  onReviewed,
+}: {
+  status: IngestDraftSourceStatus | undefined;
+  onReviewed: (reviewed: boolean) => void;
+}) {
+  if (!status) {
+    return <span>—</span>;
+  }
+
+  if (status.state === "unchanged") {
+    return (
+      <span className="badge complete">
+        Unchanged
+      </span>
+    );
+  }
+
+  if (status.state === "missing") {
+    return (
+      <span className="badge missing">
+        Source missing
+      </span>
+    );
+  }
+
+  return (
+    <label className="ingest-source-review-control">
+      <span
+        className={`badge ${
+          status.state === "changed"
+            ? "missing"
+            : ""
+        }`}
+      >
+        {status.state === "changed"
+          ? "Changed"
+          : "New"}
+      </span>
+      <span>
+        <input
+          type="checkbox"
+          checked={status.reviewed}
+          onChange={(event) =>
+            onReviewed(event.target.checked)
+          }
+        />
+        Reviewed
+      </span>
+    </label>
+  );
+}
+
 function TrackDraftTable({
   tracks,
+  sourceStatuses,
   onChange,
+  onSourceReviewed,
+  focusedSourcePath,
 }: {
   tracks: IngestBuildTrackDraft[];
+  sourceStatuses: IngestDraftSourceStatus[];
   onChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildTrackDraft>,
   ) => void;
+  onSourceReviewed: (
+    sourceRelativePath: string,
+    reviewed: boolean,
+  ) => void;
+  focusedSourcePath: string | null;
 }) {
   if (tracks.length === 0) {
     return (
@@ -1040,6 +1932,7 @@ function TrackDraftTable({
           <tr>
             <th scope="col">Use</th>
             <th scope="col">Source</th>
+            <th scope="col">Source state</th>
             <th scope="col">#</th>
             <th scope="col">Track title</th>
             <th scope="col">Version / take</th>
@@ -1051,133 +1944,183 @@ function TrackDraftTable({
           </tr>
         </thead>
         <tbody>
-          {tracks.map((track) => (
-            <tr
-              key={track.sourceRelativePath}
-            >
-              <td>
-                <input
-                  type="checkbox"
-                  aria-label={`Include ${track.sourceRelativePath}`}
-                  checked={track.include}
-                  onChange={(event) =>
-                    onChange(
-                      track.sourceRelativePath,
-                      {
-                        include:
-                          event.target.checked,
-                      },
-                    )
-                  }
-                />
-              </td>
-              <th
-                scope="row"
-                className="ingest-sticky-column"
+          {tracks.map((track) => {
+            const status = sourceStatusForPath(
+              sourceStatuses,
+              track.sourceRelativePath,
+            );
+            const sourceMissing =
+              status?.state === "missing";
+
+            return (
+              <tr
+                key={track.sourceRelativePath}
+                data-ingest-source-path={
+                  track.sourceRelativePath
+                }
+                tabIndex={-1}
+                className={[
+                  sourceMissing
+                    ? "ingest-source-missing-row"
+                    : "",
+                  focusedSourcePath ===
+                  track.sourceRelativePath
+                    ? "ingest-source-focused-row"
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined}
               >
-                <code>
-                  {track.sourceRelativePath}
-                </code>
-              </th>
-              <td>
-                <input
-                  type="number"
-                  min={1}
-                  value={track.trackNumber}
-                  disabled={!track.include}
-                  aria-label={`Track number for ${track.sourceRelativePath}`}
-                  onChange={(event) =>
-                    onChange(
-                      track.sourceRelativePath,
-                      {
-                        trackNumber:
-                          Number(
+                <td>
+                  <input
+                    type="checkbox"
+                    aria-label={`Include ${track.sourceRelativePath}`}
+                    checked={track.include}
+                    onChange={(event) =>
+                      onChange(
+                        track.sourceRelativePath,
+                        {
+                          include:
+                            event.target.checked,
+                        },
+                      )
+                    }
+                  />
+                </td>
+                <th
+                  scope="row"
+                  className="ingest-sticky-column"
+                >
+                  <code>
+                    {track.sourceRelativePath}
+                  </code>
+                </th>
+                <td>
+                  <SourceReviewCell
+                    status={status}
+                    onReviewed={(reviewed) =>
+                      onSourceReviewed(
+                        track.sourceRelativePath,
+                        reviewed,
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    min={1}
+                    value={track.trackNumber}
+                    disabled={
+                      !track.include ||
+                      sourceMissing
+                    }
+                    aria-label={`Track number for ${track.sourceRelativePath}`}
+                    onChange={(event) =>
+                      onChange(
+                        track.sourceRelativePath,
+                        {
+                          trackNumber:
+                            Number(
+                              event.target.value,
+                            ),
+                        },
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    type="text"
+                    value={track.title}
+                    disabled={
+                      !track.include ||
+                      sourceMissing
+                    }
+                    aria-label={`Track title for ${track.sourceRelativePath}`}
+                    onChange={(event) =>
+                      onChange(
+                        track.sourceRelativePath,
+                        {
+                          title:
                             event.target.value,
-                          ),
-                      },
-                    )
-                  }
-                />
-              </td>
-              <td>
-                <input
-                  type="text"
-                  value={track.title}
-                  disabled={!track.include}
-                  aria-label={`Track title for ${track.sourceRelativePath}`}
-                  onChange={(event) =>
-                    onChange(
-                      track.sourceRelativePath,
-                      {
-                        title:
-                          event.target.value,
-                      },
-                    )
-                  }
-                />
-              </td>
-              <td>
-                <input
-                  type="text"
-                  value={track.version}
-                  disabled={!track.include}
-                  aria-label={`Track version for ${track.sourceRelativePath}`}
-                  onChange={(event) =>
-                    onChange(
-                      track.sourceRelativePath,
-                      {
-                        version:
-                          event.target.value,
-                      },
-                    )
-                  }
-                />
-              </td>
-              <td>
-                <input
-                  type="text"
-                  value={track.artist}
-                  disabled={!track.include}
-                  aria-label={`Track artist for ${track.sourceRelativePath}`}
-                  onChange={(event) =>
-                    onChange(
-                      track.sourceRelativePath,
-                      {
-                        artist:
-                          event.target.value,
-                      },
-                    )
-                  }
-                />
-              </td>
-              <td>
-                <input
-                  type="date"
-                  value={track.date}
-                  disabled={!track.include}
-                  aria-label={`Source date for ${track.sourceRelativePath}`}
-                  onChange={(event) =>
-                    onChange(
-                      track.sourceRelativePath,
-                      {
-                        date:
-                          event.target.value,
-                      },
-                    )
-                  }
-                />
-              </td>
-              <td>
-                <code>
-                  {track.destinationFilename}
-                </code>
-                <small>
-                  Standardized master name;
-                  original extension retained.
-                </small>
-              </td>
-            </tr>
-          ))}
+                        },
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    type="text"
+                    value={track.version}
+                    disabled={
+                      !track.include ||
+                      sourceMissing
+                    }
+                    aria-label={`Track version for ${track.sourceRelativePath}`}
+                    onChange={(event) =>
+                      onChange(
+                        track.sourceRelativePath,
+                        {
+                          version:
+                            event.target.value,
+                        },
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    type="text"
+                    value={track.artist}
+                    disabled={
+                      !track.include ||
+                      sourceMissing
+                    }
+                    aria-label={`Track artist for ${track.sourceRelativePath}`}
+                    onChange={(event) =>
+                      onChange(
+                        track.sourceRelativePath,
+                        {
+                          artist:
+                            event.target.value,
+                        },
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <input
+                    type="date"
+                    value={track.date}
+                    disabled={
+                      !track.include ||
+                      sourceMissing
+                    }
+                    aria-label={`Source date for ${track.sourceRelativePath}`}
+                    onChange={(event) =>
+                      onChange(
+                        track.sourceRelativePath,
+                        {
+                          date:
+                            event.target.value,
+                        },
+                      )
+                    }
+                  />
+                </td>
+                <td>
+                  <code>
+                    {track.destinationFilename}
+                  </code>
+                  <small>
+                    Standardized master name;
+                    original extension retained.
+                  </small>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -1186,96 +2129,338 @@ function TrackDraftTable({
 
 function AssetDraftTable({
   assets,
+  tracks,
+  sourceStatuses,
+  attachmentFiles,
   onChange,
+  onSourceReviewed,
+  onAttachFile,
+  onDetachFile,
+  onRemoveAsset,
+  focusedSourcePath,
 }: {
   assets: IngestBuildAssetDraft[];
+  tracks: IngestBuildTrackDraft[];
+  sourceStatuses: IngestDraftSourceStatus[];
+  attachmentFiles: IngestFileInspection[];
   onChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildAssetDraft>,
   ) => void;
+  onSourceReviewed: (
+    sourceRelativePath: string,
+    reviewed: boolean,
+  ) => void;
+  onAttachFile: (file: IngestFileInspection) => void;
+  onDetachFile: (sourceRelativePath: string) => void;
+  onRemoveAsset: (sourceRelativePath: string) => void;
+  focusedSourcePath: string | null;
 }) {
-  if (assets.length === 0) {
-    return (
-      <p className="metadata-empty-value">
-        This candidate has no inspected image
-        or text sidecars.
-      </p>
+  const attachedPaths = new Set(
+    assets.map((asset) =>
+      asset.sourceRelativePath,
+    ),
+  );
+  const availableAttachments =
+    attachmentFiles.filter(
+      (file) =>
+        !attachedPaths.has(file.relativePath),
     );
-  }
 
   return (
-    <div className="ingest-table-scroll">
-      <table className="ingest-table ingest-builder-asset-table">
-        <thead>
-          <tr>
-            <th scope="col">Use</th>
-            <th scope="col">Source</th>
-            <th scope="col">Type</th>
-            <th scope="col">
-              Release-relative destination
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {assets.map((asset) => (
-            <tr
-              key={asset.sourceRelativePath}
-            >
-              <td>
-                <input
-                  type="checkbox"
-                  aria-label={`Include ${asset.sourceRelativePath}`}
-                  checked={asset.include}
-                  onChange={(event) =>
-                    onChange(
-                      asset.sourceRelativePath,
-                      {
-                        include:
-                          event.target.checked,
-                      },
-                    )
-                  }
-                />
-              </td>
-              <th
-                scope="row"
-                className="ingest-sticky-column"
-              >
-                <code>
-                  {asset.sourceRelativePath}
-                </code>
-              </th>
-              <td>{asset.mediaKind}</td>
-              <td>
-                <input
-                  type="text"
-                  value={
-                    asset.destinationRelativePath
-                  }
-                  disabled={!asset.include}
-                  spellCheck={false}
-                  aria-label={`Destination for ${asset.sourceRelativePath}`}
-                  onChange={(event) =>
-                    onChange(
-                      asset.sourceRelativePath,
-                      {
-                        destinationRelativePath:
-                          event.target.value,
-                      },
-                    )
-                  }
-                />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="ingest-asset-workflow">
+      {assets.length === 0 ? (
+        <p className="metadata-empty-value">
+          This candidate has no attached image
+          or text sidecars yet. Add a file to the
+          candidate folder and rescan, or attach a
+          loose file from the drop point below.
+        </p>
+      ) : (
+        <div className="ingest-table-scroll">
+          <table className="ingest-table ingest-builder-asset-table">
+            <thead>
+              <tr>
+                <th scope="col">Source</th>
+                <th scope="col">Preview</th>
+                <th scope="col">Use / copy</th>
+                <th scope="col">Source state</th>
+                <th scope="col">Artwork assignments</th>
+                <th scope="col">
+                  Physical release-relative copy
+                </th>
+                <th scope="col">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {assets.map((asset) => {
+                const status = sourceStatusForPath(
+                  sourceStatuses,
+                  asset.sourceRelativePath,
+                );
+                const sourceMissing =
+                  status?.state === "missing";
+
+                return (
+                  <tr
+                    key={asset.sourceRelativePath}
+                    data-ingest-source-path={
+                      asset.sourceRelativePath
+                    }
+                    tabIndex={-1}
+                    className={[
+                      sourceMissing
+                        ? "ingest-source-missing-row"
+                        : "",
+                      focusedSourcePath ===
+                      asset.sourceRelativePath
+                        ? "ingest-source-focused-row"
+                        : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ") || undefined}
+                  >
+                    <th
+                      scope="row"
+                      className="ingest-sticky-column"
+                    >
+                      <code>
+                        {asset.sourceRelativePath}
+                      </code>
+                    </th>
+                    <td className="ingest-artwork-preview-cell">
+                      {asset.mediaKind === "image" ? (
+                        <ArtworkPreview
+                          key={`${asset.sourceRelativePath}:${status?.modifiedAt ?? ""}`}
+                          sourceRelativePath={asset.sourceRelativePath}
+                          modifiedAt={status?.modifiedAt}
+                        />
+                      ) : (
+                        <span className="ingest-artwork-preview-unavailable">
+                          Text
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <label className="ingest-inline-checkbox">
+                        <input
+                          type="checkbox"
+                          aria-label={`Include ${asset.sourceRelativePath}`}
+                          checked={asset.include}
+                          disabled={sourceMissing}
+                          onChange={(event) => {
+                            const include =
+                              event.target.checked;
+                            const artworkAssignments =
+                              asset.mediaKind === "image"
+                                ? include
+                                  ? asset.artworkAssignments.length > 0
+                                    ? asset.artworkAssignments
+                                    : [defaultReleaseArtworkAssignment()]
+                                  : []
+                                : asset.artworkAssignments;
+
+                            onChange(
+                              asset.sourceRelativePath,
+                              {
+                                include,
+                                artworkAssignments,
+                              },
+                            );
+                          }}
+                        />
+                        {asset.mediaKind === "image"
+                          ? asset.include
+                            ? "Used as artwork"
+                            : "Not used"
+                          : asset.include
+                            ? "Copy text"
+                            : "Skip text"}
+                      </label>
+                    </td>
+                    <td>
+                      <SourceReviewCell
+                        status={status}
+                        onReviewed={(reviewed) =>
+                          onSourceReviewed(
+                            asset.sourceRelativePath,
+                            reviewed,
+                          )
+                        }
+                      />
+                    </td>
+                    <td>
+                      <ArtworkAssignmentsEditor
+                        asset={asset}
+                        tracks={tracks}
+                        disabled={sourceMissing}
+                        onChange={(patch) =>
+                          onChange(
+                            asset.sourceRelativePath,
+                            patch,
+                          )
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={
+                          asset.destinationRelativePath
+                        }
+                        disabled={
+                          !asset.include ||
+                          sourceMissing
+                        }
+                        spellCheck={false}
+                        aria-label={`Destination for ${asset.sourceRelativePath}`}
+                        onChange={(event) =>
+                          onChange(
+                            asset.sourceRelativePath,
+                            {
+                              destinationRelativePath:
+                                event.target.value,
+                            },
+                          )
+                        }
+                      />
+                    </td>
+                    <td>
+                      {sourceMissing ? (
+                        <button
+                          type="button"
+                          className="danger-button ingest-remove-draft-button"
+                          title={
+                            "Remove this missing asset from the draft. Nothing is deleted from ingest-drop."
+                          }
+                          aria-label="Remove missing asset from draft"
+                          onClick={() =>
+                            onRemoveAsset(
+                              asset.sourceRelativePath,
+                            )
+                          }
+                        >
+                          <span aria-hidden="true">×</span>
+                        </button>
+                      ) : status?.attached ? (
+                        <button
+                          type="button"
+                          disabled={asset.include}
+                          title={
+                            asset.include
+                              ? "Remove artwork assignments or uncheck Use before detaching this loose file."
+                              : undefined
+                          }
+                          onClick={() =>
+                            onDetachFile(
+                              asset.sourceRelativePath,
+                            )
+                          }
+                        >
+                          Detach
+                        </button>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <section className="ingest-loose-attachments">
+        <header>
+          <div>
+            <h4>Loose files available to attach</h4>
+            <p>
+              Root-level images and text files remain
+              separate ingest candidates until you attach
+              them to this draft. Attaching does not move
+              or modify the source.
+            </p>
+          </div>
+          <span className="badge">
+            {availableAttachments.length} available
+          </span>
+        </header>
+
+        {availableAttachments.length === 0 ? (
+          <p className="metadata-empty-value">
+            No unattached loose image or text files are
+            currently available. Add one to ingest-drop
+            and choose Rescan candidate.
+          </p>
+        ) : (
+          <div className="ingest-table-scroll">
+            <table className="ingest-table">
+              <thead>
+                <tr>
+                  <th scope="col">Source</th>
+                  <th scope="col">Preview</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Size</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {availableAttachments.map((file) => (
+                  <tr key={file.relativePath}>
+                    <th
+                      scope="row"
+                      className="ingest-sticky-column"
+                    >
+                      <code>{file.relativePath}</code>
+                    </th>
+                    <td className="ingest-artwork-preview-cell">
+                      {file.mediaKind === "image" ? (
+                        <ArtworkPreview
+                          key={`${file.relativePath}:${file.modifiedAt}`}
+                          sourceRelativePath={file.relativePath}
+                          modifiedAt={file.modifiedAt}
+                        />
+                      ) : (
+                        <span className="ingest-artwork-preview-unavailable">
+                          Text
+                        </span>
+                      )}
+                    </td>
+                    <td>{file.mediaKind}</td>
+                    <td>
+                      {formatByteSize(file.sizeBytes)}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onAttachFile(file)
+                        }
+                      >
+                        Attach to draft
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
 
 function BuildReview({
+  draft,
   preview,
+  sourceStatuses,
+  blockingSources,
+  onAcceptBlockingSource,
+  onSkipBlockingSource,
+  onReviewBlockingSource,
+  onRemoveAsset,
   previewLoading,
   buildLoading,
   confirmed,
@@ -1283,7 +2468,20 @@ function BuildReview({
   onConfirmedChange,
   onCreate,
 }: {
+  draft: IngestBuildDraft;
   preview: IngestBuildPreview | null;
+  sourceStatuses: IngestDraftSourceStatus[];
+  blockingSources: IngestDraftSourceStatus[];
+  onAcceptBlockingSource: (
+    status: IngestDraftSourceStatus,
+  ) => void;
+  onSkipBlockingSource: (
+    status: IngestDraftSourceStatus,
+  ) => void;
+  onReviewBlockingSource: (
+    status: IngestDraftSourceStatus,
+  ) => void;
+  onRemoveAsset: (sourceRelativePath: string) => void;
   previewLoading: boolean;
   buildLoading: boolean;
   confirmed: boolean;
@@ -1293,14 +2491,260 @@ function BuildReview({
   ) => void;
   onCreate: () => void;
 }) {
+  const trackPaths = new Set(
+    draft.tracks.map((track) =>
+      track.sourceRelativePath,
+    ),
+  );
+  const assetPaths = new Set(
+    draft.assets.map((asset) =>
+      asset.sourceRelativePath,
+    ),
+  );
+  const missingAssets = sourceStatuses.filter(
+    (status) =>
+      status.state === "missing" &&
+      assetPaths.has(status.sourceRelativePath),
+  );
+  const assignmentIssues =
+    artworkAssignmentIssues(draft);
+
   return (
     <div className="ingest-build-review">
+      <ArtworkAssignmentSummary draft={draft} />
+
+      {missingAssets.length > 0 && (
+        <section className="warning-panel ingest-missing-draft-assets">
+          <header>
+            <div>
+              <h4>Missing optional files retained in this draft</h4>
+              <p>
+                These sources are no longer present in ingest-drop.
+                Remove them from the draft to clear their stale rows;
+                this never deletes source media.
+              </p>
+            </div>
+            <span className="badge missing">
+              {missingAssets.length} missing
+            </span>
+          </header>
+          <div className="ingest-table-scroll">
+            <table className="ingest-table">
+              <thead>
+                <tr>
+                  <th scope="col">Missing source</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {missingAssets.map((status) => (
+                  <tr key={status.sourceRelativePath}>
+                    <th scope="row" className="ingest-sticky-column">
+                      <code>{status.sourceRelativePath}</code>
+                    </th>
+                    <td>
+                      <button
+                        type="button"
+                        className="danger-button ingest-remove-draft-button"
+                        title={
+                          "Remove this missing asset from the draft. Nothing is deleted from ingest-drop."
+                        }
+                        aria-label="Remove missing asset from draft"
+                        onClick={() =>
+                          onRemoveAsset(status.sourceRelativePath)
+                        }
+                      >
+                        <span aria-hidden="true">×</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {assignmentIssues.length > 0 && (
+        <section className="warning-panel ingest-artwork-assignment-issues">
+          <header>
+            <div>
+              <h4>Artwork assignments need attention</h4>
+              <p>
+                Every included image needs a clear scope, role,
+                and at least one selected track when used at track level.
+              </p>
+            </div>
+            <span className="badge missing">
+              {assignmentIssues.length} issue{assignmentIssues.length === 1 ? "" : "s"}
+            </span>
+          </header>
+          <ul className="ingest-warning-list">
+            {assignmentIssues.map((issue) => (
+              <li key={issue}>{issue}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {blockingSources.length > 0 && (
+        <section className="warning-panel ingest-source-review-panel">
+          <header>
+            <div>
+              <h4>Source review required</h4>
+              <p>
+                Decide whether to include or skip each
+                new, changed, or missing source. The
+                build-plan button becomes available as
+                soon as every row has a decision.
+              </p>
+            </div>
+            <span className="badge missing">
+              {blockingSources.length} pending
+            </span>
+          </header>
+
+          <div className="ingest-table-scroll">
+            <table className="ingest-table ingest-source-review-table">
+              <thead>
+                <tr>
+                  <th scope="col">Source</th>
+                  <th scope="col">Preview</th>
+                  <th scope="col">State</th>
+                  <th scope="col">Decision</th>
+                </tr>
+              </thead>
+              <tbody>
+                {blockingSources.map((status) => {
+                  const isTrack = trackPaths.has(
+                    status.sourceRelativePath,
+                  );
+                  const isAsset = assetPaths.has(
+                    status.sourceRelativePath,
+                  );
+                  const mayAccept =
+                    status.state !== "missing";
+                  const acceptLabel = isTrack
+                    ? "Accept track source"
+                    : status.mediaKind === "image"
+                      ? "Include as artwork"
+                      : "Include file";
+                  const reviewLabel = isTrack
+                    ? "Review in Tracks"
+                    : "Review in Other Files";
+
+                  return (
+                    <tr key={status.sourceRelativePath}>
+                      <th
+                        scope="row"
+                        className="ingest-sticky-column"
+                      >
+                        <code>
+                          {status.sourceRelativePath}
+                        </code>
+                      </th>
+                      <td className="ingest-artwork-preview-cell">
+                        {status.mediaKind === "image" &&
+                        status.state !== "missing" ? (
+                          <ArtworkPreview
+                            key={`${status.sourceRelativePath}:${status.modifiedAt ?? ""}`}
+                            sourceRelativePath={status.sourceRelativePath}
+                            modifiedAt={status.modifiedAt}
+                          />
+                        ) : (
+                          <span className="ingest-artwork-preview-unavailable">
+                            {status.mediaKind}
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            status.state === "missing" ||
+                            status.state === "changed"
+                              ? "missing"
+                              : ""
+                          }`}
+                        >
+                          {status.state}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="ingest-source-decision-actions">
+                          {mayAccept && (
+                            <button
+                              type="button"
+                              className="primary-button"
+                              onClick={() =>
+                                onAcceptBlockingSource(
+                                  status,
+                                )
+                              }
+                            >
+                              {acceptLabel}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onSkipBlockingSource(
+                                status,
+                              )
+                            }
+                          >
+                            {status.state === "missing"
+                              ? "Exclude missing file"
+                              : "Skip this file"}
+                          </button>
+                          {isAsset &&
+                            status.state === "missing" && (
+                              <button
+                                type="button"
+                                className="danger-button ingest-remove-draft-button"
+                                title={
+                                  "Remove this missing asset from the draft. Nothing is deleted from ingest-drop."
+                                }
+                                aria-label="Remove missing asset from draft"
+                                onClick={() =>
+                                  onRemoveAsset(
+                                    status.sourceRelativePath,
+                                  )
+                                }
+                              >
+                                <span aria-hidden="true">×</span>
+                              </button>
+                            )}
+                          {(isTrack || isAsset) && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onReviewBlockingSource(
+                                  status,
+                                )
+                              }
+                            >
+                              {reviewLabel}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       <button
         type="button"
         className="primary-button"
         disabled={
           previewLoading ||
-          buildLoading
+          buildLoading ||
+          blockingSources.length > 0 ||
+          assignmentIssues.length > 0
         }
         onClick={onPreview}
       >
@@ -1318,50 +2762,43 @@ function BuildReview({
               <dt>Destination</dt>
               <dd>
                 <code>
-                  {
-                    preview.releaseRelativePath
-                  }
+                  {preview.releaseRelativePath}
                 </code>
               </dd>
             </div>
             <div>
               <dt>Tracks</dt>
-              <dd>
-                {preview.summary.trackCount}
-              </dd>
+              <dd>{preview.summary.trackCount}</dd>
             </div>
             <div>
               <dt>Files copied</dt>
               <dd>
-                {
-                  preview.summary
-                    .copiedFileCount
-                }
+                {preview.summary.copiedFileCount}
               </dd>
+            </div>
+            <div>
+              <dt>Artwork sources</dt>
+              <dd>{preview.summary.artworkSourceCount}</dd>
+            </div>
+            <div>
+              <dt>Artwork assignments</dt>
+              <dd>{preview.summary.artworkAssignmentCount}</dd>
             </div>
             <div>
               <dt>Copy size</dt>
               <dd>
                 {formatByteSize(
-                  preview.summary
-                    .totalCopyBytes,
+                  preview.summary.totalCopyBytes,
                 )}
               </dd>
             </div>
             <div>
               <dt>TOMLs</dt>
-              <dd>
-                {preview.summary.tomlCount}
-              </dd>
+              <dd>{preview.summary.tomlCount}</dd>
             </div>
             <div>
               <dt>Blocked</dt>
-              <dd>
-                {
-                  preview.summary
-                    .blockedCount
-                }
-              </dd>
+              <dd>{preview.summary.blockedCount}</dd>
             </div>
           </dl>
 
@@ -1371,9 +2808,7 @@ function BuildReview({
                 <tr>
                   <th scope="col">Action</th>
                   <th scope="col">Source</th>
-                  <th scope="col">
-                    Destination
-                  </th>
+                  <th scope="col">Destination</th>
                   <th scope="col">Roles</th>
                   <th
                     scope="col"
@@ -1394,9 +2829,7 @@ function BuildReview({
                       <td>
                         {item.sourceRelativePath ? (
                           <code>
-                            {
-                              item.sourceRelativePath
-                            }
+                            {item.sourceRelativePath}
                           </code>
                         ) : (
                           "—"
@@ -1407,9 +2840,7 @@ function BuildReview({
                         className="ingest-sticky-column"
                       >
                         <code>
-                          {
-                            item.destinationRelativePath
-                          }
+                          {item.destinationRelativePath}
                         </code>
                       </th>
                       <td>
@@ -1418,8 +2849,7 @@ function BuildReview({
                         ) ?? "—"}
                       </td>
                       <td className="numeric">
-                        {item.sizeBytes !==
-                        undefined
+                        {item.sizeBytes !== undefined
                           ? formatByteSize(
                               item.sizeBytes,
                             )
@@ -1441,13 +2871,9 @@ function BuildReview({
           </div>
 
           <ul className="ingest-warning-list">
-            {preview.warnings.map(
-              (warning) => (
-                <li key={warning}>
-                  {warning}
-                </li>
-              ),
-            )}
+            {preview.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
           </ul>
 
           <label className="ingest-build-confirmation">
@@ -1455,8 +2881,9 @@ function BuildReview({
               type="checkbox"
               checked={confirmed}
               disabled={
-                preview.summary.blockedCount >
-                  0 ||
+                preview.summary.blockedCount > 0 ||
+                blockingSources.length > 0 ||
+                assignmentIssues.length > 0 ||
                 buildLoading
               }
               onChange={(event) =>
@@ -1468,8 +2895,7 @@ function BuildReview({
             <span>
               I reviewed the destination plan.
               Create a new staging release and
-              leave all ingest sources
-              unchanged.
+              leave all ingest sources unchanged.
             </span>
           </label>
 
@@ -1479,8 +2905,9 @@ function BuildReview({
             disabled={
               !confirmed ||
               buildLoading ||
-              preview.summary.blockedCount >
-                0
+              preview.summary.blockedCount > 0 ||
+              blockingSources.length > 0 ||
+              assignmentIssues.length > 0
             }
             onClick={onCreate}
           >

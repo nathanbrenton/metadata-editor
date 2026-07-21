@@ -178,7 +178,7 @@ export const metadataFieldRegistry:
         "release.primary_artist.sort_name",
       label: "Artist Sort Name",
       description:
-        "Optional alternate form used to alphabetize the release artist without changing the displayed artist name.",
+        "Alphabetical form generated from the release artist name, with a leading The moved to the end when present.",
       scope: "release",
       storageFileRole: "release",
       tomlPath:
@@ -191,12 +191,12 @@ export const metadataFieldRegistry:
         group: "Artists",
         order: 20,
         examples: [
-          "First Last → Last, First",
+          "Crazy Eights → Crazy Eights",
           "The Example Band → Example Band, The",
-          "SingleName → SingleName",
+          "Custom: First Last → Last, First",
         ],
         help:
-          "For a conventional personal name written as First Last, enter Last, First. Leave this blank when the display name already sorts correctly. Do not automatically reverse stage names, group names, or names whose cultural ordering is uncertain.",
+          "The editor defaults to the displayed artist name and changes only an unambiguous leading The, such as The Example Band → Example Band, The. It does not automatically reverse personal names, stage names, or culturally ordered names. Enter a custom value when a different authoritative sort form is required.",
       },
       displayPolicy: "auto",
     },
@@ -443,7 +443,7 @@ export const metadataFieldRegistry:
         "release.dates.release",
       label: "Release Date",
       description:
-        "Release date in ISO-style YYYY-MM-DD form when known.",
+        "Date this specific release, edition, reissue, or remaster was issued.",
       scope: "release",
       storageFileRole: "release",
       tomlPath: "release.dates.release",
@@ -485,7 +485,35 @@ export const metadataFieldRegistry:
           "2026",
         ],
         help:
-          "Use an ISO-style date when known. Some players display only the year.",
+          "Enter the date of this specific release or edition. For example, a remaster issued in 2026 uses its 2026 date here even when the underlying album first appeared in 1970. Original Release Date is a separate historical field and does not automatically inherit this value. Some players display only the year.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.dates.original_release",
+      canonicalName:
+        "release.dates.original_release",
+      label: "Original Release Date",
+      description:
+        "Earliest known release date for the release concept represented by this edition.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath:
+        "release.dates.original_release",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Dates",
+        order: 20,
+        examples: [
+          "1970-09-18",
+          "1970-09",
+          "1970",
+        ],
+        help:
+          "Enter the earliest known release date for the release concept, not the date of this particular reissue or remaster. For example, a 2026 remaster of an album first released in 1970 uses 2026 for Release Date and 1970 for Original Release Date. On a first issue, the two dates may be equal, but this field remains independent and is not filled automatically from Release Date. Leave it blank when the historical date is unknown.",
       },
       displayPolicy: "auto",
     },
@@ -715,11 +743,11 @@ export const metadataFieldRegistry:
         group: "Artists",
         order: 90,
         examples: [
-          "First Last → Last, First",
+          "Crazy Eights → Crazy Eights",
           "The Example Band → Example Band, The",
         ],
         help:
-          "This normally mirrors release.primary_artist.sort_name. Leave it blank when the Album Artist display name already sorts correctly.",
+          "This inherits the effective release artist sort name when the Album Artist identity matches. Otherwise the editor defaults to the Album Artist name and moves only a leading The to the end.",
       },
       displayPolicy: "auto",
     },
@@ -799,7 +827,7 @@ export const metadataFieldRegistry:
           "1998",
         ],
         help:
-          "A blank value inherits release.dates.original_release. Override it when the track or recording has a different historical release date.",
+          "A blank value inherits release.dates.original_release. Override it only when this specific recording or track was first released on a different date, such as an earlier single later included on the release.",
       },
       displayPolicy: "auto",
     },
@@ -822,10 +850,10 @@ export const metadataFieldRegistry:
         group: "Music Business & Rights",
         order: 40,
         examples: [
-          "© 2009 Example Publishing",
+          "Copyright © Example Publishing. All rights reserved.",
         ],
         help:
-          "Leave this blank when the release-level copyright notice applies. Add a track override only when ownership or wording differs.",
+          "Use the guided form Copyright © [name or names]. All rights reserved. Leave this blank when the release-level copyright notice applies. Add a track override only when ownership or wording differs.",
       },
       displayPolicy: "auto",
     },
@@ -848,10 +876,10 @@ export const metadataFieldRegistry:
         group: "Music Business & Rights",
         order: 50,
         examples: [
-          "℗ 2009 Example Records",
+          "Sound Recording Copyright ℗ Example Records. All rights reserved.",
         ],
         help:
-          "This ℗ notice applies to the recorded performance. It is distinct from composition, publishing, and lyrics copyright.",
+          "Use the guided form Sound Recording Copyright ℗ [name or names]. All rights reserved. This notice applies to the recorded performance and is distinct from composition, publishing, lyrics, and artwork copyright.",
       },
       displayPolicy: "auto",
     },
@@ -1065,11 +1093,11 @@ export const metadataFieldRegistry:
         group: "Artists",
         order: 30,
         examples: [
-          "First Last → Last, First",
+          "Crazy Eights → Crazy Eights",
           "The Example Band → Example Band, The",
         ],
         help:
-          "Inherit the release artist sort name only when Track Artist matches the release artist. Enter a local value only when this track needs a different alphabetical sort form.",
+          "Inherit the effective release artist sort name only when Track Artist matches the release artist. For a different local artist, the editor defaults to that artist name and moves only a leading The to the end. Enter a custom value when needed.",
       },
       displayPolicy: "auto",
     },
@@ -1816,10 +1844,10 @@ export const metadataFieldRegistry:
         group: "Music Business & Rights",
         order: 10,
         examples: [
-          "© 2026 Example Records",
+          "Copyright © Example Records. All rights reserved.",
         ],
         help:
-          "Enter the credited copyright statement, including the year and rights holder when applicable.",
+          "Use the guided form Copyright © [name or names]. All rights reserved. Only the credited holder names are editable; use Custom value when the source requires different wording.",
       },
       displayPolicy: "auto",
     },
@@ -1864,12 +1892,102 @@ export const metadataFieldRegistry:
       ],
       presentation: {
         group: "Music Business & Rights",
-        order: 20,
+        order: 30,
         examples: [
           "Example Music Publishing",
         ],
         help:
           "Enter the credited publisher, publishing administrator, or rights organization.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.rights.phonographic_copyright",
+      canonicalName: "release.rights.phonographic_copyright",
+      label: "Sound Recording Copyright",
+      description:
+        "Release-level ℗ notice covering ownership of the sound recordings.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.rights.phonographic_copyright",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 20,
+        examples: [
+          "Sound Recording Copyright ℗ Example Records. All rights reserved.",
+        ],
+        help:
+          "Use the guided form Sound Recording Copyright ℗ [name or names]. All rights reserved. Only the credited holder names are editable; use Custom value when the source requires different wording. This notice is distinct from composition, publishing, lyrics, and artwork copyright.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.rights.label",
+      canonicalName: "release.rights.label",
+      label: "Record Label",
+      description:
+        "Label or imprint responsible for releasing the recording.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.rights.label",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 40,
+        examples: ["Example Records"],
+        help:
+          "Enter the credited label or imprint. Leave blank for an unreleased or self-managed recording when no label identity is applicable.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.rights.distributor",
+      canonicalName: "release.rights.distributor",
+      label: "Distributor",
+      description:
+        "Organization or service responsible for release distribution.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.rights.distributor",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 50,
+        examples: ["Self-distributed", "Example Distribution"],
+        help:
+          "Enter the credited physical or digital distributor when applicable.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.rights.license",
+      canonicalName: "release.rights.license",
+      label: "Release License",
+      description:
+        "Release-level license or usage statement.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.rights.license",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Music Business & Rights",
+        order: 60,
+        examples: ["All rights reserved"],
+        help:
+          "Enter the governing license or a concise rights-reservation statement when one is known.",
       },
       displayPolicy: "auto",
     },
@@ -2116,6 +2234,76 @@ export const metadataFieldRegistry:
       displayPolicy: "auto",
     },
     {
+      id: "release.credits.performers[].name",
+      canonicalName: "release.credits.performers[].name",
+      label: "Release Performer Name",
+      description:
+        "Name credited as a performer across the release baseline.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.credits.performers[].name",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: false,
+      presentation: {
+        group: "Performers",
+        order: 10,
+        help:
+          "Set the performer baseline for the release. Tracks inherit this list until a track creates a local performer override.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.credits.performers[].role",
+      canonicalName: "release.credits.performers[].role",
+      label: "Release Performance Role",
+      description:
+        "Instrument, vocal, or other performance role used across the release baseline.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.credits.performers[].role",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...performanceRoleOptions],
+        customPlaceholder: "Custom performance role",
+      },
+      presentation: {
+        group: "Performers",
+        order: 20,
+        commonValues: [...performanceRoleOptions],
+        help:
+          "Add one record per credited name and role. Repeat a performer when the same person has several roles.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.credits.performers[].sort_name",
+      canonicalName: "release.credits.performers[].sort_name",
+      label: "Release Performer Sort Name",
+      description:
+        "Optional normalized name used when sorting release-level performer credits.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.credits.performers[].sort_name",
+      valueType: "string",
+      required: false,
+      repeatable: true,
+      inherited: false,
+      presentation: {
+        group: "Performers",
+        order: 30,
+        examples: ["Brenton, Nathan"],
+        help:
+          "Optional sortable form. Leave blank when the display name already sorts correctly.",
+      },
+      displayPolicy: "developer",
+    },
+    {
       id: "track.performers[].name",
       canonicalName:
         "track.performers[].name",
@@ -2290,7 +2478,7 @@ export const metadataFieldRegistry:
       repeatable: false,
       inherited: false,
       presentation: {
-        group: "Recording and Editing",
+        group: "Recording",
         order: 50,
         examples: [
           "Los Angeles, California, United States",

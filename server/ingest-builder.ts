@@ -30,8 +30,13 @@ import {
   formatTrackDisplayTitle,
 } from "../shared/track-title.js";
 import {
+  generateArtistSortName,
+} from "../shared/artist-sort-name.js";
+import {
   INGEST_BUILD_CONFIRMATION_PHRASE,
   slugifyIngestValue,
+  defaultReleaseArtworkAssignment,
+  type IngestArtworkAssignmentDraft,
   type IngestBuildAssetDraft,
   type IngestBuildCopyReceipt,
   type IngestBuildDraft,
@@ -280,6 +285,54 @@ function parseTrackDraft(
   };
 }
 
+
+function parseArtworkAssignmentDraft(
+  value: unknown,
+  assetIndex: number,
+  assignmentIndex: number,
+): IngestArtworkAssignmentDraft {
+  if (!isRecord(value)) {
+    throw new Error(
+      `Asset ${assetIndex + 1} artwork assignment ${assignmentIndex + 1} must be an object.`,
+    );
+  }
+
+  if (value.scope !== "release" && value.scope !== "track") {
+    throw new Error(
+      `Asset ${assetIndex + 1} artwork assignment ${assignmentIndex + 1} scope must be release or track.`,
+    );
+  }
+
+  if (!Array.isArray(value.trackSourceRelativePaths)) {
+    throw new Error(
+      `Asset ${assetIndex + 1} artwork assignment ${assignmentIndex + 1} track paths must be an array.`,
+    );
+  }
+
+  return {
+    id: requireString(
+      value.id,
+      `Asset ${assetIndex + 1} artwork assignment ${assignmentIndex + 1} ID`,
+      160,
+    ),
+    scope: value.scope,
+    role: requireString(
+      value.role,
+      `Asset ${assetIndex + 1} artwork assignment ${assignmentIndex + 1} role`,
+      80,
+    ),
+    trackSourceRelativePaths:
+      value.trackSourceRelativePaths.map(
+        (trackPath, trackIndex) =>
+          requireString(
+            trackPath,
+            `Asset ${assetIndex + 1} artwork assignment ${assignmentIndex + 1} track ${trackIndex + 1}`,
+            1000,
+          ),
+      ),
+  };
+}
+
 function parseAssetDraft(
   value: unknown,
   index: number,
@@ -299,22 +352,38 @@ function parseAssetDraft(
     );
   }
 
+  const include = requireBoolean(
+    value.include,
+    `Asset ${index + 1} include`,
+  );
+  const artworkAssignments =
+    Array.isArray(value.artworkAssignments)
+      ? value.artworkAssignments.map(
+          (assignment, assignmentIndex) =>
+            parseArtworkAssignmentDraft(
+              assignment,
+              index,
+              assignmentIndex,
+            ),
+        )
+      : value.mediaKind === "image" && include
+        ? [defaultReleaseArtworkAssignment()]
+        : [];
+
   return {
     sourceRelativePath: requireString(
       value.sourceRelativePath,
       `Asset ${index + 1} source path`,
       1000,
     ),
-    include: requireBoolean(
-      value.include,
-      `Asset ${index + 1} include`,
-    ),
+    include,
     mediaKind: value.mediaKind,
     destinationRelativePath: requireString(
       value.destinationRelativePath,
       `Asset ${index + 1} destination path`,
       1000,
     ),
+    artworkAssignments,
   };
 }
 
@@ -456,17 +525,65 @@ function metadataStatuses(
   }));
 }
 
+type PreparedIngestTrack = {
+  draft: IngestBuildTrackDraft;
+  id: string;
+  relativePath: string;
+  audioDestination: string;
+};
+
+type PreparedArtworkAsset = {
+  draft: IngestBuildAssetDraft;
+  destinationRelativePath: string;
+};
+
+function releaseArtworkAssignments(
+  artworkAssets: PreparedArtworkAsset[],
+) {
+  return artworkAssets.flatMap((asset) =>
+    asset.draft.artworkAssignments
+      .filter((assignment) => assignment.scope === "release")
+      .map((assignment) => ({ asset, assignment })),
+  );
+}
+
+function trackArtworkAssignments(
+  artworkAssets: PreparedArtworkAsset[],
+  trackSourceRelativePath: string,
+) {
+  return artworkAssets.flatMap((asset) =>
+    asset.draft.artworkAssignments
+      .filter(
+        (assignment) =>
+          assignment.scope === "track" &&
+          assignment.trackSourceRelativePaths.includes(
+            trackSourceRelativePath,
+          ),
+      )
+      .map((assignment) => ({ asset, assignment })),
+  );
+}
+
+function relativeArtworkPathForTrack(
+  track: PreparedIngestTrack,
+  releaseRelativePath: string,
+  artworkRelativePath: string,
+): string {
+  return path.posix.relative(
+    track.relativePath,
+    `${releaseRelativePath}/${artworkRelativePath}`,
+  );
+}
+
 function syntheticReleaseScan(
   releaseId: string,
   releaseRelativePath: string,
-  tracks: Array<{
-    draft: IngestBuildTrackDraft;
-    id: string;
-    relativePath: string;
-    audioDestination: string;
-  }>,
-  artworkRelativePath?: string,
+  tracks: PreparedIngestTrack[],
+  artworkAssets: PreparedArtworkAsset[],
 ): ReleaseScanResult {
+  const releaseArtwork = releaseArtworkAssignments(
+    artworkAssets,
+  )[0];
   const release: ReleaseScanResult = {
     id: releaseId,
     relativePath: releaseRelativePath,
@@ -478,16 +595,17 @@ function syntheticReleaseScan(
         "release-production-notes.toml",
       ],
     ),
-    artworkMasters: artworkRelativePath
+    artworkMasters: releaseArtwork
       ? [
           {
             filename: path.posix.basename(
-              artworkRelativePath,
+              releaseArtwork.asset.destinationRelativePath,
             ),
             relativePath:
-              `${releaseRelativePath}/${artworkRelativePath}`,
-            extension:
-              extensionOf(artworkRelativePath),
+              `${releaseRelativePath}/${releaseArtwork.asset.destinationRelativePath}`,
+            extension: extensionOf(
+              releaseArtwork.asset.destinationRelativePath,
+            ),
           },
         ]
       : [],
@@ -495,28 +613,47 @@ function syntheticReleaseScan(
   };
 
   release.tracks = tracks.map(
-    (track): TrackScanResult => ({
-      id: track.id,
-      relativePath: track.relativePath,
-      metadataFiles: metadataStatuses(
-        track.relativePath,
-        [
-          "track.toml",
-          "track-credits.toml",
-          "track-production-notes.toml",
+    (track): TrackScanResult => {
+      const trackArtwork = trackArtworkAssignments(
+        artworkAssets,
+        track.draft.sourceRelativePath,
+      )[0];
+
+      return {
+        id: track.id,
+        relativePath: track.relativePath,
+        metadataFiles: metadataStatuses(
+          track.relativePath,
+          [
+            "track.toml",
+            "track-credits.toml",
+            "track-production-notes.toml",
+          ],
+        ),
+        audioMasters: [
+          {
+            filename: track.audioDestination,
+            relativePath:
+              `${track.relativePath}/${track.audioDestination}`,
+            extension: extensionOf(track.audioDestination),
+          },
         ],
-      ),
-      audioMasters: [
-        {
-          filename: track.audioDestination,
-          relativePath:
-            `${track.relativePath}/${track.audioDestination}`,
-          extension:
-            extensionOf(track.audioDestination),
-        },
-      ],
-      artworkMasters: [],
-    }),
+        artworkMasters: trackArtwork
+          ? [
+              {
+                filename: path.posix.basename(
+                  trackArtwork.asset.destinationRelativePath,
+                ),
+                relativePath:
+                  `${releaseRelativePath}/${trackArtwork.asset.destinationRelativePath}`,
+                extension: extensionOf(
+                  trackArtwork.asset.destinationRelativePath,
+                ),
+              },
+            ]
+          : [],
+      };
+    },
   );
 
   return release;
@@ -525,14 +662,13 @@ function syntheticReleaseScan(
 function syntheticMetadataPreview(
   release: ReleaseScanResult,
   draft: IngestBuildDraft,
-  tracks: Array<{
-    draft: IngestBuildTrackDraft;
-    id: string;
-    relativePath: string;
-    audioDestination: string;
-  }>,
-  artworkRelativePath?: string,
+  tracks: PreparedIngestTrack[],
+  artworkAssets: PreparedArtworkAsset[],
 ): LibraryMetadataPreview {
+  const releaseArtwork = releaseArtworkAssignments(
+    artworkAssets,
+  )[0];
+
   return {
     release: {
       releaseId: {
@@ -547,13 +683,12 @@ function syntheticMetadataPreview(
         value: draft.releaseTitle,
         source: "confirmed ingest draft",
       },
-      ...(artworkRelativePath
+      ...(releaseArtwork
         ? {
             artworkMasterPath: {
               value:
-                `${release.relativePath}/${artworkRelativePath}`,
-              source:
-                "confirmed ingest asset mapping",
+                `${release.relativePath}/${releaseArtwork.asset.destinationRelativePath}`,
+              source: "confirmed ingest artwork assignment",
             },
           }
         : {}),
@@ -624,22 +759,37 @@ function setNestedRecordValue(
   current[key] = value;
 }
 
+function artworkRecord(
+  id: string,
+  role: string,
+  masterPath: string,
+  primary: boolean,
+) {
+  return {
+    id,
+    role,
+    primary,
+    master_path: masterPath,
+    web_path: "",
+    embedded_path: "",
+    description: "",
+    credits: [],
+    copyright: "",
+  };
+}
+
 function customizeGeneratedDocuments(
   documents: GeneratedMetadataDocument[],
   draft: IngestBuildDraft,
-  tracks: Array<{
-    draft: IngestBuildTrackDraft;
-    id: string;
-    relativePath: string;
-    audioDestination: string;
-  }>,
-  artworkRelativePath?: string,
+  tracks: PreparedIngestTrack[],
+  artworkAssets: PreparedArtworkAsset[],
+  releaseRelativePath: string,
 ): GeneratedMetadataDocument[] {
   const trackByDirectory = new Map(
-    tracks.map((track) => [
-      track.relativePath,
-      track,
-    ]),
+    tracks.map((track) => [track.relativePath, track]),
+  );
+  const releaseAssignments = releaseArtworkAssignments(
+    artworkAssets,
   );
 
   return documents.map((document) => {
@@ -648,17 +798,20 @@ function customizeGeneratedDocuments(
     ) as Record<string, unknown>;
 
     if (document.filename === "release.toml") {
-      setNestedRecordValue(
-        data,
-        ["release"],
-        "type",
-        draft.releaseType,
-      );
+      setNestedRecordValue(data, ["release"], "type", draft.releaseType);
       setNestedRecordValue(
         data,
         ["release", "primary_artist"],
         "name",
         draft.releaseArtist,
+      );
+      setNestedRecordValue(
+        data,
+        ["release", "primary_artist"],
+        "sort_name",
+        generateArtistSortName(
+          draft.releaseArtist,
+        ).value,
       );
       setNestedRecordValue(
         data,
@@ -669,33 +822,40 @@ function customizeGeneratedDocuments(
           disc_total: 1,
         },
       );
+      setNestedRecordValue(
+        data,
+        ["release"],
+        "artwork",
+        releaseAssignments.map(
+          ({ asset, assignment }, index) =>
+            artworkRecord(
+              assignment.id,
+              assignment.role,
+              asset.destinationRelativePath,
+              index === 0,
+            ),
+        ),
+      );
     }
 
     if (
-      document.filename ===
-        "release-settings.toml" &&
-      artworkRelativePath
+      document.filename === "release-settings.toml" &&
+      releaseAssignments.length > 0
     ) {
       setNestedRecordValue(
         data,
         ["settings", "inheritance"],
         "release_artwork_fallback_path",
-        artworkRelativePath,
+        releaseAssignments[0].asset.destinationRelativePath,
       );
     }
 
-    const trackDirectory =
-      path.posix.dirname(
-        document.relativePath,
-      );
-    const track = trackByDirectory.get(
-      trackDirectory,
+    const trackDirectory = path.posix.dirname(
+      document.relativePath,
     );
+    const track = trackByDirectory.get(trackDirectory);
 
-    if (
-      track &&
-      document.filename === "track.toml"
-    ) {
+    if (track && document.filename === "track.toml") {
       setNestedRecordValue(
         data,
         ["track", "numbering"],
@@ -717,13 +877,51 @@ function customizeGeneratedDocuments(
           original_release: "",
         },
       );
+
+      const assignments = trackArtworkAssignments(
+        artworkAssets,
+        track.draft.sourceRelativePath,
+      );
+      const firstArtwork = assignments[0];
+      setNestedRecordValue(
+        data,
+        ["track", "assets"],
+        "artwork",
+        {
+          master: firstArtwork
+            ? relativeArtworkPathForTrack(
+                track,
+                releaseRelativePath,
+                firstArtwork.asset.destinationRelativePath,
+              )
+            : "",
+          web: "",
+          embedded: "",
+          web_mime_type: "",
+          embedded_mime_type: "",
+          description: "",
+        },
+      );
+      setNestedRecordValue(
+        data,
+        ["track"],
+        "artwork",
+        assignments.map(({ asset, assignment }, index) =>
+          artworkRecord(
+            assignment.id,
+            assignment.role,
+            relativeArtworkPathForTrack(
+              track,
+              releaseRelativePath,
+              asset.destinationRelativePath,
+            ),
+            index === 0,
+          ),
+        ),
+      );
     }
 
-    if (
-      track &&
-      document.filename ===
-        "track-credits.toml"
-    ) {
+    if (track && document.filename === "track-credits.toml") {
       setNestedRecordValue(
         data,
         ["track"],
@@ -739,8 +937,7 @@ function customizeGeneratedDocuments(
 
     if (
       track &&
-      document.filename ===
-        "track-production-notes.toml" &&
+      document.filename === "track-production-notes.toml" &&
       track.draft.date
     ) {
       setNestedRecordValue(
@@ -751,8 +948,7 @@ function customizeGeneratedDocuments(
       );
     }
 
-    const content =
-      `${stringify(data).trimEnd()}\n`;
+    const content = `${stringify(data).trimEnd()}\n`;
     parse(content);
 
     return {
@@ -1129,6 +1325,66 @@ export async function prepareIngestReleaseBuild(
         );
       }
 
+      if (file.mediaKind === "image") {
+        if (asset.artworkAssignments.length === 0) {
+          throw new Error(
+            `${asset.sourceRelativePath}: included artwork requires at least one release-level or track-level assignment.`,
+          );
+        }
+
+        const assignmentIds = new Set<string>();
+        const includedTrackPaths = new Set(
+          tracks.map((track) =>
+            track.draft.sourceRelativePath,
+          ),
+        );
+
+        for (const assignment of asset.artworkAssignments) {
+          if (assignmentIds.has(assignment.id)) {
+            throw new Error(
+              `${asset.sourceRelativePath}: artwork assignment IDs must be unique.`,
+            );
+          }
+          assignmentIds.add(assignment.id);
+
+          if (!assignment.role.trim()) {
+            throw new Error(
+              `${asset.sourceRelativePath}: every artwork assignment requires a role.`,
+            );
+          }
+
+          if (assignment.scope === "release") {
+            if (assignment.trackSourceRelativePaths.length > 0) {
+              throw new Error(
+                `${asset.sourceRelativePath}: release-level artwork assignments cannot select tracks.`,
+              );
+            }
+          } else {
+            const selectedTracks = new Set(
+              assignment.trackSourceRelativePaths,
+            );
+
+            if (selectedTracks.size === 0) {
+              throw new Error(
+                `${asset.sourceRelativePath}: track-level artwork assignments require at least one included track.`,
+              );
+            }
+
+            for (const trackPath of selectedTracks) {
+              if (!includedTrackPaths.has(trackPath)) {
+                throw new Error(
+                  `${asset.sourceRelativePath}: artwork assignment references a track that is not included: ${trackPath}`,
+                );
+              }
+            }
+          }
+        }
+      } else if (asset.artworkAssignments.length > 0) {
+        throw new Error(
+          `${asset.sourceRelativePath}: text sidecars cannot have artwork assignments.`,
+        );
+      }
+
       return {
         draft: asset,
         file,
@@ -1136,21 +1392,20 @@ export async function prepareIngestReleaseBuild(
       };
     },
   );
-
-  const artworkRelativePath =
-    normalizedAssets.find(
-      (asset) =>
-        asset.file.mediaKind === "image" &&
-        asset.destinationRelativePath.startsWith(
-          "artwork/front/",
-        ),
-    )?.destinationRelativePath;
+  const artworkAssets: PreparedArtworkAsset[] =
+    normalizedAssets
+      .filter((asset) => asset.file.mediaKind === "image")
+      .map((asset) => ({
+        draft: asset.draft,
+        destinationRelativePath:
+          asset.destinationRelativePath,
+      }));
 
   const release = syntheticReleaseScan(
     releaseId,
     releaseRelativePath,
     tracks,
-    artworkRelativePath,
+    artworkAssets,
   );
   const generated =
     buildGeneratedTomlPreview(
@@ -1159,7 +1414,7 @@ export async function prepareIngestReleaseBuild(
         release,
         draft,
         tracks,
-        artworkRelativePath,
+        artworkAssets,
       ),
     );
   const documents =
@@ -1167,7 +1422,8 @@ export async function prepareIngestReleaseBuild(
       generated.documents,
       draft,
       tracks,
-      artworkRelativePath,
+      artworkAssets,
+      releaseRelativePath,
     );
   const copies: PreparedCopy[] = [];
 
@@ -1194,7 +1450,12 @@ export async function prepareIngestReleaseBuild(
         asset.destinationRelativePath,
         `${releaseRelativePath}/${asset.destinationRelativePath}`,
         asset.file.mediaKind === "image"
-          ? ["release-artwork-source"]
+          ? asset.draft.artworkAssignments.map(
+              (assignment) =>
+                assignment.scope === "release"
+                  ? `release-artwork:${assignment.role}`
+                  : `track-artwork:${assignment.role}:${assignment.trackSourceRelativePaths.length}-tracks`,
+            )
           : ["imported-text-sidecar"],
       ),
     );
@@ -1316,6 +1577,15 @@ export async function prepareIngestReleaseBuild(
         blockedCount: finalExists
           ? items.length
           : 0,
+        artworkSourceCount:
+          artworkAssets.length,
+        artworkAssignmentCount:
+          artworkAssets.reduce(
+            (total, asset) =>
+              total +
+              asset.draft.artworkAssignments.length,
+            0,
+          ),
       },
       warnings: [
         "Ingestion copies source bytes without rewriting embedded metadata.",

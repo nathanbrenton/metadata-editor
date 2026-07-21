@@ -5463,6 +5463,59 @@ input[aria-invalid="true"] {
   padding: 0 0 0.85rem 1.1rem;
 }
 
+/* Copyright names remain editable while canonical notice wording stays fixed. */
+.guided-copyright-input {
+  display: grid;
+  grid-template-columns:
+    auto
+    auto
+    minmax(12rem, 1fr)
+    auto
+    auto;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.guided-copyright-input.is-custom {
+  grid-template-columns:
+    minmax(12rem, 1fr)
+    auto;
+}
+
+.guided-copyright-fragment,
+.guided-copyright-reservation {
+  min-height: 2.15rem;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #59636d;
+  border-radius: 0.25rem;
+  padding: 0.45rem 0.65rem;
+  color: #d8dde2;
+  background: #252a2f;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.guided-copyright-punctuation {
+  color: #edf1f4;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.guided-copyright-input:not(.is-custom)
+> .guided-rights-mode-button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.guided-copyright-input
+.guided-rights-preview,
+.guided-copyright-input
+.guided-rights-note {
+  grid-column: 1 / -1;
+}
+
 /* Copyright symbols are generated from the canonical field semantics. */
 .guided-rights-input {
   display: grid;
@@ -5520,6 +5573,26 @@ input[aria-invalid="true"] {
 }
 
 @media (max-width: 52rem) {
+  .guided-copyright-input,
+  .guided-copyright-input.is-custom {
+    grid-template-columns:
+      auto
+      auto
+      minmax(0, 1fr)
+      auto;
+  }
+
+  .guided-copyright-reservation,
+  .guided-copyright-input.is-custom > input,
+  .guided-copyright-input
+  .guided-rights-mode-button,
+  .guided-copyright-input
+  .guided-rights-preview,
+  .guided-copyright-input
+  .guided-rights-note {
+    grid-column: 1 / -1;
+  }
+
   .guided-rights-input,
   .guided-rights-input.is-custom {
     grid-template-columns:
@@ -7023,5 +7096,427 @@ input[aria-invalid="true"] {
 
   .ingest-build-summary > div:last-child {
     border-bottom: 0;
+  }
+}
+
+/* Durable ingest drafts and merge-based source rescanning. */
+.ingest-builder-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.ingest-draft-status {
+  display: grid;
+  justify-items: end;
+  gap: 0.2rem;
+}
+
+.ingest-draft-status small {
+  color: #8995a1;
+  font-size: 0.68rem;
+}
+
+.ingest-source-review-control {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 7.5rem;
+}
+
+.ingest-source-review-control > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #b6c0c9;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.ingest-source-review-control input {
+  width: auto;
+}
+
+.ingest-source-missing-row > th,
+.ingest-source-missing-row > td {
+  background: #2a2022;
+}
+
+.ingest-source-missing-row:hover > th,
+.ingest-source-missing-row:hover > td {
+  background: #322528 !important;
+}
+
+.ingest-asset-workflow {
+  display: grid;
+  gap: 1rem;
+}
+
+.ingest-loose-attachments {
+  display: grid;
+  gap: 0.75rem;
+  border-top: 1px solid var(--document-border);
+  padding-top: 1rem;
+}
+
+.ingest-loose-attachments > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ingest-loose-attachments h4,
+.ingest-loose-attachments p {
+  margin: 0;
+}
+
+.ingest-loose-attachments header p {
+  margin-top: 0.2rem;
+  max-width: 54rem;
+  color: #929da7;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 720px) {
+  .ingest-builder-header-actions,
+  .ingest-loose-attachments > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ingest-draft-status {
+    justify-items: start;
+  }
+}
+
+/* Local ingest artwork previews and actionable review decisions. */
+.ingest-builder-asset-table {
+  min-width: 72rem;
+}
+
+.ingest-artwork-preview-cell {
+  width: 7rem;
+  min-width: 7rem;
+  text-align: center;
+  vertical-align: middle !important;
+}
+
+.ingest-artwork-preview-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.75rem;
+  height: 5.75rem;
+  border: 1px solid #48535d;
+  border-radius: 0.3rem;
+  overflow: hidden;
+  background: #101417;
+}
+
+.ingest-artwork-preview-link:hover,
+.ingest-artwork-preview-link:focus-visible {
+  border-color: #8ba6bc;
+  outline: 2px solid rgba(139, 166, 188, 0.35);
+  outline-offset: 2px;
+}
+
+.ingest-artwork-thumbnail {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.ingest-artwork-preview-unavailable {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3.5rem;
+  color: #818d98;
+  font-size: 0.7rem;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+.ingest-source-focused-row > th,
+.ingest-source-focused-row > td {
+  background: #22303a !important;
+  box-shadow:
+    inset 0 1px 0 #66839a,
+    inset 0 -1px 0 #66839a;
+}
+
+.ingest-source-review-panel {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ingest-source-review-panel > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem 0;
+}
+
+.ingest-source-review-panel h4,
+.ingest-source-review-panel p {
+  margin: 0;
+}
+
+.ingest-source-review-panel p {
+  margin-top: 0.25rem;
+  color: #c2b3a2;
+}
+
+.ingest-source-review-table {
+  min-width: 58rem;
+}
+
+.ingest-source-decision-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  min-width: 26rem;
+}
+
+.ingest-source-decision-actions button {
+  min-height: 2rem;
+}
+
+@media (max-width: 720px) {
+  .ingest-source-review-panel > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* Ingest artwork assignment workflow */
+.ingest-inline-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+}
+
+.ingest-artwork-assignment-editor {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 22rem;
+}
+
+.ingest-artwork-assignment-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.8fr) minmax(10rem, 1fr);
+  gap: 0.55rem 0.7rem;
+  margin: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.4rem;
+  background: var(--surface-subtle);
+}
+
+.ingest-artwork-assignment-row legend {
+  grid-column: 1 / -1;
+  padding: 0 0.25rem;
+  font-weight: 700;
+}
+
+.ingest-artwork-assignment-row label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.ingest-artwork-assignment-row label > span,
+.ingest-artwork-track-picker > strong {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ingest-artwork-track-picker {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.35rem;
+}
+
+.ingest-artwork-track-picker label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ingest-artwork-assignment-empty {
+  color: var(--text-muted);
+}
+
+.ingest-artwork-summary-panel {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.45rem;
+  overflow: hidden;
+}
+
+.ingest-artwork-summary-panel > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ingest-artwork-summary-panel h4,
+.ingest-artwork-summary-panel p {
+  margin: 0;
+}
+
+.ingest-artwork-summary-panel p {
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+}
+
+.ingest-artwork-assignment-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.ingest-artwork-scope-badge {
+  text-transform: none;
+  white-space: normal;
+}
+
+@media (max-width: 760px) {
+  .ingest-artwork-assignment-row {
+    grid-template-columns: 1fr;
+  }
+
+  .ingest-artwork-assignment-row legend,
+  .ingest-artwork-track-picker {
+    grid-column: 1;
+  }
+
+  .ingest-artwork-summary-panel > header {
+    flex-direction: column;
+  }
+}
+
+/*
+ * Missing draft assets use a compact icon action. The full
+ * explanation remains available through the button tooltip
+ * and accessible label.
+ */
+.ingest-remove-draft-button {
+  display: inline-flex;
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Help dialogs lead with practical values and hide implementation details. */
+.metadata-field-value-guidance,
+.metadata-field-about,
+.metadata-help-technical-disclosure {
+  min-width: 0;
+}
+
+.metadata-field-guidance-examples {
+  margin-top: 0.9rem;
+  border-top: 1px solid #343a41;
+  padding-top: 0.75rem;
+}
+
+.metadata-field-guidance-examples h5,
+.metadata-field-pair-example strong {
+  color: #aeb8c2;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.metadata-field-pair-example {
+  margin-top: 0.7rem !important;
+  border-top: 1px solid #303840;
+  padding-top: 0.65rem;
+}
+
+.metadata-field-pair-example code {
+  color: #eef2f5;
+}
+
+.metadata-help-technical-disclosure {
+  grid-column: 1 / -1;
+  margin: 0;
+  border: 1px solid #353d45;
+  border-radius: 0.45rem;
+  padding: 0 0.8rem;
+  background: #131619;
+}
+
+.metadata-help-technical-disclosure > summary {
+  padding: 0.8rem 0;
+}
+
+.metadata-help-technical-content {
+  padding-right: 0;
+  padding-bottom: 0.9rem;
+}
+
+.metadata-help-technical-content > .metadata-field-facts {
+  margin-top: 0;
+}
+
+/* Release performer inheritance keeps the baseline visible and actionable. */
+.performer-inheritance-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  border: 1px solid #415466;
+  border-radius: 0.4rem;
+  padding: 0.8rem 0.9rem;
+  background: #17212a;
+}
+
+.performer-inheritance-banner p {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+}
+
+.performer-record-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+@media (max-width: 760px) {
+  .performer-inheritance-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .performer-record-toolbar-actions {
+    width: 100%;
+    justify-content: flex-start;
   }
 }

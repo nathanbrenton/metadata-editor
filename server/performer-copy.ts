@@ -62,13 +62,31 @@ export function performerPairKey(
 export function readCopyablePerformerRecords(
   document: ParsedMetadataDocument,
 ): CopyablePerformerRecord[] {
-  const track = document.parsed.track;
+  let performers: unknown;
 
-  if (!isRecord(track)) {
-    return [];
+  if (document.scope === "release") {
+    const release = document.parsed.release;
+
+    if (!isRecord(release)) {
+      return [];
+    }
+
+    const credits = release.credits;
+
+    if (!isRecord(credits)) {
+      return [];
+    }
+
+    performers = credits.performers;
+  } else {
+    const track = document.parsed.track;
+
+    if (!isRecord(track)) {
+      return [];
+    }
+
+    performers = track.performers;
   }
-
-  const performers = track.performers;
 
   if (!Array.isArray(performers)) {
     return [];

@@ -969,3 +969,116 @@ test(
     );
   },
 );
+
+test(
+  "rebuilds release performer records while preserving unknown keys",
+  () => {
+    const document = {
+      release: {
+        title: "Test Release",
+        credits: {
+          performers: [
+            {
+              name: "Nathan Brenton",
+              role: "guitar",
+              sort_name: "Brenton, Nathan",
+              authority_id: "artist-001",
+            },
+            {
+              name: "Alex Example",
+              role: "drums",
+              authority_id: "artist-002",
+            },
+          ],
+          unknown: "preserve",
+        },
+      },
+    };
+
+    const updated = applyPerformerRecords(
+      document,
+      [
+        {
+          sourceIndex: 0,
+          name: "Nathan Brenton",
+          role: "electric guitar",
+          sortName: "Brenton, Nathan",
+        },
+        {
+          sourceIndex: null,
+          name: "Jamie Example",
+          role: "percussion",
+          sortName: "Example, Jamie",
+        },
+      ],
+      "release.credits.performers",
+    ) as typeof document;
+
+    assert.equal(
+      updated.release.credits.performers.length,
+      2,
+    );
+    assert.deepEqual(
+      updated.release.credits.performers[0],
+      {
+        name: "Nathan Brenton",
+        role: "electric guitar",
+        sort_name: "Brenton, Nathan",
+        authority_id: "artist-001",
+      },
+    );
+    assert.deepEqual(
+      updated.release.credits.performers[1],
+      {
+        name: "Jamie Example",
+        role: "percussion",
+        sort_name: "Example, Jamie",
+      },
+    );
+    assert.equal(
+      updated.release.credits.unknown,
+      "preserve",
+    );
+  },
+);
+
+test(
+  "creates the release performer path when it is missing",
+  () => {
+    const updated = applyPerformerRecords(
+      {
+        release: {
+          title: "Test Release",
+        },
+      },
+      [
+        {
+          sourceIndex: null,
+          name: "Nathan Brenton",
+          role: "guitar",
+          sortName: "",
+        },
+      ],
+      "release.credits.performers",
+    ) as {
+      release: {
+        credits: {
+          performers: Array<{
+            name: string;
+            role: string;
+          }>;
+        };
+      };
+    };
+
+    assert.deepEqual(
+      updated.release.credits.performers,
+      [
+        {
+          name: "Nathan Brenton",
+          role: "guitar",
+        },
+      ],
+    );
+  },
+);

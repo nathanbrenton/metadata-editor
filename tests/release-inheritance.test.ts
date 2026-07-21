@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildMissingInheritedMetadataRows,
   resolveInheritedReleaseValue,
+  trackReleaseInheritancePaths,
 } from "../src/release-inheritance.js";
 
 const inheritedTrackFields = [
@@ -419,3 +420,292 @@ test(
     assert.deepEqual(mismatchedRows, []);
   },
 );
+
+test(
+  "inherits a generated release sort name when the release sort field is blank",
+  () => {
+    const generatedReleaseArtistDocument = {
+      filename: "release.toml",
+      scope: "release" as const,
+      parsed: {
+        release: {
+          primary_artist: {
+            name: "The Crazy Eights",
+            sort_name: "",
+          },
+        },
+      },
+    };
+    const trackDocument =
+      createTrackCreditsDocument({
+        primary_artist: {
+          name: "The Crazy Eights",
+          sort_name: "",
+        },
+      });
+
+    assert.deepEqual(
+      resolveInheritedReleaseValue(
+        trackDocument,
+        {
+          path:
+            "track.primary_artist.sort_name",
+          value: "",
+          valueType: "string",
+        },
+        [generatedReleaseArtistDocument],
+      ),
+      {
+        sourcePath:
+          "release.primary_artist.sort_name",
+        value: "Crazy Eights, The",
+      },
+    );
+  },
+);
+
+test(
+  "inherits release sound-recording copyright and license",
+  () => {
+    const rightsFields = [
+      {
+        scope: "track",
+        storageFileRole: "track",
+        tomlPath:
+          "track.rights.phonographic_copyright",
+        valueType: "string",
+        repeatable: false,
+        inherited: true,
+      },
+      {
+        scope: "track",
+        storageFileRole: "track",
+        tomlPath: "track.rights.license",
+        valueType: "string",
+        repeatable: false,
+        inherited: true,
+      },
+    ];
+    const releaseWithRights = {
+      filename: "release.toml",
+      scope: "release" as const,
+      parsed: {
+        release: {
+          rights: {
+            phonographic_copyright:
+              "℗ 2016 Crazy Eights",
+            license: "All rights reserved",
+          },
+        },
+      },
+    };
+    const rows =
+      buildMissingInheritedMetadataRows(
+        createTrackDocument(),
+        [releaseWithRights],
+        rightsFields,
+        "track",
+      );
+
+    assert.deepEqual(
+      rows.map((row) => row.path),
+      [
+        "track.rights.phonographic_copyright",
+        "track.rights.license",
+      ],
+    );
+    assert.deepEqual(
+      resolveInheritedReleaseValue(
+        createTrackDocument(),
+        rows[0]!,
+        [releaseWithRights],
+      ),
+      {
+        sourcePath:
+          "release.rights.phonographic_copyright",
+        value: "℗ 2016 Crazy Eights",
+      },
+    );
+  },
+);
+
+test(
+  "inherits historical original-release dates without falling back to the current release date",
+  () => {
+    const dateField = {
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath:
+        "track.dates.original_release",
+      valueType: "string",
+      repeatable: false,
+      inherited: true,
+    };
+    const releaseWithDistinctDates = {
+      filename: "release.toml",
+      scope: "release" as const,
+      parsed: {
+        release: {
+          dates: {
+            release: "2026-07-20",
+            original_release: "1970-09-18",
+          },
+        },
+      },
+    };
+    const trackDocument =
+      createTrackDocument();
+    const rows =
+      buildMissingInheritedMetadataRows(
+        trackDocument,
+        [releaseWithDistinctDates],
+        [dateField],
+        "track",
+      );
+
+    assert.equal(
+      trackReleaseInheritancePaths.get(
+        "track.dates.original_release",
+      ),
+      "release.dates.original_release",
+    );
+    assert.deepEqual(
+      rows.map((row) => row.path),
+      ["track.dates.original_release"],
+    );
+    assert.deepEqual(
+      resolveInheritedReleaseValue(
+        trackDocument,
+        rows[0]!,
+        [releaseWithDistinctDates],
+      ),
+      {
+        sourcePath:
+          "release.dates.original_release",
+        value: "1970-09-18",
+      },
+    );
+
+    const releaseWithoutHistoricalDate = {
+      ...releaseWithDistinctDates,
+      parsed: {
+        release: {
+          dates: {
+            release: "2026-07-20",
+            original_release: "",
+          },
+        },
+      },
+    };
+
+    assert.deepEqual(
+      buildMissingInheritedMetadataRows(
+        trackDocument,
+        [releaseWithoutHistoricalDate],
+        [dateField],
+        "track",
+      ),
+      [],
+    );
+  },
+);
+
+
+test("inherits release production, recording, and editing context", () => {
+  const releaseProductionDocument = {
+    filename: "release-production-notes.toml",
+    scope: "release" as const,
+    parsed: {
+      production: {
+        location: "Home studio",
+        recording: {
+          location: "Travis bedroom",
+        },
+        editing: {
+          system: "Logic Pro",
+        },
+      },
+    },
+  };
+  const trackProductionDocument = {
+    filename: "track-production-notes.toml",
+    scope: "track" as const,
+    parsed: {
+      production: {
+        location: "",
+        recording: { location: "" },
+        editing: { system: "" },
+      },
+    },
+  };
+
+  for (const [path, value] of [
+    ["production.location", "Home studio"],
+    [
+      "production.recording.location",
+      "Travis bedroom",
+    ],
+    [
+      "production.editing.system",
+      "Logic Pro",
+    ],
+  ] as const) {
+    assert.deepEqual(
+      resolveInheritedReleaseValue(
+        trackProductionDocument,
+        {
+          path,
+          value: "",
+          valueType: "string",
+        },
+        [releaseProductionDocument],
+      ),
+      {
+        sourcePath: path,
+        value,
+      },
+    );
+  }
+});
+
+test("allows track production values to override release defaults", () => {
+  const releaseProductionDocument = {
+    filename: "release-production-notes.toml",
+    scope: "release" as const,
+    parsed: {
+      production: {
+        recording: {
+          location: "Release Studio",
+        },
+      },
+    },
+  };
+  const trackProductionDocument = {
+    filename: "track-production-notes.toml",
+    scope: "track" as const,
+    parsed: {
+      production: {
+        recording: {
+          location: "Track Studio",
+        },
+      },
+    },
+  };
+
+  assert.deepEqual(
+    resolveInheritedReleaseValue(
+      trackProductionDocument,
+      {
+        path: "production.recording.location",
+        value: "Track Studio",
+        valueType: "string",
+      },
+      [releaseProductionDocument],
+    ),
+    {
+      sourcePath:
+        "production.recording.location",
+      value: "Release Studio",
+    },
+  );
+});

@@ -76,7 +76,7 @@ test(
           "Nebula Remixes",
         releaseDate: "2025-09-10",
         releaseArtist:
-          "Nathan Brenton",
+          "The Nebula Collective",
         tracks: [
           {
             trackId:
@@ -126,6 +126,14 @@ test(
     assert.match(
       releaseItem?.content ?? "",
       /track_total = 1/,
+    );
+    assert.match(
+      releaseItem?.content ?? "",
+      /name = "The Nebula Collective"/,
+    );
+    assert.match(
+      releaseItem?.content ?? "",
+      /sort_name = "Nebula Collective, The"/,
     );
     assert.match(
       trackItem?.content ?? "",
@@ -183,6 +191,50 @@ test(
     assert.equal(
       plan.summary.blockedCount,
       1,
+    );
+  },
+);
+
+test(
+  "starter release and track templates include rights and release performers",
+  () => {
+    const plan = buildStarterMetadataPlan(
+      fixture(),
+      {
+        releaseId:
+          "2025-09-10_nebula-remixes",
+        releaseTitle: "Nebula Remixes",
+        releaseDate: "2025-09-10",
+        releaseArtist: "Nathan Brenton",
+        tracks: [
+          {
+            trackId:
+              "nathan-brenton_01_nebula-original-mix",
+            trackNumber: 1,
+            artist: "Nathan Brenton",
+            title: "Nebula",
+          },
+        ],
+      },
+    );
+    const releaseToml = plan.items.find(
+      (item) => item.filename === "release.toml",
+    )?.content ?? "";
+    const trackToml = plan.items.find(
+      (item) => item.filename === "track.toml",
+    )?.content ?? "";
+
+    assert.match(
+      releaseToml,
+      /\[release\.rights\]/,
+    );
+    assert.match(
+      releaseToml,
+      /performers = \[\]/,
+    );
+    assert.match(
+      trackToml,
+      /\[track\.rights\]/,
     );
   },
 );

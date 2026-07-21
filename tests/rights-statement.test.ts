@@ -2,23 +2,48 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  formatGuidedCopyrightNotice,
+  formatGuidedCopyrightNoticeValue,
   formatGuidedRightsStatement,
+  getGuidedCopyrightNoticeConfig,
   getRightsStatementSymbol,
+  isGuidedCopyrightNoticePath,
+  parseGuidedCopyrightNotice,
   parseGuidedRightsStatement,
 } from "../src/rights-statement.js";
 
-test("maps guided rights fields to the correct symbol", () => {
-  assert.equal(
-    getRightsStatementSymbol(
+test("maps fixed rights notices and free-form rights fields to the correct symbols", () => {
+  assert.deepEqual(
+    getGuidedCopyrightNoticeConfig(
       "release.rights.copyright",
     ),
-    "©",
+    {
+      prefix: "Copyright",
+      symbol: "©",
+      keyboardAlias: "(C)",
+    },
+  );
+  assert.deepEqual(
+    getGuidedCopyrightNoticeConfig(
+      "track.rights.phonographic_copyright",
+    ),
+    {
+      prefix: "Sound Recording Copyright",
+      symbol: "℗",
+      keyboardAlias: "(P)",
+    },
   );
   assert.equal(
     getRightsStatementSymbol(
       "track.rights.phonographic_copyright",
     ),
-    "℗",
+    null,
+  );
+  assert.equal(
+    getRightsStatementSymbol(
+      "track.text.lyrics_copyright",
+    ),
+    "©",
   );
   assert.equal(
     getRightsStatementSymbol(
@@ -151,5 +176,135 @@ test("formats guided values without requiring symbol entry", () => {
       "",
     ),
     "",
+  );
+});
+
+
+test("formats guided copyright and sound-recording notices with fixed wording", () => {
+  assert.equal(
+    isGuidedCopyrightNoticePath(
+      "release.rights.copyright",
+    ),
+    true,
+  );
+  assert.equal(
+    isGuidedCopyrightNoticePath(
+      "track.rights.copyright",
+    ),
+    true,
+  );
+  assert.equal(
+    isGuidedCopyrightNoticePath(
+      "release.rights.phonographic_copyright",
+    ),
+    true,
+  );
+  assert.equal(
+    isGuidedCopyrightNoticePath(
+      "track.rights.phonographic_copyright",
+    ),
+    true,
+  );
+  assert.equal(
+    isGuidedCopyrightNoticePath(
+      "track.text.lyrics_copyright",
+    ),
+    false,
+  );
+  assert.equal(
+    formatGuidedCopyrightNotice(
+      "Nathan Brenton and Kateri Lirio",
+      "release.rights.copyright",
+    ),
+    "Copyright © Nathan Brenton and Kateri Lirio. All rights reserved.",
+  );
+  assert.equal(
+    formatGuidedCopyrightNotice(
+      "Nathan Brenton and Kateri Lirio",
+      "release.rights.phonographic_copyright",
+    ),
+    "Sound Recording Copyright ℗ Nathan Brenton and Kateri Lirio. All rights reserved.",
+  );
+});
+
+test("parses canonical and keyboard-friendly fixed notices", () => {
+  assert.deepEqual(
+    parseGuidedCopyrightNotice(
+      "Copyright © Nathan Brenton and Kateri Lirio. All rights reserved.",
+      "release.rights.copyright",
+    ),
+    {
+      holder:
+        "Nathan Brenton and Kateri Lirio",
+    },
+  );
+  assert.deepEqual(
+    parseGuidedCopyrightNotice(
+      "Copyright (C) Nathan Brenton and Kateri Lirio. All rights reserved.",
+      "track.rights.copyright",
+    ),
+    {
+      holder:
+        "Nathan Brenton and Kateri Lirio",
+    },
+  );
+  assert.deepEqual(
+    parseGuidedCopyrightNotice(
+      "Sound Recording Copyright ℗ Example Records. All rights reserved.",
+      "release.rights.phonographic_copyright",
+    ),
+    { holder: "Example Records" },
+  );
+  assert.deepEqual(
+    parseGuidedCopyrightNotice(
+      "Sound Recording Copyright (P) Example Records. All rights reserved.",
+      "track.rights.phonographic_copyright",
+    ),
+    { holder: "Example Records" },
+  );
+  assert.deepEqual(
+    parseGuidedCopyrightNotice(
+      "",
+      "release.rights.copyright",
+    ),
+    { holder: "" },
+  );
+  assert.equal(
+    parseGuidedCopyrightNotice(
+      "© 2016 Nathan Brenton",
+      "release.rights.copyright",
+    ),
+    null,
+  );
+  assert.equal(
+    parseGuidedCopyrightNotice(
+      "℗ 2016 Example Records",
+      "release.rights.phonographic_copyright",
+    ),
+    null,
+  );
+});
+
+test("canonicalizes recognized legacy aliases for read-only display", () => {
+  assert.equal(
+    formatGuidedCopyrightNoticeValue(
+      "release.rights.copyright",
+      "Copyright (C) Nathan Brenton. All rights reserved.",
+    ),
+    "Copyright © Nathan Brenton. All rights reserved.",
+  );
+  assert.equal(
+    formatGuidedCopyrightNoticeValue(
+      "track.rights.phonographic_copyright",
+      "Sound Recording Copyright (P) Example Records. All rights reserved.",
+    ),
+    "Sound Recording Copyright ℗ Example Records. All rights reserved.",
+  );
+  assert.equal(
+    formatGuidedCopyrightNoticeValue(
+      "release.rights.copyright",
+      "All rights controlled by Example Music",
+    ),
+    null,
   );
 });

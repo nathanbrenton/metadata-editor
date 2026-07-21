@@ -34,7 +34,7 @@ export function getTechnicalCreditDisplayPriority(
   }
 
   if (
-    /\b(?:mix(?:ed|er|ing)?|mixdown)\b/.test(
+    /\bedit(?:ed|ing|or)?\b/.test(
       normalizedRole,
     )
   ) {
@@ -42,7 +42,7 @@ export function getTechnicalCreditDisplayPriority(
   }
 
   if (
-    /\b(?:master(?:ed|ing)?|remaster(?:ed|ing)?)\b/.test(
+    /\b(?:mix(?:ed|er|ing)?|mixdown)\b/.test(
       normalizedRole,
     )
   ) {
@@ -50,7 +50,7 @@ export function getTechnicalCreditDisplayPriority(
   }
 
   if (
-    /\bedit(?:ed|ing|or)?\b/.test(
+    /\b(?:master(?:ed|ing)?|remaster(?:ed|ing)?)\b/.test(
       normalizedRole,
     )
   ) {

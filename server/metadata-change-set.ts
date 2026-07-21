@@ -444,10 +444,19 @@ function validatePerformerText(
 export function applyPerformerRecords(
   document: unknown,
   performers: readonly PerformerRecordInput[],
+  performerPath:
+    | "track.performers"
+    | "release.credits.performers" =
+      "track.performers",
 ): unknown {
+  const scopeLabel =
+    performerPath === "release.credits.performers"
+      ? "release"
+      : "track";
+
   if (performers.length > 500) {
     throw new Error(
-      "A track may not contain more than 500 performer records.",
+      `A ${scopeLabel} may not contain more than 500 performer records.`,
     );
   }
 
@@ -458,7 +467,7 @@ export function applyPerformerRecords(
     existingValue =
       readMetadataValueAtPath(
         document,
-        "track.performers",
+        performerPath,
       );
   } catch (error) {
     if (
@@ -478,7 +487,7 @@ export function applyPerformerRecords(
     !Array.isArray(existingValue)
   ) {
     throw new Error(
-      "track.performers must be an array.",
+      `${performerPath} must be an array.`,
     );
   }
 
@@ -599,12 +608,12 @@ export function applyPerformerRecords(
   return pathExists
     ? replaceMetadataValueAtPath(
         document,
-        "track.performers",
+        performerPath,
         nextRecords,
       )
     : createMetadataValueAtPath(
         document,
-        "track.performers",
+        performerPath,
         nextRecords,
       );
 }

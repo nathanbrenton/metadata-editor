@@ -270,6 +270,10 @@ test(
         "Dates",
       ],
       [
+        "release.dates.original_release",
+        "Dates",
+      ],
+      [
         "track.primary_artist.name",
         "Artists",
       ],
@@ -312,6 +316,49 @@ test(
         expectedGroup,
       );
     }
+  },
+);
+
+test(
+  "keeps current and original release dates distinct",
+  () => {
+    const releaseDate = findMetadataField(
+      "release.dates.release",
+    );
+    const originalReleaseDate =
+      findMetadataField(
+        "release.dates.original_release",
+      );
+
+    assert.ok(releaseDate);
+    assert.ok(originalReleaseDate);
+
+    assert.equal(
+      releaseDate.presentation?.order,
+      10,
+    );
+    assert.equal(
+      originalReleaseDate.presentation?.order,
+      20,
+    );
+    assert.equal(
+      originalReleaseDate.inherited,
+      false,
+    );
+    assert.equal(
+      originalReleaseDate.presentation?.help
+        ?.includes(
+          "is not filled automatically from Release Date",
+        ),
+      true,
+    );
+    assert.equal(
+      releaseDate.presentation?.help
+        ?.includes(
+          "Original Release Date is a separate historical field",
+        ),
+      true,
+    );
   },
 );
 
@@ -732,5 +779,50 @@ test(
       ),
       false,
     );
+  },
+);
+
+test(
+  "registers release-level performer baseline fields",
+  () => {
+    const name = findMetadataField(
+      "release.credits.performers[].name",
+    );
+    const role = findMetadataField(
+      "release.credits.performers[].role",
+    );
+    const sortName = findMetadataField(
+      "release.credits.performers[].sort_name",
+    );
+
+    assert.ok(name);
+    assert.ok(role);
+    assert.ok(sortName);
+    assert.equal(name.presentation?.group, "Performers");
+    assert.equal(role.repeatable, true);
+    assert.equal(
+      role.editor?.control,
+      "select-or-custom",
+    );
+  },
+);
+
+test(
+  "registers release label distribution and sound-recording rights",
+  () => {
+    for (const path of [
+      "release.rights.phonographic_copyright",
+      "release.rights.label",
+      "release.rights.distributor",
+      "release.rights.license",
+    ]) {
+      const field = findMetadataField(path);
+      assert.ok(field, path);
+      assert.equal(
+        field.presentation?.group,
+        "Music Business & Rights",
+      );
+      assert.equal(field.required, false);
+    }
   },
 );

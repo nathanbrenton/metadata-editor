@@ -61,18 +61,24 @@ test("rejects unrelated contributor roles", () => {
   }
 });
 
-test("sorts recording before mixing and mastering", () => {
+test("sorts technical credits in production workflow order", () => {
   const records = [
     { name: "Kateri Lirio", role: "Mixed By" },
     { name: "Kateri Lirio", role: "Mastered By" },
     { name: "Nathan Brenton", role: "Recorded By" },
+    { name: "Nathan Brenton", role: "Edited By" },
   ];
 
   assert.deepEqual(
     sortTechnicalCreditDisplayRecords(records).map(
       ({ role }) => role,
     ),
-    ["Recorded By", "Mixed By", "Mastered By"],
+    [
+      "Recorded By",
+      "Edited By",
+      "Mixed By",
+      "Mastered By",
+    ],
   );
 });
 
@@ -93,6 +99,10 @@ test("keeps authored order stable within one technical role family", () => {
 test("places generic and custom technical roles after primary families", () => {
   assert.ok(
     getTechnicalCreditDisplayPriority("Recorded By") <
+      getTechnicalCreditDisplayPriority("Edited By"),
+  );
+  assert.ok(
+    getTechnicalCreditDisplayPriority("Edited By") <
       getTechnicalCreditDisplayPriority("Mixed By"),
   );
   assert.ok(

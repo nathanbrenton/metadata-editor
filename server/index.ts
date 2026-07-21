@@ -8,7 +8,14 @@ import {
 } from "node:http";
 import path from "node:path";
 
+import {
+  buildBlockingSourceStatuses,
+  INGEST_DRAFT_SCHEMA_VERSION,
+} from "../shared/ingest-drafts.js";
 import { isValidTuningReference } from "../shared/musical-analysis.js";
+import {
+  findProductionContextField,
+} from "../shared/production-context.js";
 
 import { buildMetadataExportPlan } from "./export-plan.js";
 import {
@@ -28,12 +35,23 @@ import {
 import { readJsonBody } from "./http.js";
 import {
   inspectIngestCandidate,
+  inspectIngestRelativeFiles,
+  listIngestAttachmentOptions,
   scanIngestDrop,
 } from "./ingest-scanner.js";
 import {
   defaultIngestRoot,
   resolveIngestRoot,
 } from "./ingest-root.js";
+import {
+  readIngestArtworkPreview,
+} from "./ingest-artwork.js";
+import {
+  deleteStoredIngestDraft,
+  parseStoredIngestDraft,
+  readStoredIngestDraft,
+  writeStoredIngestDraft,
+} from "./ingest-draft-store.js";
 import {
   defaultIngestOutputRoot,
   executeIngestReleaseBuild,
@@ -85,12 +103,30 @@ const metadataStorageFilenames: Record<string, string> = {
   track: "track.toml",
   "track-credits": "track-credits.toml",
   "track-production": "track-production-notes.toml",
+  "release-production-notes": "release-production-notes.toml",
+  "track-production-notes": "track-production-notes.toml",
 };
 
 function assertMetadataFieldMayBeRemoved(
   relativePath: string,
   metadataPath: string,
 ): void {
+  const filename = path.basename(relativePath);
+  const productionField =
+    findProductionContextField(metadataPath);
+
+  if (productionField) {
+    if (
+      filename !== "release-production-notes.toml" &&
+      filename !== "track-production-notes.toml"
+    ) {
+      throw new Error(
+        `Metadata field ${metadataPath} does not belong in ${filename}.`,
+      );
+    }
+    return;
+  }
+
   const field = findMetadataField(
     metadataPath,
   );
@@ -114,11 +150,10 @@ function assertMetadataFieldMayBeRemoved(
 
   if (
     !expectedFilename ||
-    path.basename(relativePath) !==
-      expectedFilename
+    filename !== expectedFilename
   ) {
     throw new Error(
-      `Metadata field ${metadataPath} does not belong in ${path.basename(relativePath)}.`,
+      `Metadata field ${metadataPath} does not belong in ${filename}.`,
     );
   }
 }
@@ -128,13 +163,29 @@ function assertMetadataFieldMayBeCreated(
   relativePath: string,
   metadataPath: string,
 ): void {
+  const filename = path.basename(relativePath);
+  const productionField =
+    findProductionContextField(metadataPath);
+
+  if (productionField) {
+    if (
+      filename !== "release-production-notes.toml" &&
+      filename !== "track-production-notes.toml"
+    ) {
+      throw new Error(
+        `Metadata field ${metadataPath} does not belong in ${filename}.`,
+      );
+    }
+    return;
+  }
+
   const field = findMetadataField(metadataPath);
   if (!field || field.repeatable || field.tomlPath.includes("[]")) {
     throw new Error(`Only registered scalar metadata fields may be created: ${metadataPath}`);
   }
   const expectedFilename = metadataStorageFilenames[field.storageFileRole];
-  if (!expectedFilename || path.basename(relativePath) !== expectedFilename) {
-    throw new Error(`Metadata field ${metadataPath} does not belong in ${path.basename(relativePath)}.`);
+  if (!expectedFilename || filename !== expectedFilename) {
+    throw new Error(`Metadata field ${metadataPath} does not belong in ${filename}.`);
   }
 }
 
@@ -196,6 +247,32 @@ const artworkContentTypes = new Map([
   [".webp", "image/webp"],
 ]);
 
+async function sendIngestArtworkPreview(
+  response: ServerResponse,
+  relativePath: string,
+): Promise<void> {
+  const ingestRoot = await resolveIngestRoot();
+  const preview = await readIngestArtworkPreview(
+    ingestRoot,
+    relativePath,
+  );
+
+  response.statusCode = 200;
+  response.setHeader(
+    "Content-Type",
+    preview.contentType,
+  );
+  response.setHeader(
+    "Cache-Control",
+    "private, no-store",
+  );
+  response.setHeader(
+    "X-Content-Type-Options",
+    "nosniff",
+  );
+  response.end(preview.bytes);
+}
+
 async function sendLibraryArtwork(
   response: ServerResponse,
   relativePath: string,
@@ -249,6 +326,86 @@ async function sendLibraryArtwork(
   }
 
   response.end(content);
+}
+
+function assertIngestSourcesReviewed(
+  body: Record<string, unknown>,
+  draft: ReturnType<
+    typeof parseIngestBuildDraft
+  >,
+): void {
+  /*
+   * Older local callers may not yet send source status data. The
+   * browser workflow always sends it and receives the review gate.
+   */
+  if (!Array.isArray(body.sourceStatuses)) {
+    return;
+  }
+
+  const stored = parseStoredIngestDraft({
+    schemaVersion:
+      INGEST_DRAFT_SCHEMA_VERSION,
+    candidateId: draft.candidateId,
+    updatedAt: new Date().toISOString(),
+    draft,
+    sourceStatuses:
+      body.sourceStatuses,
+  });
+  const blocking =
+    buildBlockingSourceStatuses(
+      draft,
+      stored.sourceStatuses,
+    );
+
+  if (blocking.length > 0) {
+    throw new Error(
+      `Review or exclude changed ingest sources before building: ${blocking
+        .map((status) =>
+          `${status.sourceRelativePath} (${status.state})`,
+        )
+        .join(", ")}`,
+    );
+  }
+}
+
+async function inspectDraftSources(
+  ingestRoot: string,
+  candidateId: string,
+  sourceRelativePaths: string[],
+) {
+  const inspection =
+    await inspectIngestCandidate(
+      ingestRoot,
+      candidateId,
+      process.env.INGEST_ROOT ??
+        defaultIngestRoot,
+    );
+  const existingPaths = new Set(
+    inspection.files.map((file) =>
+      file.relativePath,
+    ),
+  );
+  const additionalPaths = [
+    ...new Set(sourceRelativePaths),
+  ].filter(
+    (relativePath) =>
+      !existingPaths.has(relativePath),
+  );
+
+  if (additionalPaths.length === 0) {
+    return inspection;
+  }
+
+  return {
+    ...inspection,
+    files: [
+      ...inspection.files,
+      ...(await inspectIngestRelativeFiles(
+        ingestRoot,
+        additionalPaths,
+      )),
+    ],
+  };
 }
 
 const server = createServer(
@@ -329,6 +486,169 @@ const server = createServer(
     }
 
     if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/ingest/attachments"
+    ) {
+      const candidateId =
+        requestUrl.searchParams.get("candidate");
+
+      if (!candidateId) {
+        sendJson(response, 400, {
+          error: "Missing candidate query parameter",
+        });
+        return;
+      }
+
+      try {
+        const ingestRoot =
+          await resolveIngestRoot();
+
+        sendJson(
+          response,
+          200,
+          await listIngestAttachmentOptions(
+            ingestRoot,
+            candidateId,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown ingest attachment error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/ingest/draft"
+    ) {
+      const candidateId =
+        requestUrl.searchParams.get("candidate");
+
+      if (!candidateId) {
+        sendJson(response, 400, {
+          error: "Missing candidate query parameter",
+        });
+        return;
+      }
+
+      try {
+        sendJson(response, 200, {
+          draft: await readStoredIngestDraft(
+            candidateId,
+          ),
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown ingest draft read error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "PUT" &&
+      requestUrl.pathname ===
+        "/api/ingest/draft"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        sendJson(
+          response,
+          200,
+          await writeStoredIngestDraft(body),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown ingest draft write error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "DELETE" &&
+      requestUrl.pathname ===
+        "/api/ingest/draft"
+    ) {
+      const candidateId =
+        requestUrl.searchParams.get("candidate");
+
+      if (!candidateId) {
+        sendJson(response, 400, {
+          error: "Missing candidate query parameter",
+        });
+        return;
+      }
+
+      try {
+        await deleteStoredIngestDraft(
+          candidateId,
+        );
+        sendJson(response, 200, {
+          deleted: true,
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown ingest draft delete error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/ingest/artwork"
+    ) {
+      const relativePath =
+        requestUrl.searchParams.get("path");
+
+      if (!relativePath) {
+        sendJson(response, 400, {
+          error: "Missing ingest artwork path",
+        });
+        return;
+      }
+
+      try {
+        await sendIngestArtworkPreview(
+          response,
+          relativePath,
+        );
+      } catch (error) {
+        sendJson(response, 404, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Ingest artwork preview not found",
+        });
+      }
+
+      return;
+    }
+
+    if (
       request.method === "POST" &&
       requestUrl.pathname ===
         "/api/ingest/build-preview"
@@ -350,16 +670,30 @@ const server = createServer(
         const draft = parseIngestBuildDraft(
           body.draft,
         );
+        assertIngestSourcesReviewed(
+          body as Record<string, unknown>,
+          draft,
+        );
         const ingestRoot =
           await resolveIngestRoot();
         const outputRoot =
           await resolveIngestOutputRoot();
         const inspection =
-          await inspectIngestCandidate(
+          await inspectDraftSources(
             ingestRoot,
             draft.candidateId,
-            process.env.INGEST_ROOT ??
-              defaultIngestRoot,
+            [
+              ...draft.tracks
+                .filter((track) => track.include)
+                .map((track) =>
+                  track.sourceRelativePath,
+                ),
+              ...draft.assets
+                .filter((asset) => asset.include)
+                .map((asset) =>
+                  asset.sourceRelativePath,
+                ),
+            ],
           );
         const prepared =
           await prepareIngestReleaseBuild(
@@ -411,6 +745,10 @@ const server = createServer(
         const draft = parseIngestBuildDraft(
           body.draft,
         );
+        assertIngestSourcesReviewed(
+          body as Record<string, unknown>,
+          draft,
+        );
 
         if (
           typeof body.confirmation !== "string"
@@ -425,11 +763,21 @@ const server = createServer(
         const outputRoot =
           await resolveIngestOutputRoot();
         const inspection =
-          await inspectIngestCandidate(
+          await inspectDraftSources(
             ingestRoot,
             draft.candidateId,
-            process.env.INGEST_ROOT ??
-              defaultIngestRoot,
+            [
+              ...draft.tracks
+                .filter((track) => track.include)
+                .map((track) =>
+                  track.sourceRelativePath,
+                ),
+              ...draft.assets
+                .filter((asset) => asset.include)
+                .map((asset) =>
+                  asset.sourceRelativePath,
+                ),
+            ],
           );
         const result =
           await executeIngestReleaseBuild(
@@ -1238,6 +1586,11 @@ const server = createServer(
           typeof body.releaseId === "string"
             ? body.releaseId
             : "";
+        const sourceScope =
+          "sourceScope" in body &&
+          body.sourceScope === "release"
+            ? "release"
+            : "track";
         const sourceTrackId =
           "sourceTrackId" in body &&
           typeof body.sourceTrackId === "string"
@@ -1264,7 +1617,10 @@ const server = createServer(
 
         if (
           !releaseId ||
-          !sourceTrackId ||
+          (
+            sourceScope === "track" &&
+            !sourceTrackId
+          ) ||
           !/^[a-f0-9]{64}$/.test(
             sourceOriginalSha256,
           ) ||
@@ -1282,7 +1638,7 @@ const server = createServer(
           )
         ) {
           throw new Error(
-            "releaseId, sourceTrackId, sourceOriginalSha256, selectedSourceIndexes, and destinationTrackIds are required.",
+            "releaseId, source scope, source hash, selectedSourceIndexes, and destinationTrackIds are required.",
           );
         }
 
@@ -1302,6 +1658,7 @@ const server = createServer(
         }
 
         if (
+          sourceScope === "track" &&
           uniqueDestinationTrackIds.includes(
             sourceTrackId,
           )
@@ -1334,15 +1691,20 @@ const server = createServer(
         const sourceDocument =
           detail.documents.find(
             (document) =>
-              document.trackId ===
-                sourceTrackId &&
-              document.filename ===
-                "track-credits.toml",
+              sourceScope === "release"
+                ? document.scope === "release" &&
+                  document.filename === "release.toml"
+                : document.trackId ===
+                    sourceTrackId &&
+                  document.filename ===
+                    "track-credits.toml",
           );
 
         if (!sourceDocument) {
           throw new Error(
-            "The source track requires a readable track-credits.toml document.",
+            sourceScope === "release"
+              ? "The release requires a readable release.toml document."
+              : "The source track requires a readable track-credits.toml document.",
           );
         }
 
@@ -1495,7 +1857,11 @@ const server = createServer(
         if (!execute) {
           sendJson(response, 200, {
             releaseId,
-            sourceTrackId,
+            sourceTrackId:
+              sourceScope === "release"
+                ? "release"
+                : sourceTrackId,
+            sourceScope,
             sourceRelativePath:
               sourceDocument.relativePath,
             sourceSha256:
@@ -1739,7 +2105,11 @@ const server = createServer(
           failedCount > 0 ? 207 : 200,
           {
             releaseId,
-            sourceTrackId,
+            sourceTrackId:
+              sourceScope === "release"
+                ? "release"
+                : sourceTrackId,
+            sourceScope,
             sourceRelativePath:
               sourceDocument.relativePath,
             sourceSha256:
@@ -2209,6 +2579,12 @@ const server = createServer(
             ? body.performers
             : undefined;
 
+        const performerPath =
+          "performerPath" in body &&
+          typeof body.performerPath === "string"
+            ? body.performerPath
+            : "track.performers";
+
         const technicalContributors =
           "technicalContributors" in body
             ? body.technicalContributors
@@ -2236,6 +2612,10 @@ const server = createServer(
             performers === undefined ||
             Array.isArray(performers)
           ) ||
+          ![
+            "track.performers",
+            "release.credits.performers",
+          ].includes(performerPath) ||
           !(
             technicalContributors ===
               undefined ||
@@ -2439,6 +2819,9 @@ const server = createServer(
               | "release.credits.contributors",
             [],
             normalizedCreateChanges,
+            performerPath as
+              | "track.performers"
+              | "release.credits.performers",
           );
 
         const totals =

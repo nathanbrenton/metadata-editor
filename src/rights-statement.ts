@@ -7,14 +7,145 @@ export type GuidedRightsStatement = {
   holder: string;
 };
 
-const rightsStatementSymbolsByPath =
-  new Map<string, RightsStatementSymbol>([
-    ["release.rights.copyright", "©"],
-    ["track.rights.copyright", "©"],
+export type GuidedCopyrightNotice = {
+  holder: string;
+};
+
+export type GuidedCopyrightNoticeConfig = {
+  prefix: "Copyright" | "Sound Recording Copyright";
+  symbol: RightsStatementSymbol;
+  keyboardAlias: "(C)" | "(P)";
+};
+
+const guidedCopyrightNoticeConfigs =
+  new Map<string, GuidedCopyrightNoticeConfig>([
+    [
+      "release.rights.copyright",
+      {
+        prefix: "Copyright",
+        symbol: "©",
+        keyboardAlias: "(C)",
+      },
+    ],
+    [
+      "track.rights.copyright",
+      {
+        prefix: "Copyright",
+        symbol: "©",
+        keyboardAlias: "(C)",
+      },
+    ],
+    [
+      "release.rights.phonographic_copyright",
+      {
+        prefix: "Sound Recording Copyright",
+        symbol: "℗",
+        keyboardAlias: "(P)",
+      },
+    ],
     [
       "track.rights.phonographic_copyright",
-      "℗",
+      {
+        prefix: "Sound Recording Copyright",
+        symbol: "℗",
+        keyboardAlias: "(P)",
+      },
     ],
+  ]);
+
+export function getGuidedCopyrightNoticeConfig(
+  path: string,
+): GuidedCopyrightNoticeConfig | null {
+  return guidedCopyrightNoticeConfigs.get(path) ?? null;
+}
+
+export function isGuidedCopyrightNoticePath(
+  path: string,
+): boolean {
+  return guidedCopyrightNoticeConfigs.has(path);
+}
+
+function escapeRegularExpression(
+  value: string,
+): string {
+  return value.replace(
+    /[.*+?^${}()|[\]\\]/g,
+    "\\$&",
+  );
+}
+
+export function parseGuidedCopyrightNotice(
+  value: string,
+  path = "release.rights.copyright",
+): GuidedCopyrightNotice | null {
+  const config =
+    getGuidedCopyrightNoticeConfig(path);
+
+  if (!config) {
+    return null;
+  }
+
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return { holder: "" };
+  }
+
+  const symbolPattern = [
+    config.symbol,
+    config.keyboardAlias,
+  ]
+    .map(escapeRegularExpression)
+    .join("|");
+  const match = trimmedValue.match(
+    new RegExp(
+      `^${escapeRegularExpression(config.prefix)}\\s+(?:${symbolPattern})\\s+(.+?)\\.\\s+All rights reserved\\.$`,
+      "i",
+    ),
+  );
+
+  return match
+    ? { holder: (match[1] ?? "").trim() }
+    : null;
+}
+
+export function formatGuidedCopyrightNotice(
+  holder: string,
+  path = "release.rights.copyright",
+): string {
+  const config =
+    getGuidedCopyrightNoticeConfig(path);
+
+  if (!config) {
+    return "";
+  }
+
+  const normalizedHolder = holder
+    .trim()
+    .replace(/\.\s*$/, "");
+
+  return normalizedHolder
+    ? `${config.prefix} ${config.symbol} ${normalizedHolder}. All rights reserved.`
+    : "";
+}
+
+export function formatGuidedCopyrightNoticeValue(
+  path: string,
+  value: string,
+): string | null {
+  const parsedValue =
+    parseGuidedCopyrightNotice(value, path);
+
+  return parsedValue === null
+    ? null
+    : formatGuidedCopyrightNotice(
+        parsedValue.holder,
+        path,
+      );
+}
+
+const rightsStatementSymbolsByPath =
+  new Map<string, RightsStatementSymbol>([
     ["track.text.lyrics_copyright", "©"],
   ]);
 

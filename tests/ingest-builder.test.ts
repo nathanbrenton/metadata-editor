@@ -598,3 +598,190 @@ test(
     );
   },
 );
+
+test(
+  "copies one artwork source once while assigning it to the release and a track",
+  async (t) => {
+    const fixture = await createFixture();
+
+    t.after(async () => {
+      await rm(fixture.root, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    const trackSource =
+      fixture.draft.tracks[0].sourceRelativePath;
+    fixture.draft.assets = fixture.draft.assets.map(
+      (asset) =>
+        asset.mediaKind === "image"
+          ? {
+              ...asset,
+              include: true,
+              artworkAssignments: [
+                {
+                  id: "release-front",
+                  scope: "release" as const,
+                  role: "front_cover",
+                  trackSourceRelativePaths: [],
+                },
+                {
+                  id: "track-front",
+                  scope: "track" as const,
+                  role: "track_artwork",
+                  trackSourceRelativePaths: [
+                    trackSource,
+                  ],
+                },
+              ],
+            }
+          : {
+              ...asset,
+              include: false,
+            },
+    );
+
+    const prepared =
+      await prepareIngestReleaseBuild(
+        fixture.ingestRoot,
+        fixture.outputRoot,
+        fixture.inspection,
+        fixture.draft,
+      );
+
+    assert.equal(
+      prepared.preview.summary.artworkSourceCount,
+      1,
+    );
+    assert.equal(
+      prepared.preview.summary.artworkAssignmentCount,
+      2,
+    );
+
+    const artworkCopies = prepared.preview.items.filter(
+      (item) =>
+        item.kind === "copy" &&
+        item.mediaKind === "image",
+    );
+
+    assert.equal(artworkCopies.length, 1);
+    assert.deepEqual(
+      artworkCopies[0].logicalRoles,
+      [
+        "release-artwork:front_cover",
+        "track-artwork:track_artwork:1-tracks",
+      ],
+    );
+
+    const result = await executeIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      fixture.inspection,
+      fixture.draft,
+      "CREATE_STAGING_RELEASE",
+    );
+    const releaseRoot = path.join(
+      fixture.outputRoot,
+      result.releaseRelativePath,
+    );
+    const trackRoot = path.join(
+      releaseRoot,
+      "tracks",
+      "nathan-brenton_01_pixels-v0",
+    );
+    const releaseToml = parse(
+      await readFile(
+        path.join(releaseRoot, "release.toml"),
+        "utf8",
+      ),
+    ) as {
+      release?: {
+        artwork?: Array<{
+          role?: string;
+          master_path?: string;
+        }>;
+      };
+    };
+    const trackToml = parse(
+      await readFile(
+        path.join(trackRoot, "track.toml"),
+        "utf8",
+      ),
+    ) as {
+      track?: {
+        artwork?: Array<{
+          role?: string;
+          master_path?: string;
+        }>;
+        assets?: {
+          artwork?: {
+            master?: string;
+          };
+        };
+      };
+    };
+
+    assert.deepEqual(
+      releaseToml.release?.artwork?.map(
+        (artwork) => artwork.role,
+      ),
+      ["front_cover"],
+    );
+    assert.equal(
+      releaseToml.release?.artwork?.[0]
+        ?.master_path,
+      "artwork/front/artwork-master.jpg",
+    );
+    assert.deepEqual(
+      trackToml.track?.artwork?.map(
+        (artwork) => artwork.role,
+      ),
+      ["track_artwork"],
+    );
+    assert.equal(
+      trackToml.track?.artwork?.[0]
+        ?.master_path,
+      "../../artwork/front/artwork-master.jpg",
+    );
+    assert.equal(
+      trackToml.track?.assets?.artwork?.master,
+      "../../artwork/front/artwork-master.jpg",
+    );
+  },
+);
+
+test(
+  "rejects included artwork without a metadata assignment",
+  async (t) => {
+    const fixture = await createFixture();
+
+    t.after(async () => {
+      await rm(fixture.root, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    fixture.draft.assets = fixture.draft.assets.map(
+      (asset) =>
+        asset.mediaKind === "image"
+          ? {
+              ...asset,
+              include: true,
+              artworkAssignments: [],
+            }
+          : asset,
+    );
+
+    await assert.rejects(
+      prepareIngestReleaseBuild(
+        fixture.ingestRoot,
+        fixture.outputRoot,
+        fixture.inspection,
+        fixture.draft,
+      ),
+      /requires at least one release-level or track-level assignment/,
+    );
+  },
+);

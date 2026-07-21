@@ -3,6 +3,14 @@ import {
   type FlattenedMetadataRow,
 } from "./metadata-flattener.js";
 
+import {
+  generateArtistSortName,
+} from "../shared/artist-sort-name.js";
+
+import {
+  productionContextFields,
+} from "../shared/production-context.js";
+
 export type InheritedMetadataValue =
   | string
   | number
@@ -63,6 +71,14 @@ export const trackReleaseInheritancePaths =
       "release.rights.publisher",
     ],
     [
+      "track.rights.phonographic_copyright",
+      "release.rights.phonographic_copyright",
+    ],
+    [
+      "track.rights.license",
+      "release.rights.license",
+    ],
+    [
       "track.subtitle",
       "release.subtitle",
     ],
@@ -78,6 +94,12 @@ export const trackReleaseInheritancePaths =
       "track.dates.original_release",
       "release.dates.original_release",
     ],
+    ...productionContextFields.map(
+      (field): [string, string] => [
+        field.path,
+        field.path,
+      ],
+    ),
   ]);
 
 const primaryArtistSortNamePath =
@@ -209,16 +231,27 @@ function resolveArtistSortNameReleaseValue(
       releaseDocuments,
       releasePrimaryArtistNamePath,
     );
-  const releaseSortName =
+  const authoredReleaseSortName =
     findMetadataValueAcrossDocuments(
       releaseDocuments,
       releasePrimaryArtistSortNamePath,
     );
 
   if (
-    typeof releaseArtistName !== "string" ||
-    typeof releaseSortName !== "string"
+    typeof releaseArtistName !== "string"
   ) {
+    return null;
+  }
+
+  const releaseSortName =
+    typeof authoredReleaseSortName ===
+    "string"
+      ? authoredReleaseSortName
+      : generateArtistSortName(
+          releaseArtistName,
+        ).value;
+
+  if (!releaseSortName) {
     return null;
   }
 

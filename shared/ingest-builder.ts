@@ -19,6 +19,27 @@ export type IngestBuildTrackDraft = {
   destinationFilename: string;
 };
 
+export type IngestArtworkAssignmentDraft = {
+  id: string;
+  scope: "release" | "track";
+  role: string;
+  trackSourceRelativePaths: string[];
+};
+
+export const ingestArtworkRoleOptions = [
+  "front_cover",
+  "back_cover",
+  "booklet",
+  "disc",
+  "liner_notes",
+  "artist",
+  "track_artwork",
+  "thumbnail",
+  "alternate",
+  "promotional",
+  "other",
+] as const;
+
 export type IngestBuildAssetDraft = {
   sourceRelativePath: string;
   include: boolean;
@@ -27,7 +48,34 @@ export type IngestBuildAssetDraft = {
     "image" | "text"
   >;
   destinationRelativePath: string;
+  artworkAssignments: IngestArtworkAssignmentDraft[];
 };
+
+export function defaultReleaseArtworkAssignment(): IngestArtworkAssignmentDraft {
+  return {
+    id: "release-front-cover",
+    scope: "release",
+    role: "front_cover",
+    trackSourceRelativePaths: [],
+  };
+}
+
+export function createArtworkAssignmentId(
+  assignments: IngestArtworkAssignmentDraft[],
+): string {
+  const existing = new Set(
+    assignments.map((assignment) => assignment.id),
+  );
+  let index = assignments.length + 1;
+  let candidate = `artwork-assignment-${index}`;
+
+  while (existing.has(candidate)) {
+    index += 1;
+    candidate = `artwork-assignment-${index}`;
+  }
+
+  return candidate;
+}
 
 export type IngestBuildDraft = {
   candidateId: string;
@@ -68,6 +116,8 @@ export type IngestBuildPreview = {
     tomlCount: number;
     totalCopyBytes: number;
     blockedCount: number;
+    artworkSourceCount: number;
+    artworkAssignmentCount: number;
   };
   warnings: string[];
   confirmationPhrase: typeof INGEST_BUILD_CONFIRMATION_PHRASE;
@@ -428,15 +478,27 @@ export function createDefaultIngestBuildDraft(
           `notes/imported/${sourceStem}${extension}`;
       }
 
+      const artworkAssignments =
+        file.mediaKind === "image" &&
+        releaseArtworkAssigned &&
+        destinationRelativePath.startsWith(
+          "artwork/front/",
+        )
+          ? [defaultReleaseArtworkAssignment()]
+          : [];
+
       return {
         sourceRelativePath: file.relativePath,
-        include: true,
+        include:
+          file.mediaKind === "text" ||
+          artworkAssignments.length > 0,
         mediaKind: file.mediaKind,
         destinationRelativePath:
           uniquifyPath(
             destinationRelativePath,
             usedDestinations,
           ),
+        artworkAssignments,
       };
     });
 

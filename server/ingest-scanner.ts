@@ -2,11 +2,13 @@ import { execFile } from "node:child_process";
 import {
   lstat,
   readdir,
+  realpath,
 } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
 import type {
+  IngestAttachmentOptions,
   IngestCandidateInspection,
   IngestCandidateKind,
   IngestCandidateSummary,
@@ -908,5 +910,121 @@ export async function inspectIngestCandidate(
     capabilities,
     warnings,
     readOnly: true,
+  };
+}
+
+export async function inspectIngestRelativeFiles(
+  ingestRoot: string,
+  relativePaths: string[],
+  commandRunner: IngestCommandRunner =
+    defaultCommandRunner,
+): Promise<IngestFileInspection[]> {
+  const capabilities =
+    await detectIngestProbeCapabilities(
+      commandRunner,
+    );
+  const uniquePaths = [
+    ...new Set(relativePaths),
+  ];
+  const files: IngestFileInspection[] = [];
+
+  for (const relativePath of uniquePaths) {
+    const normalized = relativePath
+      .replaceAll("\\", "/")
+      .replace(/^\/+/, "");
+    const segments = normalized.split("/");
+
+    if (
+      !normalized ||
+      path.posix.isAbsolute(normalized) ||
+      segments.some(
+        (segment) =>
+          !segment ||
+          segment === "." ||
+          segment === "..",
+      )
+    ) {
+      throw new Error(
+        `Invalid ingest source path: ${relativePath}`,
+      );
+    }
+
+    const candidatePath =
+      assertPathWithinIngestRoot(
+        ingestRoot,
+        path.join(
+          ingestRoot,
+          ...segments,
+        ),
+      );
+    const stats = await lstat(candidatePath);
+
+    if (
+      stats.isSymbolicLink() ||
+      !stats.isFile()
+    ) {
+      throw new Error(
+        `Ingest attachment must be a regular non-symlink file: ${relativePath}`,
+      );
+    }
+
+    const canonicalPath =
+      await realpath(candidatePath);
+    assertPathWithinIngestRoot(
+      ingestRoot,
+      canonicalPath,
+    );
+
+    files.push(
+      await inspectFile(
+        ingestRoot,
+        canonicalPath,
+        undefined,
+        capabilities,
+        commandRunner,
+      ),
+    );
+  }
+
+  return files;
+}
+
+export async function listIngestAttachmentOptions(
+  ingestRoot: string,
+  candidateId: string,
+  commandRunner: IngestCommandRunner =
+    defaultCommandRunner,
+): Promise<IngestAttachmentOptions> {
+  await resolveIngestCandidate(
+    ingestRoot,
+    candidateId,
+  );
+
+  const entries = await readdir(
+    ingestRoot,
+    { withFileTypes: true },
+  );
+  const relativePaths = entries
+    .filter(
+      (entry) =>
+        entry.name !== candidateId &&
+        !isIgnoredName(entry.name) &&
+        !entry.isSymbolicLink() &&
+        entry.isFile() &&
+        ["image", "text"].includes(
+          classifyIngestExtension(
+            path.extname(entry.name).toLowerCase(),
+          ),
+        ),
+    )
+    .map((entry) => entry.name);
+
+  return {
+    candidateId,
+    files: await inspectIngestRelativeFiles(
+      ingestRoot,
+      relativePaths,
+      commandRunner,
+    ),
   };
 }

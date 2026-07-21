@@ -1408,3 +1408,88 @@ test("saves derived field creation with an ordinary edit atomically", async () =
     assert.equal(parsed.track.display_title, "Updated");
   });
 });
+
+test(
+  "saves release performer baseline records in release.toml",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const relativePath =
+          "releases/test-release/release.toml";
+        const targetPath = path.join(
+          mediaRoot,
+          relativePath,
+        );
+        await mkdir(path.dirname(targetPath), {
+          recursive: true,
+        });
+        const originalContent = [
+          "[release]",
+          'title = "Test Release"',
+          "",
+          "[release.credits]",
+          'unknown = "preserve"',
+          "performers = []",
+          "",
+        ].join("\n");
+        await writeFile(
+          targetPath,
+          originalContent,
+        );
+
+        await saveScalarMetadataChanges(
+          mediaRoot,
+          buildRelease(relativePath),
+          relativePath,
+          sha256(originalContent),
+          [],
+          false,
+          [
+            {
+              sourceIndex: null,
+              name: "Nathan Brenton",
+              role: "guitar",
+              sortName: "Brenton, Nathan",
+            },
+          ],
+          undefined,
+          [],
+          "track.contributors",
+          [],
+          [],
+          "release.credits.performers",
+        );
+
+        const parsed = parse(
+          await readFile(targetPath, "utf8"),
+        ) as {
+          release: {
+            credits: {
+              unknown: string;
+              performers: Array<{
+                name: string;
+                role: string;
+                sort_name?: string;
+              }>;
+            };
+          };
+        };
+
+        assert.equal(
+          parsed.release.credits.unknown,
+          "preserve",
+        );
+        assert.deepEqual(
+          parsed.release.credits.performers,
+          [
+            {
+              name: "Nathan Brenton",
+              role: "guitar",
+              sort_name: "Brenton, Nathan",
+            },
+          ],
+        );
+      },
+    );
+  },
+);

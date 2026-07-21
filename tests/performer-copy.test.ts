@@ -177,3 +177,44 @@ test(
     );
   },
 );
+
+test(
+  "reads release performer records as a copy source",
+  () => {
+    const releaseDocument: ParsedMetadataDocument = {
+      filename: "release.toml",
+      relativePath:
+        "releases/example/release.toml",
+      scope: "release",
+      content: "",
+      sha256: "b".repeat(64),
+      parsed: {
+        release: {
+          credits: {
+            performers: [
+              {
+                name: "Nathan Brenton",
+                role: "guitar",
+                sort_name: "Brenton, Nathan",
+              },
+            ],
+          },
+        },
+      },
+    };
+
+    assert.deepEqual(
+      readCopyablePerformerRecords(
+        releaseDocument,
+      ),
+      [
+        {
+          sourceIndex: 0,
+          name: "Nathan Brenton",
+          role: "guitar",
+          sortName: "Brenton, Nathan",
+        },
+      ],
+    );
+  },
+);

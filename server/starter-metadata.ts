@@ -1,6 +1,9 @@
 import {
   formatTrackDisplayTitle,
 } from "../shared/track-title.js";
+import {
+  generateArtistSortName,
+} from "../shared/artist-sort-name.js";
 
 import {
   parse,
@@ -226,12 +229,28 @@ export function buildStarterMetadataPlan(
 
       primary_artist: {
         name: releaseArtist,
-        sort_name: "",
+        sort_name:
+          generateArtistSortName(
+            releaseArtist,
+          ).value,
       },
 
       dates: {
         release: releaseDate,
         original_release: "",
+      },
+
+      rights: {
+        copyright: "",
+        phonographic_copyright: "",
+        publisher: "",
+        label: "",
+        distributor: "",
+        license: "",
+      },
+
+      credits: {
+        performers: [],
       },
 
       numbering: {
@@ -299,6 +318,13 @@ export function buildStarterMetadataPlan(
         language: "",
         script: "",
         explicit: false,
+
+        rights: {
+          copyright: "",
+          phonographic_copyright: "",
+          publisher: "",
+          license: "",
+        },
 
         credit_sources: {
           file: "track-credits.toml",

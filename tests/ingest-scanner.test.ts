@@ -12,6 +12,7 @@ import test from "node:test";
 
 import {
   inspectIngestCandidate,
+  listIngestAttachmentOptions,
   scanIngestDrop,
   type IngestCommandRunner,
 } from "../server/ingest-scanner.js";
@@ -192,4 +193,27 @@ test("inspects media with ffprobe and MediaInfo without exposing write actions",
   );
   assert.ok(text);
   assert.equal(text.detectedBy, "extension");
+});
+
+test("offers only loose image and text files as attachable sidecars", async () => {
+  const root = await createIngestFixture();
+  await writeFile(
+    path.join(root, "front.png"),
+    "image",
+  );
+  await writeFile(
+    path.join(root, "session-notes.md"),
+    "notes",
+  );
+
+  const result = await listIngestAttachmentOptions(
+    root,
+    "161123_Pixels_v0.mp3",
+    commandRunner,
+  );
+
+  assert.deepEqual(
+    result.files.map((file) => file.relativePath).sort(),
+    ["front.png", "session-notes.md"],
+  );
 });

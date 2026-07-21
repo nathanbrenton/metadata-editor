@@ -96,6 +96,10 @@ export async function saveScalarMetadataChanges(
       "track.contributors",
   deletePaths: string[] = [],
   createChanges: MetadataValueChange[] = [],
+  performerPath:
+    | "track.performers"
+    | "release.credits.performers" =
+      "track.performers",
 ): Promise<ScalarMetadataSaveReceipt> {
   if (!/^[a-f0-9]{64}$/.test(originalSha256)) {
     throw new Error(
@@ -164,14 +168,23 @@ export async function saveScalarMetadataChanges(
     );
   }
 
-  if (
-    performerRecords !== undefined &&
-    path.basename(relativePath) !==
-      "track-credits.toml"
-  ) {
-    throw new Error(
-      "Performer records may only be saved in track-credits.toml.",
-    );
+  if (performerRecords !== undefined) {
+    const targetFilename =
+      path.basename(relativePath);
+    const expectedFilename =
+      performerPath ===
+        "release.credits.performers"
+        ? "release.toml"
+        : "track-credits.toml";
+
+    if (targetFilename !== expectedFilename) {
+      throw new Error(
+        performerPath ===
+          "release.credits.performers"
+          ? "Release performer records may only be saved in release.toml."
+          : "Track performer records may only be saved in track-credits.toml.",
+      );
+    }
   }
 
   if (
@@ -203,7 +216,7 @@ export async function saveScalarMetadataChanges(
     performerRecords !== undefined &&
     changes.some((change) =>
       change.path.startsWith(
-        "track.performers",
+        performerPath,
       ),
     )
   ) {
@@ -316,6 +329,7 @@ export async function saveScalarMetadataChanges(
       applyPerformerRecords(
         updatedDocument,
         performerRecords,
+        performerPath,
       );
   }
 

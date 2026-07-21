@@ -23,8 +23,13 @@ import {
 } from "./technical-credit-role.js";
 
 import {
+  formatGuidedCopyrightNotice,
+  formatGuidedCopyrightNoticeValue,
   formatGuidedRightsStatement,
+  getGuidedCopyrightNoticeConfig,
   getRightsStatementSymbol,
+  isGuidedCopyrightNoticePath,
+  parseGuidedCopyrightNotice,
   parseGuidedRightsStatement,
   type RightsStatementSymbol,
 } from "./rights-statement.js";
@@ -51,6 +56,14 @@ import {
 } from "./performer-display-order.js";
 
 import {
+  sortPerformerRoleDisplayValues,
+} from "./performer-role-display-order.js";
+
+import {
+  metadataRowMatchesNotesTab,
+} from "./metadata-tab-routing.js";
+
+import {
   getDefaultTrackOverviewFieldOrder,
   getMissingTrackOverviewFieldPresentation,
   isDefaultTrackIdentityFieldPath,
@@ -69,6 +82,31 @@ import {
 } from "./track-derived-metadata.js";
 
 import {
+  artistNamePathForSortNamePath,
+  deriveArtistSortNameChanges,
+} from "./artist-sort-name.js";
+
+import {
+  generateArtistSortName,
+} from "../shared/artist-sort-name.js";
+
+import {
+  findProductionContextField,
+  productionContextFields,
+  resolveProductionContextGroup,
+} from "../shared/production-context.js";
+
+import {
+  isDefaultRightsFieldPath,
+  shouldShowDefaultRightsFields,
+} from "./default-rights-fields.js";
+
+import {
+  createTrackPerformerOverride,
+  resolveEffectivePerformerRecords,
+} from "./performer-inheritance.js";
+
+import {
   formatTrackDisplayTitle,
   inferTrackTitleMetadata,
   recommendedTrackVersionOptions,
@@ -84,6 +122,11 @@ import {
   filterPresentableMetadataRows,
   unmappedMetadataGroup,
 } from "./metadata-presentation.js";
+
+import {
+  getPatternMetadataHelpCommonValues,
+  productionTypeCommonValues,
+} from "./metadata-help-common-values.js";
 
 import {
   lyricsMetadataGroupOrder,
@@ -321,7 +364,8 @@ type MetadataFieldDefinition = {
       | "Performers"
       | "Production"
       | "Arrangement"
-      | "Recording and Editing"
+      | "Recording"
+      | "Editing"
       | "Mixing"
       | "Mastering"
       | "Writing, Lyrics & Language"
@@ -5093,13 +5137,24 @@ function editorTextToStringArray(
 }
 
 
+function getPerformerPath(
+  document: ParsedMetadataDocument,
+):
+  | "track.performers"
+  | "release.credits.performers" {
+  return document.scope === "release"
+    ? "release.credits.performers"
+    : "track.performers";
+}
+
 function isPerformerRecordPath(
   metadataPath: string,
 ): boolean {
   return (
+    metadataPath === "track.performers" ||
     metadataPath ===
-      "track.performers" ||
-    /^track\.performers\[\d+\]\.(name|role|sort_name)$/.test(
+      "release.credits.performers" ||
+    /^(?:track\.performers|release\.credits\.performers)\[\d+\]\.(name|role|sort_name)$/.test(
       metadataPath,
     )
   );
@@ -5108,20 +5163,36 @@ function isPerformerRecordPath(
 function readPerformerRecords(
   document: ParsedMetadataDocument,
 ): PerformerRecordDraft[] {
-  const track =
-    document.parsed.track;
+  const performerContainer =
+    document.scope === "release"
+      ? (
+          typeof document.parsed.release === "object" &&
+          document.parsed.release !== null &&
+          !Array.isArray(document.parsed.release) &&
+          "credits" in document.parsed.release &&
+          typeof document.parsed.release.credits === "object" &&
+          document.parsed.release.credits !== null &&
+          !Array.isArray(document.parsed.release.credits)
+            ? document.parsed.release.credits
+            : null
+        )
+      : (
+          typeof document.parsed.track === "object" &&
+          document.parsed.track !== null &&
+          !Array.isArray(document.parsed.track)
+            ? document.parsed.track
+            : null
+        );
 
   if (
-    typeof track !== "object" ||
-    track === null ||
-    Array.isArray(track) ||
-    !("performers" in track) ||
-    !Array.isArray(track.performers)
+    !performerContainer ||
+    !("performers" in performerContainer) ||
+    !Array.isArray(performerContainer.performers)
   ) {
     return [];
   }
 
-  return track.performers.flatMap(
+  return performerContainer.performers.flatMap(
     (value, sourceIndex) => {
       if (
         typeof value !== "object" ||
@@ -5555,6 +5626,17 @@ function groupPersonRoleDisplayRecords(
   return Array.from(grouped.values());
 }
 
+function sortGroupedPerformerRoleDisplays(
+  records: readonly GroupedPersonRoleDisplay[],
+): GroupedPersonRoleDisplay[] {
+  return records.map((record) => ({
+    ...record,
+    roles: sortPerformerRoleDisplayValues(
+      record.roles,
+    ),
+  }));
+}
+
 function buildDocumentDraftKey(
   document: ParsedMetadataDocument,
   metadataPath: string,
@@ -5608,22 +5690,80 @@ function getDocumentDraftChanges(
 function getDocumentSaveChanges(
   document: ParsedMetadataDocument,
   draft: MetadataDraft,
+  releaseDocuments: ParsedMetadataDocument[] = [],
 ): {
   changes: MetadataValueChange[];
   createChanges: MetadataValueChange[];
 } {
-  const authoredChanges = getDocumentDraftChanges(document, draft);
+  const authoredChanges = getDocumentDraftChanges(
+    document,
+    draft,
+  );
+  const existing = new Map<
+    string,
+    EditableMetadataValue
+  >();
 
-  if (document.scope !== "track" || document.filename !== "track.toml") {
-    return { changes: authoredChanges, createChanges: [] };
-  }
-
-  const existing = new Map<string, EditableMetadataValue>();
   for (const row of flattenMetadata(document.parsed)) {
-    if (isEditableMetadataValue(row.value)) existing.set(row.path, row.value);
+    if (isEditableMetadataValue(row.value)) {
+      existing.set(row.path, row.value);
+    }
   }
 
-  return deriveTrackSaveChanges(existing, authoredChanges);
+  const baseResult =
+    document.scope === "track" &&
+    document.filename === "track.toml"
+      ? deriveTrackSaveChanges(
+          existing,
+          authoredChanges,
+        )
+      : {
+          changes: authoredChanges,
+          createChanges: [],
+        };
+  const releaseArtistDocument =
+    releaseDocuments.find(
+      (candidate) =>
+        candidate.filename ===
+        "release.toml",
+    );
+  const releaseArtistValue =
+    releaseArtistDocument
+      ? readDocumentDraftString(
+          releaseArtistDocument,
+          "release.primary_artist.name",
+          draft,
+        )
+      : findMetadataValueAcrossDocuments(
+          releaseDocuments,
+          "release.primary_artist.name",
+        );
+  const artistSortChanges =
+    deriveArtistSortNameChanges(
+      existing,
+      [
+        ...baseResult.changes,
+        ...baseResult.createChanges,
+      ],
+      {
+        scope: document.scope,
+        filename: document.filename,
+        releaseArtistName:
+          typeof releaseArtistValue ===
+          "string"
+            ? releaseArtistValue
+            : "",
+      },
+    );
+
+  return {
+    changes: [
+      ...baseResult.changes,
+      ...artistSortChanges,
+    ],
+    createChanges:
+      baseResult.createChanges,
+  };
 }
 
 function removeDocumentDraftChanges(
@@ -5786,8 +5926,13 @@ const contributorRoleGroups: Array<{
   },
   {
     pattern:
-      /\b(record(?:ed|ing)?|tracking|engineer(?:ed|ing)?|edit(?:ed|ing|or)?|transfer(?:red|ring)?|restor(?:ation|ed|ing)?|tape operator)\b/i,
-    group: "Recording and Editing",
+      /\b(edit(?:ed|ing|or)?|transfer(?:red|ring)?|restor(?:ation|ed|ing)?)\b/i,
+    group: "Editing",
+  },
+  {
+    pattern:
+      /\b(record(?:ed|ing)?|tracking|engineer(?:ed|ing)?|tape operator)\b/i,
+    group: "Recording",
   },
   {
     pattern:
@@ -5824,7 +5969,8 @@ const metadataGroupOrder = [
   ...lyricsMetadataGroupOrder,
   "Arrangement",
   "Production",
-  "Recording and Editing",
+  "Recording",
+  "Editing",
   "Mixing",
   "Mastering",
   "Identifiers",
@@ -6214,6 +6360,8 @@ function resolveMetadataRowGroup(
     )
   ) {
     return "Artwork";
+  }
+
   if (
     /^(release|track)\.identifiers(\.|$)/.test(
       path,
@@ -6223,8 +6371,6 @@ function resolveMetadataRowGroup(
     )
   ) {
     return "Identifiers";
-  }
-
   }
 
   if (
@@ -6290,19 +6436,28 @@ function resolveMetadataRowGroup(
     return "Mastering";
   }
 
-  if (
-    /^production\.(recording|editing|sound_design)(\.|$)/.test(
-      path,
-    ) ||
-    /^track\.production\.(recording|editing|sound_design)(\.|$)/.test(
-      path,
-    )
-  ) {
-    return "Recording and Editing";
+  const productionContextGroup =
+    resolveProductionContextGroup(path);
+
+  if (productionContextGroup) {
+    return productionContextGroup;
   }
 
   if (
-    /^(production|track\.production|release\.credits\.contributors)(\.|$)/.test(
+    /^track\.production\.recording(\.|$)/.test(path)
+  ) {
+    return "Recording";
+  }
+
+  if (
+    /^track\.production\.editing(\.|$)/.test(path)
+  ) {
+    return "Editing";
+  }
+
+  if (
+    /^track\.production\.sound_design(\.|$)/.test(path) ||
+    /^(track\.production|release\.credits\.contributors)(\.|$)/.test(
       path,
     )
   ) {
@@ -6686,6 +6841,8 @@ function PerformerCreditCopyModal({
           },
           body: JSON.stringify({
             releaseId,
+            sourceScope:
+              source.document.scope,
             sourceTrackId:
               source.document.trackId,
             sourceOriginalSha256:
@@ -6743,7 +6900,11 @@ function PerformerCreditCopyModal({
       onClose={onClose}
     >
       <section className="performer-copy-intro">
-        <h4>Source track</h4>
+        <h4>
+          {source.document.scope === "release"
+            ? "Source release"
+            : "Source track"}
+        </h4>
         <strong>{sourceLabel}</strong>
         <p>
           Select saved name/role pairs, choose destination tracks, then review the duplicate-aware copy plan before writing. Existing target credits are never removed.
@@ -6877,7 +7038,10 @@ function PerformerCreditCopyModal({
           <div>
             <h4>2. Destination tracks</h4>
             <p>
-              The source track is excluded. Missing track-credits documents will be created only for targets that receive a new credit.
+              {source.document.scope === "track"
+                ? "The source track is excluded. "
+                : "Release performers may be copied into explicit track overrides. "}
+              Missing track-credits documents will be created only for targets that receive a new credit.
             </p>
           </div>
           <div className="performer-copy-selection-actions">
@@ -7078,7 +7242,7 @@ function describeMetadataValueGuidance(
 ): string {
   switch (valueType) {
     case "string":
-      return "Enter a single text value. Unless a recommended vocabulary is listed below, this field accepts project-defined free text.";
+      return "Enter a single text value. Unless a recommended vocabulary is listed above, this field accepts project-defined free text.";
     case "integer":
       return "Enter a whole number without decimals or leading zeroes.";
     case "number":
@@ -7119,6 +7283,59 @@ function getSupplementalFieldGuidance(
 
   const exactGuidance:
     Record<string, SupplementalFieldGuidance> = {
+      "production.production_type": {
+        help:
+          "Describe the production or recording context with one concise, reusable term. Use Release Type for the publication format; use this field for session context such as a rehearsal, jam session, home recording, or field recording.",
+        commonValues: [
+          ...productionTypeCommonValues,
+        ],
+        examples: [
+          "home recording",
+          "jam session",
+          "field recording",
+        ],
+      },
+      "production.session_type": {
+        help:
+          "Describe the kind of working session represented by these files or notes.",
+        commonValues: [
+          "tracking session",
+          "overdub session",
+          "rehearsal",
+          "jam session",
+          "writing session",
+          "live session",
+          "editing session",
+          "mix session",
+          "mastering session",
+        ],
+      },
+      "production.location_type": {
+        help:
+          "Classify the recording environment separately from the specific venue or geographic location.",
+        commonValues: [
+          "commercial studio",
+          "home studio",
+          "rehearsal space",
+          "live venue",
+          "remote setup",
+          "mobile setup",
+          "field location",
+          "outdoor location",
+        ],
+      },
+      "production.capture_method": {
+        help:
+          "Describe the broad capture workflow without replacing detailed equipment or engineering notes.",
+        commonValues: [
+          "multitrack recording",
+          "live to stereo",
+          "direct to two-track",
+          "overdubbed recording",
+          "remote collaboration",
+          "archive transfer",
+        ],
+      },
       "track.album_artists[].name": {
         help:
           "Compatibility album-artist value stored on this track. It normally mirrors release.primary_artist.name and does not replace the authoritative Track Artist field.",
@@ -7153,7 +7370,7 @@ function getSupplementalFieldGuidance(
       },
       "track.dates.original_release": {
         help:
-          "Earliest known release date for this recording or track version. A blank value inherits release.dates.original_release.",
+          "Earliest known release date for this recording or track version. A blank value inherits release.dates.original_release; override it only when this specific recording or track was first released on a different date, such as an earlier single later included on the release.",
         examples: [
           "2009-05-01",
           "1998",
@@ -7161,16 +7378,16 @@ function getSupplementalFieldGuidance(
       },
       "track.rights.copyright": {
         help:
-          "Track-level copyright notice. Leave it blank when the release-level notice applies; use an override only when this track has distinct copyright ownership or wording.",
+          "Track-level copyright notice using the fixed form Copyright © [name or names]. All rights reserved. Leave it blank when the release-level notice applies; use an override only when this track has distinct ownership or wording.",
         examples: [
-          "© 2009 Example Publishing",
+          "Copyright © Example Publishing. All rights reserved.",
         ],
       },
       "track.rights.phonographic_copyright": {
         help:
-          "Track-level ℗ notice covering the sound recording. This is distinct from the composition or lyrics copyright.",
+          "Track-level sound-recording notice using the fixed form Sound Recording Copyright ℗ [name or names]. All rights reserved. This is distinct from composition, publishing, lyrics, and artwork copyright.",
         examples: [
-          "℗ 2009 Example Records",
+          "Sound Recording Copyright ℗ Example Records. All rights reserved.",
         ],
       },
       "track.rights.publisher": {
@@ -7293,21 +7510,99 @@ function getSupplementalFieldGuidance(
         ],
       },
       "release.language": {
-        examples: [
+        help:
+          "Prefer a short BCP 47 or ISO 639 language code and use the same convention throughout the library.",
+        commonValues: [
           "en",
           "es",
           "fr",
           "de",
+          "it",
+          "pt",
           "ja",
+          "ko",
+          "zh",
+          "zxx",
         ],
       },
       "track.language": {
-        examples: [
+        help:
+          "Prefer a short BCP 47 or ISO 639 language code and use the same convention throughout the library.",
+        commonValues: [
           "en",
           "es",
           "fr",
           "de",
+          "it",
+          "pt",
           "ja",
+          "ko",
+          "zh",
+          "zxx",
+        ],
+      },
+      "track.text.lyrics_language": {
+        help:
+          "Use the language code for the lyrical text. Leave the local field blank when it should follow the effective Track Language.",
+        commonValues: [
+          "en",
+          "es",
+          "fr",
+          "de",
+          "it",
+          "pt",
+          "ja",
+          "ko",
+          "zh",
+          "zxx",
+        ],
+      },
+      "release.script": {
+        help:
+          "Prefer a consistent ISO 15924 script code when the release writing system is known.",
+        commonValues: [
+          "Latn",
+          "Cyrl",
+          "Arab",
+          "Hebr",
+          "Grek",
+          "Hans",
+          "Hant",
+          "Jpan",
+          "Kore",
+          "Deva",
+        ],
+      },
+      "track.script": {
+        help:
+          "Prefer a consistent ISO 15924 script code when the track writing system is known.",
+        commonValues: [
+          "Latn",
+          "Cyrl",
+          "Arab",
+          "Hebr",
+          "Grek",
+          "Hans",
+          "Hant",
+          "Jpan",
+          "Kore",
+          "Deva",
+        ],
+      },
+      "track.text.lyrics_script": {
+        help:
+          "Use an ISO 15924 script code for the lyrical text when it differs from or clarifies the track writing system.",
+        commonValues: [
+          "Latn",
+          "Cyrl",
+          "Arab",
+          "Hebr",
+          "Grek",
+          "Hans",
+          "Hant",
+          "Jpan",
+          "Kore",
+          "Deva",
         ],
       },
       "release.artwork[].role": {
@@ -7452,21 +7747,68 @@ function getSupplementalFieldGuidance(
       },
     };
 
+  const patternCommonValues =
+    getPatternMetadataHelpCommonValues(
+      normalizedPath,
+    );
   const exact =
     exactGuidance[normalizedPath];
 
   if (exact) {
-    return exact;
+    return {
+      ...exact,
+      commonValues: mergeMetadataGuidanceValues(
+        exact.commonValues ?? [],
+        patternCommonValues,
+      ),
+    };
+  }
+
+  if (patternCommonValues.length > 0) {
+    if (normalizedPath.endsWith(".language")) {
+      return {
+        help:
+          "Prefer a short BCP 47 or ISO 639 language code and use the same convention throughout the library.",
+        commonValues: patternCommonValues,
+      };
+    }
+
+    if (normalizedPath.endsWith(".script")) {
+      return {
+        help:
+          "Prefer a consistent ISO 15924 script code when the writing system is known.",
+        commonValues: patternCommonValues,
+      };
+    }
+
+    if (normalizedPath.endsWith(".country")) {
+      return {
+        help:
+          "Prefer a consistent two-letter ISO 3166-1 alpha-2 country code when the field represents a country.",
+        commonValues: patternCommonValues,
+      };
+    }
+
+    return {
+      commonValues: patternCommonValues,
+    };
   }
 
   if (
     normalizedPath.endsWith(".role")
   ) {
     return {
-      examples: [
-        "producer",
-        "engineer",
+      commonValues: [
         "performer",
+        "producer",
+        "recording engineer",
+        "mix engineer",
+        "mastering engineer",
+        "composer",
+        "lyricist",
+        "arranger",
+        "art director",
+        "photography",
       ],
     };
   }
@@ -7492,11 +7834,13 @@ function getSupplementalFieldGuidance(
     return {
       help:
         "Prefer a consistent two-letter ISO 3166-1 alpha-2 country code when the field represents a country.",
-      examples: [
+      commonValues: [
         "US",
         "GB",
         "CA",
+        "AU",
         "DE",
+        "FR",
         "JP",
       ],
     };
@@ -7508,12 +7852,17 @@ function getSupplementalFieldGuidance(
     return {
       help:
         "Prefer a short BCP 47 or ISO 639 language code and use the same convention throughout the library.",
-      examples: [
+      commonValues: [
         "en",
         "es",
         "fr",
         "de",
+        "it",
+        "pt",
         "ja",
+        "ko",
+        "zh",
+        "zxx",
       ],
     };
   }
@@ -7638,9 +7987,8 @@ function getSupplementalFieldGuidance(
   }
 
   return {
-    examples: [
+    help:
       "Use a concise value consistent with the rest of the library.",
-    ],
   };
 }
 
@@ -7653,6 +8001,33 @@ type MetadataFieldHelpSpec = {
   valueType:
     FlattenedMetadataRow["valueType"];
 };
+
+function mergeMetadataGuidanceValues(
+  ...valueGroups: readonly (readonly string[])[]
+): string[] {
+  const values: string[] = [];
+  const seen = new Set<string>();
+
+  for (const group of valueGroups) {
+    for (const rawValue of group) {
+      const value = rawValue.trim();
+      const normalizedValue =
+        value.toLocaleLowerCase();
+
+      if (
+        value.length === 0 ||
+        seen.has(normalizedValue)
+      ) {
+        continue;
+      }
+
+      seen.add(normalizedValue);
+      values.push(value);
+    }
+  }
+
+  return values;
+}
 
 type EffectiveMetadataFieldGuidance = {
   help: string;
@@ -7679,13 +8054,16 @@ function resolveEffectiveMetadataFieldGuidance(
         spec.valueType,
       ),
     commonValues:
-      presentation?.commonValues ??
-      supplementalGuidance.commonValues ??
-      [],
+      mergeMetadataGuidanceValues(
+        spec.field?.editor?.options ?? [],
+        presentation?.commonValues ?? [],
+        supplementalGuidance.commonValues ?? [],
+      ),
     examples:
-      presentation?.examples ??
-      supplementalGuidance.examples ??
-      [],
+      mergeMetadataGuidanceValues(
+        presentation?.examples ?? [],
+        supplementalGuidance.examples ?? [],
+      ),
   };
 }
 
@@ -7792,34 +8170,6 @@ function MetadataFieldControls({
           title={`${label} — Help`}
           onClose={() => setModalOpen(false)}
         >
-          {guidance.examples.length > 0 && (
-            <section className="metadata-field-guidance metadata-field-examples">
-              <h4>Example</h4>
-              <ul className="metadata-field-modal-values">
-                {guidance.examples.map(
-                  (value) => (
-                    <li key={value}>
-                      <code>{value}</code>
-                    </li>
-                  ),
-                )}
-              </ul>
-            </section>
-          )}
-
-          <section className="metadata-field-guidance">
-            <h4>About this field</h4>
-            <p>
-              {field?.description ??
-                "Metadata value stored at this canonical TOML path."}
-            </p>
-          </section>
-
-          <section className="metadata-field-guidance">
-            <h4>Value guidance</h4>
-            <p>{guidance.help}</p>
-          </section>
-
           {guidance.commonValues.length > 0 && (
             <section className="metadata-field-guidance metadata-field-common-values">
               <h4>Common values</h4>
@@ -7841,6 +8191,34 @@ function MetadataFieldControls({
             </section>
           )}
 
+          <section className="metadata-field-guidance metadata-field-value-guidance">
+            <h4>Value guidance</h4>
+            <p>{guidance.help}</p>
+
+            {guidance.examples.length > 0 && (
+              <div className="metadata-field-guidance-examples">
+                <h5>Examples</h5>
+                <ul className="metadata-field-modal-values">
+                  {guidance.examples.map(
+                    (value) => (
+                      <li key={value}>
+                        <code>{value}</code>
+                      </li>
+                    ),
+                  )}
+                </ul>
+              </div>
+            )}
+          </section>
+
+          <section className="metadata-field-guidance metadata-field-about">
+            <h4>About this field</h4>
+            <p>
+              {field?.description ??
+                "Metadata value stored at this canonical TOML path."}
+            </p>
+          </section>
+
           {!field && (
             <p className="metadata-field-guidance-note metadata-field-full-width">
               This path uses supplemental guidance until
@@ -7849,48 +8227,55 @@ function MetadataFieldControls({
             </p>
           )}
 
-          <section className="metadata-field-guidance metadata-field-technical-details">
-            <h4>Technical details</h4>
+          <details className="metadata-field-guidance metadata-help-technical-disclosure metadata-tag-disclosure">
+            <summary>
+              <span>Technical details</span>
+              <small>
+                Canonical path, data type, and field behavior
+              </small>
+            </summary>
 
-            <MetadataFieldFacts spec={spec} />
+            <div className="metadata-help-technical-content metadata-tag-disclosure-content">
+              <MetadataFieldFacts spec={spec} />
 
-            {field && groups.length > 0 && (
-              <details className="metadata-tag-details metadata-tag-details-inline metadata-tag-disclosure">
-                <summary>
-                  <span>
-                    Player compatibility and tag mappings
-                  </span>
-                  <small>
-                    {groups.length} mapping
-                    {groups.length === 1 ? " group" : " groups"}
-                  </small>
-                </summary>
+              {field && groups.length > 0 && (
+                <details className="metadata-tag-details metadata-tag-details-inline metadata-tag-disclosure">
+                  <summary>
+                    <span>
+                      Player compatibility and tag mappings
+                    </span>
+                    <small>
+                      {groups.length} mapping
+                      {groups.length === 1 ? " group" : " groups"}
+                    </small>
+                  </summary>
 
-                <div className="metadata-tag-disclosure-content">
-                  <dl className="metadata-aliases">
-                    {groups.map((group) => (
-                      <div key={group.label}>
-                        <dt>{group.label}</dt>
-                        <dd
-                          className={
-                            group.verified === false
-                              ? "alias-unverified"
-                              : undefined
-                          }
-                        >
-                          {group.values.join(", ")}
-                        </dd>
-                      </div>
-                    ))}
-                  </dl>
+                  <div className="metadata-tag-disclosure-content">
+                    <dl className="metadata-aliases">
+                      {groups.map((group) => (
+                        <div key={group.label}>
+                          <dt>{group.label}</dt>
+                          <dd
+                            className={
+                              group.verified === false
+                                ? "alias-unverified"
+                                : undefined
+                            }
+                          >
+                            {group.values.join(", ")}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
 
-                  <MetadataCompatibilityNotes
-                    field={field}
-                  />
-                </div>
-              </details>
-            )}
-          </section>
+                    <MetadataCompatibilityNotes
+                      field={field}
+                    />
+                  </div>
+                </details>
+              )}
+            </div>
+          </details>
         </MetadataFieldModal>
       )}
     </>
@@ -7971,39 +8356,6 @@ function MetadataFieldPairHelpModal({
       title={`${title} — Help`}
       onClose={onClose}
     >
-      <section className="metadata-field-guidance metadata-field-examples">
-        <h4>Example</h4>
-        <div className="metadata-field-pair-example-grid">
-          {orderedPairFields.map(
-            (field) => (
-              <div key={field.key}>
-                <span>{field.label}</span>
-                <code>{field.example}</code>
-              </div>
-            ),
-          )}
-        </div>
-      </section>
-
-      <section className="metadata-field-guidance metadata-field-pair-about">
-        <h4>About this pair</h4>
-        <p>{description}</p>
-      </section>
-
-      <section className="metadata-field-guidance metadata-field-pair-guidance">
-        <h4>Field guidance</h4>
-        <div className="metadata-field-pair-guidance-grid">
-          {orderedPairFields.map(
-            (field) => (
-              <article key={field.key}>
-                <h5>{field.label}</h5>
-                <p>{field.guidance}</p>
-              </article>
-            ),
-          )}
-        </div>
-      </section>
-
       {commonRoleValues.length > 0 && (
         <section className="metadata-field-guidance metadata-field-common-values">
           <h4>Common role values</h4>
@@ -8023,21 +8375,52 @@ function MetadataFieldPairHelpModal({
         </section>
       )}
 
-      <section className="metadata-field-guidance metadata-field-technical-details">
-        <h4>Technical details</h4>
-        <div className="metadata-field-pair-facts-grid">
+      <section className="metadata-field-guidance metadata-field-pair-guidance">
+        <h4>Field guidance</h4>
+        <div className="metadata-field-pair-guidance-grid">
           {orderedPairFields.map(
             (field) => (
               <article key={field.key}>
-                <h5>{field.label} field</h5>
-                <MetadataFieldFacts
-                  spec={field.spec}
-                />
+                <h5>{field.label}</h5>
+                <p>{field.guidance}</p>
+                <p className="metadata-field-pair-example">
+                  <strong>Example:</strong>{" "}
+                  <code>{field.example}</code>
+                </p>
               </article>
             ),
           )}
         </div>
       </section>
+
+      <section className="metadata-field-guidance metadata-field-pair-about">
+        <h4>About this pair</h4>
+        <p>{description}</p>
+      </section>
+
+      <details className="metadata-field-guidance metadata-help-technical-disclosure metadata-tag-disclosure">
+        <summary>
+          <span>Technical details</span>
+          <small>
+            Canonical paths, data types, and field behavior
+          </small>
+        </summary>
+
+        <div className="metadata-help-technical-content metadata-tag-disclosure-content">
+          <div className="metadata-field-pair-facts-grid">
+            {orderedPairFields.map(
+              (field) => (
+                <article key={field.key}>
+                  <h5>{field.label} field</h5>
+                  <MetadataFieldFacts
+                    spec={field.spec}
+                  />
+                </article>
+              ),
+            )}
+          </div>
+        </div>
+      </details>
     </MetadataFieldModal>
   );
 }
@@ -9062,6 +9445,7 @@ function ReleaseMetadataDetailView({
     const { changes, createChanges } = getDocumentSaveChanges(
       document,
       draft,
+      releaseDocuments,
     );
     const performerRecords =
       performerDrafts[
@@ -9112,6 +9496,10 @@ function ReleaseMetadataDetailView({
               serializePerformerRecords(
                 performerRecords,
               ),
+            performerPath:
+              performerRecords === undefined
+                ? undefined
+                : getPerformerPath(document),
             technicalContributors:
               serializeTechnicalCreditRecords(
                 technicalContributorRecords,
@@ -9299,6 +9687,7 @@ function ReleaseMetadataDetailView({
           getDocumentSaveChanges(
             document,
             draft,
+            releaseDocuments,
           );
         const performerRecords =
           performerDrafts[
@@ -9329,6 +9718,10 @@ function ReleaseMetadataDetailView({
                 serializePerformerRecords(
                   performerRecords,
                 ),
+              performerPath:
+                performerRecords === undefined
+                  ? undefined
+                  : getPerformerPath(document),
               technicalContributors:
                 serializeTechnicalCreditRecords(
                   technicalContributorRecords,
@@ -10129,14 +10522,17 @@ function ReleaseMetadataDetailView({
   );
 
   const performerCopySourceLabel =
-    performerCopySource?.document.trackId
-      ? performerCopyTrackOptions.find(
-          (option) =>
-            option.trackId ===
-            performerCopySource.document.trackId,
-        )?.label ??
-        performerCopySource.document.trackId
-      : "Track";
+    performerCopySource?.document.scope ===
+      "release"
+      ? `Release — ${inferredReleaseTitle}`
+      : performerCopySource?.document.trackId
+        ? performerCopyTrackOptions.find(
+            (option) =>
+              option.trackId ===
+              performerCopySource.document.trackId,
+          )?.label ??
+          performerCopySource.document.trackId
+        : "Track";
 
   const inferredReleaseArtist =
     inferCommonReleaseArtist(
@@ -10683,8 +11079,7 @@ function ReleaseMetadataDetailView({
       )}
 
 
-      {performerCopySource &&
-        performerCopySource.document.trackId && (
+      {performerCopySource && (
           <PerformerCreditCopyModal
             releaseId={detail.releaseId}
             source={performerCopySource}
@@ -10697,8 +11092,10 @@ function ReleaseMetadataDetailView({
             trackOptions={
               performerCopyTrackOptions.filter(
                 (option) =>
+                  performerCopySource.document.scope ===
+                    "release" ||
                   option.trackId !==
-                  performerCopySource.document.trackId,
+                    performerCopySource.document.trackId,
               )
             }
             onClose={() =>
@@ -11398,9 +11795,15 @@ function ReleaseMetadataDetailView({
           onTechnicalCreditDraftChange={
             updateTechnicalCreditDraft
           }
-          onCopyPerformerCredits={() => {
-            // Release documents do not expose track performer-copy actions.
-          }}
+          onCopyPerformerCredits={(
+            document,
+            records,
+          ) =>
+            setPerformerCopySource({
+              document,
+              records,
+            })
+          }
           metadataRegistry={
             metadataRegistry
           }
@@ -12320,6 +12723,181 @@ function SelectOrCustomMetadataInput({
 }
 
 
+function CopyrightNoticeInput({
+  path,
+  value,
+  onChange,
+}: {
+  path: string;
+  value: string;
+  onChange: (nextValue: string) => void;
+}) {
+  const config =
+    getGuidedCopyrightNoticeConfig(path);
+  const parsedValue =
+    parseGuidedCopyrightNotice(value, path);
+  const [customMode, setCustomMode] =
+    useState(parsedValue === null);
+  const [guidedHolder, setGuidedHolder] =
+    useState(parsedValue?.holder ?? "");
+  const lastEmittedGuidedValue =
+    useRef<string | null>(null);
+
+  useEffect(() => {
+    const nextParsedValue =
+      parseGuidedCopyrightNotice(
+        value,
+        path,
+      );
+
+    setCustomMode(nextParsedValue === null);
+    setGuidedHolder(
+      nextParsedValue?.holder ?? "",
+    );
+    lastEmittedGuidedValue.current = null;
+  }, [path]);
+
+  useEffect(() => {
+    if (
+      value ===
+      lastEmittedGuidedValue.current
+    ) {
+      lastEmittedGuidedValue.current = null;
+      return;
+    }
+
+    const nextParsedValue =
+      parseGuidedCopyrightNotice(
+        value,
+        path,
+      );
+
+    if (nextParsedValue === null) {
+      return;
+    }
+
+    setGuidedHolder(nextParsedValue.holder);
+  }, [path, value]);
+
+  if (!config) {
+    return null;
+  }
+
+  const canonicalPlaceholder =
+    `${config.prefix} ${config.symbol} Name. All rights reserved.`;
+  const noticeKind =
+    config.symbol === "℗"
+      ? "sound recording copyright"
+      : "copyright";
+
+  if (customMode) {
+    return (
+      <span className="guided-copyright-input is-custom">
+        <input
+          type="text"
+          aria-label={`Custom ${noticeKind} notice`}
+          value={value}
+          placeholder={canonicalPlaceholder}
+          onChange={(event) =>
+            onChange(event.target.value)
+          }
+        />
+
+        <button
+          type="button"
+          className="guided-rights-mode-button"
+          onClick={() =>
+            setCustomMode(false)
+          }
+        >
+          Use guided format
+        </button>
+
+        {parsedValue === null &&
+          value.trim() !== "" && (
+            <small className="guided-rights-note">
+              This existing custom value remains unchanged until the guided name field is edited.
+            </small>
+          )}
+      </span>
+    );
+  }
+
+  const updateHolder = (holder: string) => {
+    setGuidedHolder(holder);
+
+    const nextValue =
+      formatGuidedCopyrightNotice(
+        holder,
+        path,
+      );
+
+    lastEmittedGuidedValue.current =
+      nextValue;
+    onChange(nextValue);
+  };
+
+  return (
+    <span className="guided-copyright-input">
+      <span className="guided-copyright-fragment">
+        {config.prefix}
+      </span>
+      <span
+        className="guided-copyright-fragment guided-copyright-symbol"
+        aria-label={
+          config.symbol === "℗"
+            ? "Sound recording copyright symbol"
+            : "Copyright symbol"
+        }
+        title={
+          config.symbol === "℗"
+            ? "Sound recording copyright"
+            : "Copyright"
+        }
+      >
+        {config.symbol}
+      </span>
+      <input
+        type="text"
+        aria-label={`${config.prefix} holder names`}
+        value={guidedHolder}
+        placeholder="Name or names"
+        onChange={(event) =>
+          updateHolder(event.target.value)
+        }
+      />
+      <span
+        className="guided-copyright-punctuation"
+        aria-hidden="true"
+      >
+        .
+      </span>
+      <span className="guided-copyright-reservation">
+        All rights reserved.
+      </span>
+
+      <button
+        type="button"
+        className="guided-rights-mode-button"
+        onClick={() =>
+          setCustomMode(true)
+        }
+      >
+        Custom value
+      </button>
+
+      <small className="guided-rights-preview">
+        Value preview: {
+          formatGuidedCopyrightNotice(
+            guidedHolder,
+            path,
+          ) || "Blank"
+        }
+      </small>
+    </span>
+  );
+}
+
 function GuidedRightsStatementInput({
   path,
   symbol,
@@ -12665,6 +13243,15 @@ function MetadataValueCell({
     usingFallbackGeneratedValue
       ? generatedFallbackValue
       : authoredCurrentValue;
+  const guidedNoticeDisplayValue =
+    typeof currentValue === "string"
+      ? formatGuidedCopyrightNoticeValue(
+          row.path,
+          currentValue,
+        )
+      : null;
+  const displayCurrentValue =
+    guidedNoticeDisplayValue ?? currentValue;
 
   if (!editMode) {
     return (
@@ -12682,9 +13269,9 @@ function MetadataValueCell({
           .join(" ")}
       >
         <span>
-          {row.path === "track.audio.tuning_hz" && typeof currentValue === "number"
-            ? `${formatMetadataValue(currentValue)} Hz`
-            : formatMetadataValue(currentValue)}
+          {row.path === "track.audio.tuning_hz" && typeof displayCurrentValue === "number"
+            ? `${formatMetadataValue(displayCurrentValue)} Hz`
+            : formatMetadataValue(displayCurrentValue)}
         </span>
 
         {usingGeneratedValue && (
@@ -12889,6 +13476,43 @@ function MetadataValueCell({
           </span>
         )}
       </label>
+    );
+  }
+
+  if (
+    typeof currentValue === "string" &&
+    isGuidedCopyrightNoticePath(row.path)
+  ) {
+    return (
+      <div className="metadata-editor-field guided-rights-field">
+        <CopyrightNoticeInput
+          path={row.path}
+          value={currentValue}
+          onChange={(nextValue) =>
+            onDraftValueChange(
+              document,
+              row.path,
+              originalValue,
+              nextValue,
+            )
+          }
+        />
+
+        {usingInheritedValue &&
+          !changed && (
+          <span className="metadata-provenance-note metadata-inherited-note">
+            Inherited from release
+          </span>
+        )}
+
+        {changed && (
+          <span className="changed-indicator">
+            {usingInheritedValue
+              ? "Track override"
+              : "Modified"}
+          </span>
+        )}
+      </div>
     );
   }
 
@@ -13126,17 +13750,14 @@ function MetadataValueCell({
     );
   }
 
-  const supportsArtistSortNameInheritance =
-    isArtistSortNameInheritancePath(
-      row.path,
-    ) && inheritedValue !== undefined;
+  const supportsReleaseValueInheritance =
+    inheritedValue !== undefined;
   const restoreReleaseValuePending =
-    supportsArtistSortNameInheritance &&
+    supportsReleaseValueInheritance &&
     changed &&
-    isBlankMetadataValue(currentValue) &&
-    !isBlankMetadataValue(originalValue);
+    isBlankMetadataValue(currentValue);
   const showUseReleaseValue =
-    supportsArtistSortNameInheritance &&
+    supportsReleaseValueInheritance &&
     (
       changed ||
       !isBlankMetadataValue(originalValue)
@@ -13157,7 +13778,7 @@ function MetadataValueCell({
         }
       />
 
-      {supportsArtistSortNameInheritance && (
+      {supportsReleaseValueInheritance && (
         <span className="metadata-inheritance-actions">
           <small className="metadata-provenance-note metadata-inherited-note">
             Release value: {formatMetadataValue(inheritedValue)}
@@ -13275,7 +13896,8 @@ function metadataRowMatchesTab(
   if (tab === "recording") {
     return [
       "Production",
-      "Recording and Editing",
+      "Recording",
+      "Editing",
       "Mixing",
       "Mastering",
       "Technical Audio",
@@ -13287,11 +13909,9 @@ function metadataRowMatchesTab(
   }
 
   if (tab === "notes") {
-    return (
-      group === "Text and Notes" ||
-      /(^|\.)(notes?|comment|description)(\.|\[|$)/.test(
-        lowerPath,
-      )
+    return metadataRowMatchesNotesTab(
+      lowerPath,
+      group,
     );
   }
 
@@ -13304,7 +13924,8 @@ function metadataRowMatchesTab(
     "Lyrics Rights & Source",
     "Arrangement",
     "Production",
-    "Recording and Editing",
+    "Recording",
+    "Editing",
     "Mixing",
     "Mastering",
     "Technical Audio",
@@ -13335,7 +13956,8 @@ type ReleaseContributorRecord = {
 
 const engineeringContributorGroups =
   new Set([
-    "Recording and Editing",
+    "Recording",
+    "Editing",
     "Mixing",
     "Mastering",
   ]);
@@ -13478,6 +14100,21 @@ function getInitialMetadataFieldValue(
     }).value;
   }
 
+  const artistNamePath =
+    artistNamePathForSortNamePath(
+      field.tomlPath,
+    );
+
+  if (artistNamePath) {
+    return generateArtistSortName(
+      readDocumentDraftString(
+        document,
+        artistNamePath,
+        draft,
+      ),
+    ).value;
+  }
+
   switch (field.valueType) {
     case "boolean":
       return false;
@@ -13510,19 +14147,79 @@ function metadataStorageRoleForFilename(
   return roles[filename] ?? "";
 }
 
+function buildDocumentMetadataRegistry(
+  document: ParsedMetadataDocument,
+  metadataRegistry: MetadataFieldDefinition[],
+): MetadataFieldDefinition[] {
+  if (
+    document.filename !== "release-production-notes.toml" &&
+    document.filename !== "track-production-notes.toml"
+  ) {
+    return metadataRegistry;
+  }
+
+  const storageFileRole =
+    metadataStorageRoleForFilename(
+      document.filename,
+    );
+  const existingPaths = new Set(
+    metadataRegistry.map(
+      (field) => field.tomlPath,
+    ),
+  );
+  const supplemental = productionContextFields
+    .filter(
+      (field) => !existingPaths.has(field.path),
+    )
+    .map(
+      (field): MetadataFieldDefinition => ({
+        id: `${document.scope}.${field.path}`,
+        canonicalName: `${document.scope}.${field.path}`,
+        label: field.label,
+        description: field.help,
+        scope: document.scope,
+        storageFileRole,
+        tomlPath: field.path,
+        valueType: "string",
+        required: false,
+        repeatable: false,
+        inherited:
+          document.scope === "track",
+        presentation: {
+          group: field.group,
+          order: field.order,
+          examples: field.examples,
+          help: field.help,
+        },
+        displayPolicy: "auto",
+      }),
+    );
+
+  return [
+    ...metadataRegistry,
+    ...supplemental,
+  ];
+}
+
 function PerformerRecordEditor({
   document,
   records,
   releasePrimaryArtistName,
+  releaseDefaultRecords = [],
+  inheritedFromRelease = false,
   editMode,
   metadataRegistry,
   relatedOpen,
   onRelatedToggle,
   onChange,
+  onCustomizeTrack,
+  onUseRelease,
 }: {
   document: ParsedMetadataDocument;
   records: PerformerRecordDraft[];
   releasePrimaryArtistName: string;
+  releaseDefaultRecords?: PerformerRecordDraft[];
+  inheritedFromRelease?: boolean;
   editMode: boolean;
   metadataRegistry: MetadataFieldDefinition[];
   relatedOpen: boolean;
@@ -13534,17 +14231,25 @@ function PerformerRecordEditor({
   onChange: (
     records: PerformerRecordDraft[],
   ) => void;
+  onCustomizeTrack?: () => void;
+  onUseRelease?: () => void;
 }) {
+  const performerBasePath =
+    document.scope === "release"
+      ? "release.credits.performers"
+      : "track.performers";
   const roleField =
     findRegisteredMetadataField(
       metadataRegistry,
-      "track.performers[0].role",
+      `${performerBasePath}[0].role`,
     );
   const sortNameField =
     findRegisteredMetadataField(
       metadataRegistry,
-      "track.performers[0].sort_name",
+      `${performerBasePath}[0].sort_name`,
     );
+  const canEditRecords =
+    editMode && !inheritedFromRelease;
   const performanceRoleOptions =
     roleField?.editor?.options ??
     roleField?.presentation?.commonValues ??
@@ -13634,13 +14339,15 @@ function PerformerRecordEditor({
 
   const personGroupedRecords =
     prioritizeReleaseArtistDisplay(
-      groupPersonRoleDisplayRecords(
-        records.map((record) => ({
-          key: record.key,
-          name: record.name,
-          role: record.role,
-          sortName: record.sortName,
-        })),
+      sortGroupedPerformerRoleDisplays(
+        groupPersonRoleDisplayRecords(
+          records.map((record) => ({
+            key: record.key,
+            name: record.name,
+            role: record.role,
+            sortName: record.sortName,
+          })),
+        ),
       ),
       releasePrimaryArtistName,
     );
@@ -13650,7 +14357,7 @@ function PerformerRecordEditor({
       releasePrimaryArtistName,
     );
   const showSortNames =
-    editMode
+    canEditRecords
       ? records.some(
           (record) =>
             record.sortName.trim(),
@@ -13668,7 +14375,27 @@ function PerformerRecordEditor({
 
   return (
     <div className="performer-record-editor">
-      {editMode && (
+      {inheritedFromRelease && (
+        <div className="performer-inheritance-banner">
+          <div>
+            <strong>Inherited from release</strong>
+            <p>
+              This track uses the release performer baseline. Customize it only when this track differs.
+            </p>
+          </div>
+          {editMode && onCustomizeTrack && (
+            <button
+              type="button"
+              className="performer-add-button"
+              onClick={onCustomizeTrack}
+            >
+              Customize performers for this track
+            </button>
+          )}
+        </div>
+      )}
+
+      {canEditRecords && (
         <div className="performer-record-toolbar">
           {incompleteCount > 0 ? (
             <p className="performer-validation-message">
@@ -13682,15 +14409,29 @@ function PerformerRecordEditor({
             <span aria-hidden="true" />
           )}
 
-          <button
-            type="button"
-            className="performer-add-button"
-            disabled={records.length >= 500}
-            onClick={addRecord}
-          >
-            <span aria-hidden="true">+</span>
-            <span>Add performer</span>
-          </button>
+          <div className="performer-record-toolbar-actions">
+            {document.scope === "track" &&
+              releaseDefaultRecords.length > 0 &&
+              onUseRelease && (
+                <button
+                  type="button"
+                  className="metadata-section-copy-button"
+                  onClick={onUseRelease}
+                >
+                  Use release performers
+                </button>
+              )}
+
+            <button
+              type="button"
+              className="performer-add-button"
+              disabled={records.length >= 500}
+              onClick={addRecord}
+            >
+              <span aria-hidden="true">+</span>
+              <span>Add performer</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -13700,7 +14441,7 @@ function PerformerRecordEditor({
             No performers have been added.
           </p>
 
-          {editMode && (
+          {canEditRecords && (
             <button
               type="button"
               className="performer-add-button"
@@ -13716,7 +14457,7 @@ function PerformerRecordEditor({
           <div
             className={[
               "performer-record-column-headings",
-              !editMode
+              !canEditRecords
                 ? "is-read-only"
                 : "",
             ]
@@ -13731,7 +14472,7 @@ function PerformerRecordEditor({
               <strong>Performance role</strong>
             </div>
 
-            {editMode && (
+            {canEditRecords && (
               <span className="sr-only">
                 Record actions
               </span>
@@ -13739,7 +14480,7 @@ function PerformerRecordEditor({
           </div>
 
           <div className="performer-record-list">
-            {editMode
+            {canEditRecords
               ? records.map(
                   (record, recordIndex) => (
                     <div
@@ -13867,12 +14608,12 @@ function PerformerRecordEditor({
               </strong>
               <MetadataFieldControls
                 field={sortNameField}
-                path="track.performers[].sort_name"
+                path={`${performerBasePath}[].sort_name`}
                 valueType="string"
               />
             </header>
 
-            {editMode
+            {canEditRecords
               ? records.map(
                   (record, recordIndex) => (
                     <label key={record.key}>
@@ -14638,9 +15379,14 @@ function MetadataDocumentTable({
     field: MetadataFieldDefinition,
   ) => void;
 }) {
+  const documentMetadataRegistry =
+    buildDocumentMetadataRegistry(
+      document,
+      metadataRegistry,
+    );
   const rows = filterPresentableMetadataRows(
     flattenMetadata(document.parsed),
-    metadataRegistry,
+    documentMetadataRegistry,
   );
   const [
     selectedMissingFieldPaths,
@@ -14979,7 +15725,7 @@ function MetadataDocumentTable({
     buildMissingInheritedMetadataRows(
       document,
       releaseDocuments,
-      metadataRegistry,
+      documentMetadataRegistry,
       metadataStorageRoleForFilename(
         document.filename,
       ),
@@ -14995,7 +15741,7 @@ function MetadataDocumentTable({
       (row, sourceIndex) => {
         const fieldDefinition =
           findRegisteredMetadataField(
-            metadataRegistry,
+            documentMetadataRegistry,
             row.path,
           );
 
@@ -15017,7 +15763,7 @@ function MetadataDocumentTable({
       (row, inheritedIndex) => {
         const fieldDefinition =
           findRegisteredMetadataField(
-            metadataRegistry,
+            documentMetadataRegistry,
             row.path,
           );
 
@@ -15055,7 +15801,7 @@ function MetadataDocumentTable({
       rows.map((row) => row.path),
     );
   const allMissingCategoryFields =
-    metadataRegistry
+    documentMetadataRegistry
       .filter(
         (field) =>
           field.scope === document.scope &&
@@ -15129,6 +15875,43 @@ function MetadataDocumentTable({
         )
       : [];
 
+  const showDefaultRightsFields =
+    shouldShowDefaultRightsFields({
+      scope: document.scope,
+      filename: document.filename,
+      activeTab: activeMetadataTab,
+    });
+  const defaultRightsMissingFields =
+    showDefaultRightsFields
+      ? allMissingCategoryFields.filter(
+          (field) =>
+            isDefaultRightsFieldPath(
+              document.scope,
+              field.tomlPath,
+            ),
+        )
+      : [];
+
+  const showDefaultProductionContextFields =
+    activeMetadataTab === "recording" &&
+    (
+      document.filename ===
+        "release-production-notes.toml" ||
+      document.filename ===
+        "track-production-notes.toml"
+    );
+  const defaultProductionContextMissingFields =
+    showDefaultProductionContextFields
+      ? allMissingCategoryFields.filter(
+          (field) =>
+            Boolean(
+              findProductionContextField(
+                field.tomlPath,
+              ),
+            ),
+        )
+      : [];
+
   const missingCategoryFields =
     allMissingCategoryFields.filter(
       (field) =>
@@ -15140,42 +15923,106 @@ function MetadataDocumentTable({
             field.tomlPath,
           ) &&
           field.tomlPath !==
-            "track.text.lyrics_language"
+            "track.text.lyrics_language" &&
+          !(
+            showDefaultRightsFields &&
+            isDefaultRightsFieldPath(
+              document.scope,
+              field.tomlPath,
+            )
+          ) &&
+          !(
+            showDefaultProductionContextFields &&
+            Boolean(
+              findProductionContextField(
+                field.tomlPath,
+              ),
+            )
+          )
         ) ||
         (
           !showDefaultTrackOverviewFields &&
-          activeMetadataTab !== "lyrics"
+          activeMetadataTab !== "lyrics" &&
+          !showDefaultRightsFields &&
+          !showDefaultProductionContextFields
         ),
     );
 
   const supportsPerformerRecords =
-    document.scope === "track" &&
-    document.filename ===
-      "track-credits.toml" &&
-    activeMetadataTab === "credits";
+    activeMetadataTab === "credits" &&
+    (
+      (
+        document.scope === "track" &&
+        document.filename ===
+          "track-credits.toml"
+      ) ||
+      (
+        document.scope === "release" &&
+        document.filename ===
+          "release.toml"
+      )
+    );
   const savedPerformerRecords =
     readPerformerRecords(document);
-  const performerRecords =
+  const releasePerformerRecords =
+    document.scope === "track"
+      ? releaseDocuments.flatMap(
+          (releaseDocument) =>
+            releaseDocument.filename ===
+              "release.toml"
+              ? readPerformerRecords(
+                  releaseDocument,
+                )
+              : [],
+        )
+      : [];
+  const localPerformerRecords =
     performerDraft ??
     savedPerformerRecords;
+  const effectivePerformerState =
+    document.scope === "track"
+      ? resolveEffectivePerformerRecords(
+          releasePerformerRecords,
+          localPerformerRecords,
+        )
+      : {
+          mode: "track" as const,
+          effective:
+            localPerformerRecords,
+        };
+  const performerRecords =
+    effectivePerformerState.effective;
+  const performersInheritedFromRelease =
+    document.scope === "track" &&
+    effectivePerformerState.mode ===
+      "release" &&
+    releasePerformerRecords.length > 0;
+  const performerBasePath =
+    document.scope === "release"
+      ? "release.credits.performers"
+      : "track.performers";
   const performerNameField =
     findRegisteredMetadataField(
-      metadataRegistry,
-      "track.performers[0].name",
+      documentMetadataRegistry,
+      `${performerBasePath}[0].name`,
     );
   const performerRoleField =
     findRegisteredMetadataField(
-      metadataRegistry,
-      "track.performers[0].role",
+      documentMetadataRegistry,
+      `${performerBasePath}[0].role`,
     );
   const performerHelpProps: MetadataFieldPairHelpProps = {
-    title: "Performers",
+    title: document.scope === "release"
+      ? "Release performers"
+      : "Track performers",
     description:
-      "Keep each performer name paired with the role they performed. Each performer record stores one credited name with one performance role. Repeat the same name when one performer has several roles; read-only mode groups matching credits into concise summary rows.",
+      document.scope === "release"
+        ? "Set the performer baseline for the release. Tracks inherit these paired name/role records until a track creates a local performer override."
+        : "Track performers inherit the release baseline while the local performer array is empty. Customize the track to remove, edit, or add individual performers.",
     nameField: performerNameField,
-    namePath: "track.performers[].name",
+    namePath: `${performerBasePath}[].name`,
     roleField: performerRoleField,
-    rolePath: "track.performers[].role",
+    rolePath: `${performerBasePath}[].role`,
     nameGuidance:
       "Enter the performer name exactly as supplied by the artist, liner notes, or release documentation.",
     roleGuidance:
@@ -15188,12 +16035,10 @@ function MetadataDocumentTable({
       [],
   };
   const releasePrimaryArtistValue =
-    document.scope === "track"
-      ? findMetadataValueAcrossDocuments(
-          releaseDocuments,
-          "release.primary_artist.name",
-        )
-      : undefined;
+    findMetadataValueAcrossDocuments(
+      releaseDocuments,
+      "release.primary_artist.name",
+    );
   const releasePrimaryArtistName =
     typeof releasePrimaryArtistValue ===
     "string"
@@ -15689,6 +16534,106 @@ function MetadataDocumentTable({
     ];
   }
 
+  if (defaultProductionContextMissingFields.length > 0) {
+    for (const group of [
+      "Production",
+      "Recording",
+      "Editing",
+    ] as const) {
+      const hasMissingGroupFields =
+        defaultProductionContextMissingFields.some(
+          (field) =>
+            field.presentation?.group === group,
+        );
+
+      if (
+        !hasMissingGroupFields ||
+        displayStandardSections.some(
+          (section) =>
+            section.group === group,
+        )
+      ) {
+        continue;
+      }
+
+      const groupRank =
+        metadataGroupRank.get(group) ??
+        Number.MAX_SAFE_INTEGER;
+      const insertionIndex =
+        displayStandardSections.findIndex(
+          (section) =>
+            (
+              metadataGroupRank.get(
+                section.group as
+                  typeof metadataGroupOrder[number],
+              ) ??
+              Number.MAX_SAFE_INTEGER
+            ) > groupRank,
+        );
+      const normalizedInsertionIndex =
+        insertionIndex >= 0
+          ? insertionIndex
+          : displayStandardSections.length;
+
+      displayStandardSections = [
+        ...displayStandardSections.slice(
+          0,
+          normalizedInsertionIndex,
+        ),
+        {
+          group,
+          rows: [],
+        },
+        ...displayStandardSections.slice(
+          normalizedInsertionIndex,
+        ),
+      ];
+    }
+  }
+
+  if (
+    defaultRightsMissingFields.length > 0 &&
+    !displayStandardSections.some(
+      (section) =>
+        section.group ===
+          "Music Business & Rights",
+    )
+  ) {
+    const rightsRank =
+      metadataGroupRank.get(
+        "Music Business & Rights",
+      ) ?? Number.MAX_SAFE_INTEGER;
+    const insertionIndex =
+      displayStandardSections.findIndex(
+        (section) =>
+          (
+            metadataGroupRank.get(
+              section.group as
+                typeof metadataGroupOrder[number],
+            ) ??
+            Number.MAX_SAFE_INTEGER
+          ) > rightsRank,
+      );
+    const normalizedInsertionIndex =
+      insertionIndex >= 0
+        ? insertionIndex
+        : displayStandardSections.length;
+
+    displayStandardSections = [
+      ...displayStandardSections.slice(
+        0,
+        normalizedInsertionIndex,
+      ),
+      {
+        group: "Music Business & Rights",
+        rows: [],
+      },
+      ...displayStandardSections.slice(
+        normalizedInsertionIndex,
+      ),
+    ];
+  }
+
   if (
     supportsTechnicalCreditRecords
   ) {
@@ -15733,6 +16678,23 @@ function MetadataDocumentTable({
         row,
         releaseDocuments,
       );
+    const artistNamePath =
+      artistNamePathForSortNamePath(
+        row.path,
+      );
+    const generatedArtistSortName =
+      !inherited &&
+      artistNamePath &&
+      typeof row.value === "string" &&
+      !row.value.trim()
+        ? generateArtistSortName(
+            readDocumentDraftString(
+              document,
+              artistNamePath,
+              draft,
+            ),
+          ).value
+        : "";
 
     return (
     <div
@@ -15855,13 +16817,16 @@ function MetadataDocumentTable({
             row.path ===
               "track.text.lyrics_language"
               ? effectiveTrackLanguage
-              : undefined
+              : generatedArtistSortName ||
+                  undefined
           }
           generatedFallbackNote={
             row.path ===
               "track.text.lyrics_language"
               ? "Generated from Track Language"
-              : undefined
+              : generatedArtistSortName
+                ? "Generated from Artist Name"
+                : undefined
           }
           editMode={editMode}
           draft={draft}
@@ -16018,6 +16983,92 @@ function MetadataDocumentTable({
             row.path,
           ),
       );
+
+    if (
+      ["Production", "Recording", "Editing"].includes(
+        section.group,
+      ) &&
+      defaultProductionContextMissingFields.some(
+        (field) =>
+          field.presentation?.group ===
+            section.group,
+      )
+    ) {
+      const missingFields =
+        defaultProductionContextMissingFields.filter(
+          (field) =>
+            field.presentation?.group ===
+              section.group,
+        );
+
+      return [
+        ...existingRows.map((item) => ({
+          order:
+            item.fieldDefinition
+              ?.presentation?.order ??
+            Number.MAX_SAFE_INTEGER,
+          sourceIndex: item.sourceIndex,
+          content: renderMetadataRow(item),
+        })),
+        ...missingFields.map(
+          (field, missingIndex) => ({
+            order:
+              field.presentation?.order ??
+              Number.MAX_SAFE_INTEGER,
+            sourceIndex:
+              rows.length + missingIndex,
+            content:
+              renderDefaultMissingField(
+                field,
+              ),
+          }),
+        ),
+      ]
+        .sort(
+          (left, right) =>
+            left.order - right.order ||
+            left.sourceIndex -
+              right.sourceIndex,
+        )
+        .map(({ content }) => content);
+    }
+
+    if (
+      section.group ===
+        "Music Business & Rights" &&
+      defaultRightsMissingFields.length > 0
+    ) {
+      return [
+        ...existingRows.map((item) => ({
+          order:
+            item.fieldDefinition
+              ?.presentation?.order ??
+            Number.MAX_SAFE_INTEGER,
+          sourceIndex: item.sourceIndex,
+          content: renderMetadataRow(item),
+        })),
+        ...defaultRightsMissingFields.map(
+          (field, missingIndex) => ({
+            order:
+              field.presentation?.order ??
+              Number.MAX_SAFE_INTEGER,
+            sourceIndex:
+              rows.length + missingIndex,
+            content:
+              renderDefaultMissingField(
+                field,
+              ),
+          }),
+        ),
+      ]
+        .sort(
+          (left, right) =>
+            left.order - right.order ||
+            left.sourceIndex -
+              right.sourceIndex,
+        )
+        .map(({ content }) => content);
+    }
 
     if (
       section.group ===
@@ -16655,6 +17706,31 @@ function MetadataDocumentTable({
                               section.rows.length +
                               defaultLyricsLanguageMissingFields.length
                             } fields`
+                        : [
+                            "Production",
+                            "Recording",
+                            "Editing",
+                          ].includes(section.group) &&
+                          defaultProductionContextMissingFields.some(
+                            (field) =>
+                              field.presentation?.group ===
+                              section.group,
+                          )
+                          ? `${section.rows.length} of ${
+                              section.rows.length +
+                              defaultProductionContextMissingFields.filter(
+                                (field) =>
+                                  field.presentation?.group ===
+                                  section.group,
+                              ).length
+                            } fields`
+                        : section.group ===
+                            "Music Business & Rights" &&
+                          defaultRightsMissingFields.length > 0
+                          ? `${section.rows.length} of ${
+                              section.rows.length +
+                              defaultRightsMissingFields.length
+                            } fields`
                           : `${section.rows.length} ${
                               section.rows.length === 1
                                 ? "field"
@@ -16678,7 +17754,9 @@ function MetadataDocumentTable({
                           (editMode &&
                             !canFinishEditing)
                             ? "Save or discard browser edits before copying performer credits."
-                            : "Copy selected saved performer credits to other tracks in this release"
+                            : document.scope === "release"
+                              ? "Copy selected release performer credits into track-level overrides"
+                              : "Copy selected saved performer credits to other tracks in this release"
                         }
                         onClick={(event) => {
                           event.preventDefault();
@@ -16712,7 +17790,7 @@ function MetadataDocumentTable({
                     }
                     editMode={editMode}
                     metadataRegistry={
-                      metadataRegistry
+                      documentMetadataRegistry
                     }
                     relatedOpen={
                       metadataSectionOpenState[
@@ -16741,9 +17819,15 @@ function MetadataDocumentTable({
                     releasePrimaryArtistName={
                       releasePrimaryArtistName
                     }
+                    releaseDefaultRecords={
+                      releasePerformerRecords
+                    }
+                    inheritedFromRelease={
+                      performersInheritedFromRelease
+                    }
                     editMode={editMode}
                     metadataRegistry={
-                      metadataRegistry
+                      documentMetadataRegistry
                     }
                     relatedOpen={
                       metadataSectionOpenState[
@@ -16758,6 +17842,32 @@ function MetadataDocumentTable({
                     }
                     onChange={
                       onPerformerDraftChange
+                    }
+                    onCustomizeTrack={
+                      document.scope === "track"
+                        ? () =>
+                            onPerformerDraftChange(
+                              createTrackPerformerOverride(
+                                releasePerformerRecords,
+                              ),
+                            )
+                        : undefined
+                    }
+                    onUseRelease={
+                      document.scope === "track"
+                        ? () => {
+                            if (
+                              localPerformerRecords.length > 0 &&
+                              !window.confirm(
+                                "Remove this track's local performer override and use the release performers?",
+                              )
+                            ) {
+                              return;
+                            }
+
+                            onPerformerDraftChange([]);
+                          }
+                        : undefined
                     }
                   />
                 )}

@@ -197,3 +197,84 @@ test(
     );
   },
 );
+
+test(
+  "generates separate production recording and editing templates",
+  () => {
+    const release = createIncompleteRelease();
+    const generated = buildGeneratedTomlPreview(
+      release,
+      buildMetadataPreview(release),
+    );
+    const releaseNotes = generated.documents.find(
+      (document) =>
+        document.filename ===
+        "release-production-notes.toml",
+    );
+    const trackNotes = generated.documents.find(
+      (document) =>
+        document.filename ===
+        "track-production-notes.toml",
+    );
+
+    assert.ok(releaseNotes);
+    assert.ok(trackNotes);
+
+    for (const content of [
+      releaseNotes.content,
+      trackNotes.content,
+    ]) {
+      assert.match(content, /\[production\]/);
+      assert.match(
+        content,
+        /\[production\.recording\]/,
+      );
+      assert.match(
+        content,
+        /\[production\.editing\]/,
+      );
+      assert.match(
+        content,
+        /production_type = ""/,
+      );
+    }
+  },
+);
+
+test(
+  "generates release and track rights plus a release performer baseline",
+  () => {
+    const release = createIncompleteRelease();
+    const generated = buildGeneratedTomlPreview(
+      release,
+      buildMetadataPreview(release),
+    );
+    const releaseToml = generated.documents.find(
+      (document) =>
+        document.filename === "release.toml",
+    );
+    const trackToml = generated.documents.find(
+      (document) =>
+        document.filename === "track.toml",
+    );
+
+    assert.ok(releaseToml);
+    assert.ok(trackToml);
+    assert.match(
+      releaseToml.content,
+      /\[release\.rights\]/,
+    );
+    assert.match(
+      releaseToml.content,
+      /phonographic_copyright = ""/,
+    );
+    assert.match(
+      releaseToml.content,
+      /performers = \[\]/,
+    );
+    assert.match(
+      trackToml.content,
+      /\[track\.rights\]/,
+    );
+  },
+);
