@@ -26,12 +26,20 @@ const serverSource = readFileSync(
   "utf8",
 );
 
+const styleSource = readFileSync(
+  new URL(
+    "../src/styles.css",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
 test(
   "offers guided and quick-review staging workflows from candidate inspection",
   () => {
     assert.match(
       appSource,
-      /Build staging release/,
+      /Build or update staging release/,
     );
     assert.match(
       builderSource,
@@ -52,6 +60,14 @@ test(
     assert.match(
       builderSource,
       /Preview build plan/,
+    );
+    assert.match(
+      builderSource,
+      /Preview update plan/,
+    );
+    assert.match(
+      builderSource,
+      /Apply staging update/,
     );
   },
 );
@@ -104,6 +120,46 @@ test(
     assert.match(
       builderSource,
       /working-session context[\s\S]*jam[\s\S]*Production Notes/i,
+    );
+  },
+);
+
+test(
+  "supports desktop track reordering and clearly labeled staging deltas",
+  () => {
+    assert.match(
+      builderSource,
+      /Move track earlier/,
+    );
+    assert.match(
+      builderSource,
+      /Move track later/,
+    );
+    assert.match(
+      builderSource,
+      /Existing staging release detected/,
+    );
+    assert.match(
+      builderSource,
+      /Adjustment \/ reason/,
+    );
+    assert.match(
+      builderSource,
+      /Files preserved/,
+    );
+    assert.match(
+      serverSource,
+      /stable ID will be retained/i,
+    );
+  },
+);
+
+test(
+  "keeps build-plan action and status labels on one line",
+  () => {
+    assert.match(
+      styleSource,
+      /\.ingest-build-plan-table tr > :first-child,[\s\S]*\.ingest-build-plan-table tr > :last-child\s*\{[^}]*min-width:\s*6\.5rem;[^}]*overflow-wrap:\s*normal;[^}]*white-space:\s*nowrap;[^}]*word-break:\s*normal;/s,
     );
   },
 );

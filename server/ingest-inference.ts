@@ -10,14 +10,23 @@ const audioExtensions = new Set([
   ".aif",
   ".aiff",
   ".alac",
+  ".ape",
+  ".au",
+  ".caf",
+  ".dff",
+  ".dsf",
   ".flac",
   ".m4a",
+  ".mka",
   ".mp3",
   ".ogg",
   ".opus",
+  ".snd",
+  ".tta",
   ".wav",
   ".wave",
   ".wma",
+  ".wv",
 ]);
 
 const imageExtensions = new Set([

@@ -28,17 +28,28 @@ const trackMetadataFiles = [
   "track-production-notes.toml",
 ] as const;
 
-const audioMasterExtensions = new Set([
+const audioAssetExtensions = new Set([
   ".aac",
   ".aif",
   ".aiff",
   ".alac",
+  ".ape",
+  ".au",
+  ".caf",
+  ".dff",
+  ".dsf",
   ".flac",
   ".m4a",
+  ".mka",
   ".mp3",
   ".ogg",
   ".opus",
+  ".snd",
+  ".tta",
   ".wav",
+  ".wave",
+  ".wma",
+  ".wv",
 ]);
 
 const artworkMasterExtensions = new Set([
@@ -215,7 +226,18 @@ async function scanTrack(
         matchesMasterAsset(
           filePath,
           "audio-master",
-          audioMasterExtensions,
+          audioAssetExtensions,
+        ),
+      )
+      .map((filePath) =>
+        toDiscoveredAsset(mediaRoot, filePath),
+      ),
+    playbackAudio: files
+      .filter((filePath) =>
+        matchesMasterAsset(
+          filePath,
+          "audio-playback",
+          audioAssetExtensions,
         ),
       )
       .map((filePath) =>
@@ -322,6 +344,12 @@ function buildScannerWarnings(
       if (track.audioMasters.length > 1) {
         warnings.push(
           `${track.relativePath}: multiple audio masters detected`,
+        );
+      }
+
+      if ((track.playbackAudio?.length ?? 0) > 1) {
+        warnings.push(
+          `${track.relativePath}: multiple playback audio files detected`,
         );
       }
 

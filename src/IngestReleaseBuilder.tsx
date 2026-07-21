@@ -1,18 +1,22 @@
 import {
+  useEffect,
   useState,
 } from "react";
 
 import {
   INGEST_BUILD_CONFIRMATION_PHRASE,
+  INGEST_UPDATE_CONFIRMATION_PHRASE,
   createArtworkAssignmentId,
   defaultReleaseArtworkAssignment,
   ingestArtworkRoleOptions,
   type IngestArtworkAssignmentDraft,
   type IngestBuildAssetDraft,
   type IngestBuildDraft,
+  type IngestBuildOperation,
   type IngestBuildPreview,
   type IngestBuildResult,
   type IngestBuildTrackDraft,
+  type IngestStagingTargetStatus,
 } from "../shared/ingest-builder.js";
 import {
   buildBlockingSourceStatuses,
@@ -647,11 +651,75 @@ export function IngestReleaseBuilder({
     useState(false);
   const [focusedSourcePath, setFocusedSourcePath] =
     useState<string | null>(null);
+  const [targetStatus, setTargetStatus] =
+    useState<IngestStagingTargetStatus | null>(null);
+  const [targetStatusLoading, setTargetStatusLoading] =
+    useState(false);
   const blockingSources =
     buildBlockingSourceStatuses(
       draft,
       sourceStatuses,
     );
+  const stagingOperation: IngestBuildOperation =
+    preview?.operation ??
+    targetStatus?.operation ??
+    "create";
+
+  useEffect(() => {
+    const releaseId = draft.releaseId.trim();
+
+    if (!/^[a-z0-9][a-z0-9_-]*$/.test(releaseId)) {
+      setTargetStatus(null);
+      setTargetStatusLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setTargetStatusLoading(true);
+
+      void fetch(
+        `/api/ingest/staging-target?release=${encodeURIComponent(releaseId)}`,
+        { signal: controller.signal },
+      )
+        .then(async (response) => {
+          const body = (await response.json()) as unknown;
+
+          if (!response.ok) {
+            throw new Error(
+              messageFromResponse(
+                body,
+                `Staging target lookup failed: HTTP ${response.status}`,
+              ),
+            );
+          }
+
+          setTargetStatus(
+            body as IngestStagingTargetStatus,
+          );
+        })
+        .catch((lookupError: unknown) => {
+          if (
+            lookupError instanceof DOMException &&
+            lookupError.name === "AbortError"
+          ) {
+            return;
+          }
+
+          setTargetStatus(null);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setTargetStatusLoading(false);
+          }
+        });
+    }, 200);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [draft.releaseId]);
 
   const invalidateBuildPlan = () => {
     setPreview(null);
@@ -748,6 +816,61 @@ export function IngestReleaseBuilder({
             : track,
       ),
     }));
+  };
+
+  const moveTrack = (
+    sourceRelativePath: string,
+    direction: "up" | "down",
+  ) => {
+    updateDraft((current) => {
+      const ordered = current.tracks
+        .filter((track) => track.include)
+        .slice()
+        .sort(
+          (left, right) =>
+            left.trackNumber - right.trackNumber ||
+            left.sourceRelativePath.localeCompare(
+              right.sourceRelativePath,
+            ),
+        );
+      const currentIndex = ordered.findIndex(
+        (track) =>
+          track.sourceRelativePath === sourceRelativePath,
+      );
+      const targetIndex =
+        direction === "up"
+          ? currentIndex - 1
+          : currentIndex + 1;
+
+      if (
+        currentIndex < 0 ||
+        targetIndex < 0 ||
+        targetIndex >= ordered.length
+      ) {
+        return current;
+      }
+
+      [ordered[currentIndex], ordered[targetIndex]] = [
+        ordered[targetIndex],
+        ordered[currentIndex],
+      ];
+      const numberByPath = new Map(
+        ordered.map((track, index) => [
+          track.sourceRelativePath,
+          index + 1,
+        ]),
+      );
+
+      return {
+        ...current,
+        tracks: current.tracks.map((track) => ({
+          ...track,
+          trackNumber:
+            numberByPath.get(track.sourceRelativePath) ??
+            track.trackNumber,
+        })),
+      };
+    });
   };
 
   const updateAsset = (
@@ -918,7 +1041,10 @@ export function IngestReleaseBuilder({
             draft,
             sourceStatuses,
             confirmation:
-              INGEST_BUILD_CONFIRMATION_PHRASE,
+              preview.operation === "update"
+                ? INGEST_UPDATE_CONFIRMATION_PHRASE
+                : INGEST_BUILD_CONFIRMATION_PHRASE,
+  INGEST_UPDATE_CONFIRMATION_PHRASE,
           }),
         },
       );
@@ -929,7 +1055,7 @@ export function IngestReleaseBuilder({
         throw new Error(
           messageFromResponse(
             responseBody,
-            `Staging release creation failed: HTTP ${response.status}`,
+            `Staging release ${preview.operation === "update" ? "update" : "creation"} failed: HTTP ${response.status}`,
           ),
         );
       }
@@ -957,7 +1083,7 @@ export function IngestReleaseBuilder({
         <header className="ingest-builder-header">
           <div>
             <p className="eyebrow">
-              Staging release created
+              Staging release {result.operation === "update" ? "updated" : "created"}
             </p>
             <h2>{draft.releaseTitle}</h2>
             <code>
@@ -971,14 +1097,14 @@ export function IngestReleaseBuilder({
 
         <div className="message success">
           <strong>
-            {result.createdFiles.length} files
-            created and verified.
+            {result.operation === "update"
+              ? `${result.createdFiles.length} files added, ${result.updatedFiles.length} files updated, and ${result.preservedFiles.length} existing files preserved.`
+              : `${result.createdFiles.length} files created and verified.`}
           </strong>
           <p>
-            Source files remain in the ingest
-            drop. Copied media hashes were
-            checked before the staging release
-            was published.
+            Source files remain in the ingest drop.
+            Copied media hashes were checked before
+            the staging release was promoted.
           </p>
         </div>
 
@@ -1068,7 +1194,7 @@ export function IngestReleaseBuilder({
               )
             }
           >
-            Open created release
+            Open {result.operation === "update" ? "updated" : "created"} release
           </button>
         </div>
       </section>
@@ -1090,7 +1216,7 @@ export function IngestReleaseBuilder({
           </button>
           <div>
             <p className="eyebrow">
-              Staging release builder
+              Staging release {stagingOperation === "update" ? "updater" : "builder"}
             </p>
             <h2>
               {inspection.candidate.displayTitle}
@@ -1146,15 +1272,31 @@ export function IngestReleaseBuilder({
 
       <div className="ingest-safety-banner">
         <strong>
-          Copy-only staging workflow
+          {stagingOperation === "update"
+            ? "Copy-and-merge staging update"
+            : "Copy-only staging workflow"}
         </strong>
         <span>
-          The builder writes only to the
-          configured staging media root. It
-          never moves, renames, tags, or deletes
-          the ingest source.
+          {stagingOperation === "update"
+            ? "The updater preserves existing authored files, adds selected new masters, and changes only validated numbering documents. It never modifies ingest sources."
+            : "The builder writes only to the configured staging media root. It never moves, renames, tags, or deletes the ingest source."}
         </span>
       </div>
+
+      {(targetStatusLoading || targetStatus?.exists) && (
+        <div className="ingest-staging-target-banner">
+          <strong>
+            {targetStatusLoading
+              ? "Checking staging target…"
+              : "Existing staging release detected"}
+          </strong>
+          <span>
+            {targetStatusLoading
+              ? `Looking for releases/${draft.releaseId}`
+              : `Updates will be previewed as a delta against ${targetStatus?.releaseRelativePath}.`}
+          </span>
+        </div>
+      )}
 
       <nav
         className="ingest-builder-mode-tabs"
@@ -1215,9 +1357,11 @@ export function IngestReleaseBuilder({
           previewLoading={previewLoading}
           buildLoading={buildLoading}
           confirmed={confirmed}
+          operation={stagingOperation}
           onStepChange={setGuidedStep}
           onReleaseChange={updateRelease}
           onTrackChange={updateTrack}
+          onMoveTrack={moveTrack}
           onAssetChange={updateAsset}
           sourceStatuses={sourceStatuses}
           attachmentFiles={attachmentOptions.files}
@@ -1251,8 +1395,10 @@ export function IngestReleaseBuilder({
           previewLoading={previewLoading}
           buildLoading={buildLoading}
           confirmed={confirmed}
+          operation={stagingOperation}
           onReleaseChange={updateRelease}
           onTrackChange={updateTrack}
+          onMoveTrack={moveTrack}
           onAssetChange={updateAsset}
           sourceStatuses={sourceStatuses}
           attachmentFiles={attachmentOptions.files}
@@ -1291,9 +1437,11 @@ function GuidedIngestBuilder({
   previewLoading,
   buildLoading,
   confirmed,
+  operation,
   onStepChange,
   onReleaseChange,
   onTrackChange,
+  onMoveTrack,
   onAssetChange,
   sourceStatuses,
   attachmentFiles,
@@ -1316,6 +1464,7 @@ function GuidedIngestBuilder({
   previewLoading: boolean;
   buildLoading: boolean;
   confirmed: boolean;
+  operation: IngestBuildOperation;
   onStepChange: (step: GuidedStep) => void;
   onReleaseChange: (
     key: keyof Pick<
@@ -1331,6 +1480,10 @@ function GuidedIngestBuilder({
   onTrackChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildTrackDraft>,
+  ) => void;
+  onMoveTrack: (
+    sourceRelativePath: string,
+    direction: "up" | "down",
   ) => void;
   onAssetChange: (
     sourceRelativePath: string,
@@ -1448,6 +1601,7 @@ function GuidedIngestBuilder({
             tracks={draft.tracks}
             sourceStatuses={sourceStatuses}
             onChange={onTrackChange}
+            onMove={onMoveTrack}
             onSourceReviewed={onSourceReviewed}
             focusedSourcePath={focusedSourcePath}
           />
@@ -1490,7 +1644,7 @@ function GuidedIngestBuilder({
               Step 4 of 4
             </p>
             <h3>
-              Review destination and create
+              Review destination and {operation === "update" ? "update" : "create"}
             </h3>
             <p>
               Generate a fresh server-validated
@@ -1499,6 +1653,7 @@ function GuidedIngestBuilder({
           </header>
           <BuildReview
             draft={draft}
+            operation={operation}
             preview={preview}
             sourceStatuses={sourceStatuses}
             blockingSources={blockingSources}
@@ -1560,8 +1715,10 @@ function QuickIngestBuilder({
   previewLoading,
   buildLoading,
   confirmed,
+  operation,
   onReleaseChange,
   onTrackChange,
+  onMoveTrack,
   onAssetChange,
   sourceStatuses,
   attachmentFiles,
@@ -1579,6 +1736,7 @@ function QuickIngestBuilder({
   onCreate,
 }: {
   draft: IngestBuildDraft;
+  operation: IngestBuildOperation;
   preview: IngestBuildPreview | null;
   previewLoading: boolean;
   buildLoading: boolean;
@@ -1597,6 +1755,10 @@ function QuickIngestBuilder({
   onTrackChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildTrackDraft>,
+  ) => void;
+  onMoveTrack: (
+    sourceRelativePath: string,
+    direction: "up" | "down",
   ) => void;
   onAssetChange: (
     sourceRelativePath: string,
@@ -1655,6 +1817,7 @@ function QuickIngestBuilder({
           tracks={draft.tracks}
           sourceStatuses={sourceStatuses}
           onChange={onTrackChange}
+          onMove={onMoveTrack}
           onSourceReviewed={onSourceReviewed}
           focusedSourcePath={focusedSourcePath}
         />
@@ -1684,6 +1847,7 @@ function QuickIngestBuilder({
         </header>
         <BuildReview
           draft={draft}
+          operation={operation}
           preview={preview}
           sourceStatuses={sourceStatuses}
           blockingSources={blockingSources}
@@ -1901,6 +2065,7 @@ function TrackDraftTable({
   tracks,
   sourceStatuses,
   onChange,
+  onMove,
   onSourceReviewed,
   focusedSourcePath,
 }: {
@@ -1909,6 +2074,10 @@ function TrackDraftTable({
   onChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildTrackDraft>,
+  ) => void;
+  onMove: (
+    sourceRelativePath: string,
+    direction: "up" | "down",
   ) => void;
   onSourceReviewed: (
     sourceRelativePath: string,
@@ -1925,6 +2094,32 @@ function TrackDraftTable({
     );
   }
 
+  const orderedIncludedPaths = tracks
+    .filter((track) => track.include)
+    .slice()
+    .sort(
+      (left, right) =>
+        left.trackNumber - right.trackNumber ||
+        left.sourceRelativePath.localeCompare(
+          right.sourceRelativePath,
+        ),
+    )
+    .map((track) => track.sourceRelativePath);
+  const displayTracks = tracks
+    .slice()
+    .sort((left, right) => {
+      if (left.include !== right.include) {
+        return left.include ? -1 : 1;
+      }
+
+      return (
+        left.trackNumber - right.trackNumber ||
+        left.sourceRelativePath.localeCompare(
+          right.sourceRelativePath,
+        )
+      );
+    });
+
   return (
     <div className="ingest-table-scroll">
       <table className="ingest-table ingest-builder-track-table">
@@ -1934,6 +2129,7 @@ function TrackDraftTable({
             <th scope="col">Source</th>
             <th scope="col">Source state</th>
             <th scope="col">#</th>
+            <th scope="col">Order</th>
             <th scope="col">Track title</th>
             <th scope="col">Version / take</th>
             <th scope="col">Artist</th>
@@ -1944,13 +2140,17 @@ function TrackDraftTable({
           </tr>
         </thead>
         <tbody>
-          {tracks.map((track) => {
+          {displayTracks.map((track) => {
             const status = sourceStatusForPath(
               sourceStatuses,
               track.sourceRelativePath,
             );
             const sourceMissing =
               status?.state === "missing";
+            const orderIndex =
+              orderedIncludedPaths.indexOf(
+                track.sourceRelativePath,
+              );
 
             return (
               <tr
@@ -2028,6 +2228,48 @@ function TrackDraftTable({
                       )
                     }
                   />
+                </td>
+                <td>
+                  <div className="ingest-track-order-controls">
+                    <button
+                      type="button"
+                      aria-label={`Move ${track.sourceRelativePath} earlier`}
+                      title="Move track earlier"
+                      disabled={
+                        !track.include ||
+                        sourceMissing ||
+                        orderIndex <= 0
+                      }
+                      onClick={() =>
+                        onMove(
+                          track.sourceRelativePath,
+                          "up",
+                        )
+                      }
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Move ${track.sourceRelativePath} later`}
+                      title="Move track later"
+                      disabled={
+                        !track.include ||
+                        sourceMissing ||
+                        orderIndex < 0 ||
+                        orderIndex >=
+                          orderedIncludedPaths.length - 1
+                      }
+                      onClick={() =>
+                        onMove(
+                          track.sourceRelativePath,
+                          "down",
+                        )
+                      }
+                    >
+                      ↓
+                    </button>
+                  </div>
                 </td>
                 <td>
                   <input
@@ -2454,6 +2696,7 @@ function AssetDraftTable({
 
 function BuildReview({
   draft,
+  operation,
   preview,
   sourceStatuses,
   blockingSources,
@@ -2469,6 +2712,7 @@ function BuildReview({
   onCreate,
 }: {
   draft: IngestBuildDraft;
+  operation: IngestBuildOperation;
   preview: IngestBuildPreview | null;
   sourceStatuses: IngestDraftSourceStatus[];
   blockingSources: IngestDraftSourceStatus[];
@@ -2751,54 +2995,60 @@ function BuildReview({
         {previewLoading
           ? "Validating plan…"
           : preview
-            ? "Refresh build plan"
-            : "Preview build plan"}
+            ? operation === "update"
+              ? "Refresh update plan"
+              : "Refresh build plan"
+            : operation === "update"
+              ? "Preview update plan"
+              : "Preview build plan"}
       </button>
 
       {preview && (
         <>
           <dl className="ingest-build-summary">
             <div>
-              <dt>Destination</dt>
-              <dd>
-                <code>
-                  {preview.releaseRelativePath}
-                </code>
-              </dd>
+              <dt>Operation</dt>
+              <dd>{preview.operation === "update" ? "Update" : "Create"}</dd>
             </div>
             <div>
               <dt>Tracks</dt>
               <dd>{preview.summary.trackCount}</dd>
             </div>
             <div>
-              <dt>Files copied</dt>
-              <dd>
-                {preview.summary.copiedFileCount}
-              </dd>
+              <dt>Tracks added</dt>
+              <dd>{preview.summary.addedTrackCount}</dd>
             </div>
             <div>
-              <dt>Artwork sources</dt>
-              <dd>{preview.summary.artworkSourceCount}</dd>
+              <dt>Tracks reordered</dt>
+              <dd>{preview.summary.reorderedTrackCount}</dd>
             </div>
             <div>
-              <dt>Artwork assignments</dt>
-              <dd>{preview.summary.artworkAssignmentCount}</dd>
+              <dt>Files added</dt>
+              <dd>{preview.summary.copiedFileCount}</dd>
             </div>
             <div>
-              <dt>Copy size</dt>
-              <dd>
-                {formatByteSize(
-                  preview.summary.totalCopyBytes,
-                )}
-              </dd>
+              <dt>Files updated</dt>
+              <dd>{preview.summary.updatedFileCount}</dd>
             </div>
             <div>
-              <dt>TOMLs</dt>
-              <dd>{preview.summary.tomlCount}</dd>
+              <dt>Files preserved</dt>
+              <dd>{preview.summary.preservedFileCount}</dd>
+            </div>
+            <div>
+              <dt>Files removed</dt>
+              <dd>{preview.summary.removedFileCount}</dd>
             </div>
             <div>
               <dt>Blocked</dt>
               <dd>{preview.summary.blockedCount}</dd>
+            </div>
+            <div>
+              <dt>Copy size</dt>
+              <dd>{formatByteSize(preview.summary.totalCopyBytes)}</dd>
+            </div>
+            <div className="ingest-build-summary-destination">
+              <dt>Destination</dt>
+              <dd><code>{preview.releaseRelativePath}</code></dd>
             </div>
           </dl>
 
@@ -2809,6 +3059,8 @@ function BuildReview({
                   <th scope="col">Action</th>
                   <th scope="col">Source</th>
                   <th scope="col">Destination</th>
+                  <th scope="col">Adjustment / reason</th>
+                  <th scope="col">Kind</th>
                   <th scope="col">Roles</th>
                   <th
                     scope="col"
@@ -2825,7 +3077,13 @@ function BuildReview({
                     <tr
                       key={`${item.destinationRelativePath}:${index}`}
                     >
-                      <td>{item.kind}</td>
+                      <td>
+                        <span
+                          className={`badge ingest-plan-action ${item.action}`}
+                        >
+                          {item.action}
+                        </span>
+                      </td>
                       <td>
                         {item.sourceRelativePath ? (
                           <code>
@@ -2843,6 +3101,10 @@ function BuildReview({
                           {item.destinationRelativePath}
                         </code>
                       </th>
+                      <td title={item.reason}>
+                        {item.adjustment ?? item.reason}
+                      </td>
+                      <td>{item.kind}</td>
                       <td>
                         {item.logicalRoles?.join(
                           ", ",
@@ -2860,7 +3122,7 @@ function BuildReview({
                           className={`badge ${item.action === "blocked" ? "error" : ""}`}
                           title={item.reason}
                         >
-                          {item.action}
+                          {item.action === "blocked" ? "Blocked" : "Ready"}
                         </span>
                       </td>
                     </tr>
@@ -2893,9 +3155,9 @@ function BuildReview({
               }
             />
             <span>
-              I reviewed the destination plan.
-              Create a new staging release and
-              leave all ingest sources unchanged.
+              {preview.operation === "update"
+                ? "I reviewed the update plan. Apply this staging update, preserve existing authored files, and leave all ingest sources unchanged."
+                : "I reviewed the destination plan. Create a new staging release and leave all ingest sources unchanged."}
             </span>
           </label>
 
@@ -2912,8 +3174,12 @@ function BuildReview({
             onClick={onCreate}
           >
             {buildLoading
-              ? "Copying and verifying…"
-              : "Create staging release"}
+              ? preview.operation === "update"
+                ? "Updating and verifying…"
+                : "Copying and verifying…"
+              : preview.operation === "update"
+                ? "Apply staging update"
+                : "Create staging release"}
           </button>
         </>
       )}

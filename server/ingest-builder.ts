@@ -5,9 +5,12 @@ import {
 import {
   access,
   copyFile,
+  cp,
   lstat,
   mkdir,
   open,
+  readFile,
+  readdir,
   realpath,
   rename,
   rm,
@@ -34,6 +37,7 @@ import {
 } from "../shared/artist-sort-name.js";
 import {
   INGEST_BUILD_CONFIRMATION_PHRASE,
+  INGEST_UPDATE_CONFIRMATION_PHRASE,
   slugifyIngestValue,
   defaultReleaseArtworkAssignment,
   type IngestArtworkAssignmentDraft,
@@ -43,6 +47,8 @@ import {
   type IngestBuildPlanItem,
   type IngestBuildPreview,
   type IngestBuildResult,
+  type IngestBuildOperation,
+  type IngestStagingTargetStatus,
   type IngestBuildTrackDraft,
 } from "../shared/ingest-builder.js";
 import type {
@@ -99,13 +105,45 @@ type PreparedCopy = {
   sha256: string;
 };
 
+type PreparedDocument = GeneratedMetadataDocument & {
+  writeAction: "create" | "replace";
+};
+
 type PreparedIngestBuild = {
   preview: IngestBuildPreview;
+  operation: IngestBuildOperation;
   releasePath: string;
   releaseRelativePath: string;
-  documents: GeneratedMetadataDocument[];
+  documents: PreparedDocument[];
   copies: PreparedCopy[];
+  preservedFiles: string[];
   receiptContent: string;
+};
+
+type ExistingReceiptTrack = {
+  id: string;
+  number: number;
+  title: string;
+  version: string;
+  artist: string;
+  sourceDate: string;
+  sourceRelativePath: string;
+  destinationRelativePath: string;
+};
+
+type ExistingReceiptCopy = {
+  sourceRelativePath: string;
+  destinationRelativePath: string;
+  mediaKind: IngestMediaKind;
+  logicalRoles: string[];
+  bytes: number;
+  sourceSha256: string;
+};
+
+type ExistingIngestReceipt = {
+  raw: Record<string, unknown>;
+  tracks: ExistingReceiptTrack[];
+  copies: ExistingReceiptCopy[];
 };
 
 function isRecord(
@@ -530,6 +568,7 @@ type PreparedIngestTrack = {
   id: string;
   relativePath: string;
   audioDestination: string;
+  existingTrack?: ExistingReceiptTrack;
 };
 
 type PreparedArtworkAsset = {
@@ -757,6 +796,23 @@ function setNestedRecordValue(
   }
 
   current[key] = value;
+}
+
+function readNestedRecordValue(
+  root: Record<string, unknown>,
+  segments: string[],
+): unknown {
+  let current: unknown = root;
+
+  for (const segment of segments) {
+    if (!isRecord(current)) {
+      return undefined;
+    }
+
+    current = current[segment];
+  }
+
+  return current;
 }
 
 function artworkRecord(
@@ -995,6 +1051,301 @@ async function pathExists(
   }
 }
 
+export async function inspectIngestStagingTarget(
+  outputRoot: string,
+  releaseIdInput: string,
+): Promise<IngestStagingTargetStatus> {
+  const releaseId = requireReleaseId(
+    releaseIdInput,
+  );
+  const canonicalOutputRoot =
+    await realpath(outputRoot);
+  const releaseRelativePath =
+    `releases/${releaseId}`;
+  const releasePath = assertPathWithinRoot(
+    canonicalOutputRoot,
+    path.join(
+      canonicalOutputRoot,
+      "releases",
+      releaseId,
+    ),
+  );
+  const exists = await pathExists(releasePath);
+
+  if (exists) {
+    const stats = await lstat(releasePath);
+
+    if (
+      stats.isSymbolicLink() ||
+      !stats.isDirectory()
+    ) {
+      throw new Error(
+        `Staging target is not a regular release directory: ${releaseRelativePath}`,
+      );
+    }
+  }
+
+  return {
+    releaseId,
+    exists,
+    operation: exists ? "update" : "create",
+    releaseRelativePath,
+  };
+}
+
+function receiptText(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+): string {
+  const value = record[key];
+
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`${label} is missing from ingest-receipt.json.`);
+  }
+
+  return value.trim();
+}
+
+function receiptNumber(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+): number {
+  const value = record[key];
+
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 1
+  ) {
+    throw new Error(`${label} is invalid in ingest-receipt.json.`);
+  }
+
+  return value;
+}
+
+function parseExistingReceiptTrack(
+  value: unknown,
+  index: number,
+): ExistingReceiptTrack {
+  if (!isRecord(value)) {
+    throw new Error(
+      `Track ${index + 1} is malformed in ingest-receipt.json.`,
+    );
+  }
+
+  return {
+    id: receiptText(value, "id", `Track ${index + 1} ID`),
+    number: receiptNumber(
+      value,
+      "number",
+      `Track ${index + 1} number`,
+    ),
+    title:
+      typeof value.title === "string"
+        ? value.title
+        : "",
+    version:
+      typeof value.version === "string"
+        ? value.version
+        : "",
+    artist:
+      typeof value.artist === "string"
+        ? value.artist
+        : "",
+    sourceDate:
+      typeof value.sourceDate === "string"
+        ? value.sourceDate
+        : "",
+    sourceRelativePath: receiptText(
+      value,
+      "sourceRelativePath",
+      `Track ${index + 1} source path`,
+    ),
+    destinationRelativePath: receiptText(
+      value,
+      "destinationRelativePath",
+      `Track ${index + 1} destination path`,
+    ),
+  };
+}
+
+function parseExistingReceiptCopy(
+  value: unknown,
+  index: number,
+): ExistingReceiptCopy {
+  if (!isRecord(value)) {
+    throw new Error(
+      `Copy ${index + 1} is malformed in ingest-receipt.json.`,
+    );
+  }
+
+  const mediaKind = value.mediaKind;
+
+  if (
+    mediaKind !== "audio" &&
+    mediaKind !== "image" &&
+    mediaKind !== "text" &&
+    mediaKind !== "unknown"
+  ) {
+    throw new Error(
+      `Copy ${index + 1} media kind is invalid in ingest-receipt.json.`,
+    );
+  }
+
+  return {
+    sourceRelativePath: receiptText(
+      value,
+      "sourceRelativePath",
+      `Copy ${index + 1} source path`,
+    ),
+    destinationRelativePath: receiptText(
+      value,
+      "destinationRelativePath",
+      `Copy ${index + 1} destination path`,
+    ),
+    mediaKind,
+    logicalRoles: Array.isArray(value.logicalRoles)
+      ? value.logicalRoles.filter(
+          (role): role is string =>
+            typeof role === "string",
+        )
+      : [],
+    bytes:
+      typeof value.bytes === "number" &&
+      Number.isSafeInteger(value.bytes) &&
+      value.bytes >= 0
+        ? value.bytes
+        : 0,
+    sourceSha256: receiptText(
+      value,
+      "sourceSha256",
+      `Copy ${index + 1} source SHA-256`,
+    ),
+  };
+}
+
+async function readExistingIngestReceipt(
+  releasePath: string,
+  releaseId: string,
+): Promise<ExistingIngestReceipt> {
+  const receiptPath = assertPathWithinRoot(
+    releasePath,
+    path.join(releasePath, "ingest-receipt.json"),
+  );
+  let stats;
+
+  try {
+    stats = await lstat(receiptPath);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      throw new Error(
+        "This release directory predates incremental staging updates because ingest-receipt.json is missing. Recreate it through the ingest builder or migrate it before updating.",
+      );
+    }
+
+    throw error;
+  }
+
+  if (
+    stats.isSymbolicLink() ||
+    !stats.isFile()
+  ) {
+    throw new Error(
+      "Existing staging releases require a regular ingest-receipt.json file before they can be updated.",
+    );
+  }
+
+  const rawValue = JSON.parse(
+    await readFile(receiptPath, "utf8"),
+  ) as unknown;
+
+  if (!isRecord(rawValue)) {
+    throw new Error(
+      "Existing ingest-receipt.json must contain an object.",
+    );
+  }
+
+  const release = rawValue.release;
+
+  if (
+    !isRecord(release) ||
+    receiptText(release, "id", "Receipt release ID") !== releaseId
+  ) {
+    throw new Error(
+      "Existing ingest receipt does not match the requested staging release.",
+    );
+  }
+
+  if (
+    !Array.isArray(rawValue.tracks) ||
+    !Array.isArray(rawValue.copies)
+  ) {
+    throw new Error(
+      "Existing ingest receipt is missing track or copy records.",
+    );
+  }
+
+  return {
+    raw: rawValue,
+    tracks: rawValue.tracks.map(
+      parseExistingReceiptTrack,
+    ),
+    copies: rawValue.copies.map(
+      parseExistingReceiptCopy,
+    ),
+  };
+}
+
+async function assertSafeReleaseTree(
+  root: string,
+  directory = root,
+): Promise<void> {
+  const stats = await lstat(directory);
+
+  if (
+    stats.isSymbolicLink() ||
+    !stats.isDirectory()
+  ) {
+    throw new Error(
+      `Unsafe staging release path: ${path.relative(root, directory) || "."}`,
+    );
+  }
+
+  const entries = await readdir(directory, {
+    withFileTypes: true,
+  });
+
+  for (const entry of entries) {
+    const target = assertPathWithinRoot(
+      root,
+      path.join(directory, entry.name),
+    );
+
+    if (entry.isSymbolicLink()) {
+      throw new Error(
+        `Staging release updates refuse symbolic links: ${path.relative(root, target)}`,
+      );
+    }
+
+    if (entry.isDirectory()) {
+      await assertSafeReleaseTree(root, target);
+      continue;
+    }
+
+    if (!entry.isFile()) {
+      throw new Error(
+        `Staging release updates require regular files: ${path.relative(root, target)}`,
+      );
+    }
+  }
+}
+
 function inspectionFileMap(
   inspection: IngestCandidateInspection,
 ): Map<string, IngestFileInspection> {
@@ -1172,6 +1523,194 @@ function createReceiptContent(
   )}\n`;
 }
 
+function uniqueTrackIdFor(
+  track: IngestBuildTrackDraft,
+  usedIds: Set<string>,
+): string {
+  const base = trackIdFor(track);
+
+  if (!usedIds.has(base)) {
+    usedIds.add(base);
+    return base;
+  }
+
+  let suffix = 2;
+  let candidate = `${base}-${suffix}`;
+
+  while (usedIds.has(candidate)) {
+    suffix += 1;
+    candidate = `${base}-${suffix}`;
+  }
+
+  usedIds.add(candidate);
+  return candidate;
+}
+
+function withinReleasePath(
+  releaseRelativePath: string,
+  relativePath: string,
+): string {
+  const prefix = `${releaseRelativePath}/`;
+
+  if (!relativePath.startsWith(prefix)) {
+    throw new Error(
+      `Path is outside the staging release: ${relativePath}`,
+    );
+  }
+
+  return normalizeRelativeDestination(
+    relativePath.slice(prefix.length),
+    "Staging release path",
+  );
+}
+
+async function readTomlRecordForUpdate(
+  releasePath: string,
+  releaseRelativePath: string,
+  relativePath: string,
+): Promise<{
+  content: string;
+  data: Record<string, unknown>;
+}> {
+  const withinRelease = withinReleasePath(
+    releaseRelativePath,
+    relativePath,
+  );
+  const target = assertPathWithinRoot(
+    releasePath,
+    path.join(
+      releasePath,
+      ...withinRelease.split("/"),
+    ),
+  );
+  const stats = await lstat(target);
+
+  if (
+    stats.isSymbolicLink() ||
+    !stats.isFile()
+  ) {
+    throw new Error(
+      `Staging update requires a regular metadata file: ${relativePath}`,
+    );
+  }
+
+  const content = await readFile(target, "utf8");
+  const parsed = parse(content);
+
+  if (!isRecord(parsed)) {
+    throw new Error(
+      `Expected a TOML document object: ${relativePath}`,
+    );
+  }
+
+  return {
+    content,
+    data: parsed,
+  };
+}
+
+function stringifyValidatedToml(
+  data: Record<string, unknown>,
+): string {
+  const content = `${stringify(data).trimEnd()}\n`;
+  parse(content);
+  return content;
+}
+
+function buildUpdatedReceiptContent(
+  existingReceipt: ExistingIngestReceipt,
+  inspection: IngestCandidateInspection,
+  draft: IngestBuildDraft,
+  releaseRelativePath: string,
+  tracks: PreparedIngestTrack[],
+  newCopies: PreparedCopy[],
+): string {
+  const previousUpdates = Array.isArray(
+    existingReceipt.raw.updates,
+  )
+    ? existingReceipt.raw.updates
+    : [];
+  const copies = [
+    ...existingReceipt.copies.map((copy) => ({
+      sourceRelativePath:
+        copy.sourceRelativePath,
+      destinationRelativePath:
+        copy.destinationRelativePath,
+      mediaKind: copy.mediaKind,
+      logicalRoles: copy.logicalRoles,
+      bytes: copy.bytes,
+      sourceSha256: copy.sourceSha256,
+    })),
+    ...newCopies.map((copy) => ({
+      sourceRelativePath:
+        copy.sourceRelativePath,
+      destinationRelativePath:
+        copy.destinationRelativePath,
+      mediaKind: copy.mediaKind,
+      logicalRoles: copy.logicalRoles,
+      bytes: copy.bytes,
+      sourceSha256: copy.sha256,
+    })),
+  ];
+
+  return `${JSON.stringify(
+    {
+      ...existingReceipt.raw,
+      schema: {
+        name: "metadata-editor-ingest-receipt",
+        version: 2,
+      },
+      candidate: {
+        id: inspection.candidate.id,
+        relativePath:
+          inspection.candidate.relativePath,
+        kind: inspection.candidate.kind,
+      },
+      release: {
+        id: draft.releaseId,
+        relativePath: releaseRelativePath,
+        title: draft.releaseTitle,
+        artist: draft.releaseArtist,
+        date: draft.releaseDate,
+        type: draft.releaseType,
+      },
+      tracks: tracks.map((track) => ({
+        id: track.id,
+        number: track.draft.trackNumber,
+        title: track.draft.title,
+        version: track.draft.version,
+        artist: track.draft.artist,
+        sourceDate: track.draft.date,
+        sourceRelativePath:
+          track.draft.sourceRelativePath,
+        destinationRelativePath:
+          `${track.relativePath}/${track.audioDestination}`,
+      })),
+      copies,
+      updates: [
+        ...previousUpdates,
+        {
+          plannedAt: new Date().toISOString(),
+          candidateId: draft.candidateId,
+          addedTrackIds: tracks
+            .filter((track) => !track.existingTrack)
+            .map((track) => track.id),
+          trackOrder: tracks.map((track) => ({
+            id: track.id,
+            number: track.draft.trackNumber,
+          })),
+        },
+      ],
+      createdBy: {
+        application: "metadata-editor",
+        workflow: "ingest-builder-v2-update",
+      },
+    },
+    null,
+    2,
+  )}\n`;
+}
+
 export async function prepareIngestReleaseBuild(
   ingestRoot: string,
   outputRoot: string,
@@ -1216,6 +1755,19 @@ export async function prepareIngestReleaseBuild(
   const finalExists = await pathExists(
     releasePath,
   );
+  const operation: IngestBuildOperation =
+    finalExists ? "update" : "create";
+  const existingReceipt = finalExists
+    ? await readExistingIngestReceipt(
+        releasePath,
+        releaseId,
+      )
+    : null;
+
+  if (finalExists) {
+    await assertSafeReleaseTree(releasePath);
+  }
+
   const fileMap =
     inspectionFileMap(inspection);
   const includedTracks = draft.tracks
@@ -1233,6 +1785,47 @@ export async function prepareIngestReleaseBuild(
   }
 
   validateUniqueTrackInputs(includedTracks);
+
+  if (existingReceipt) {
+    const includedSourcePaths = new Set(
+      includedTracks.map(
+        (track) => track.sourceRelativePath,
+      ),
+    );
+    const omittedExistingTracks =
+      existingReceipt.tracks.filter(
+        (track) =>
+          !includedSourcePaths.has(
+            track.sourceRelativePath,
+          ),
+      );
+
+    if (omittedExistingTracks.length > 0) {
+      throw new Error(
+        [
+          "Incremental staging updates do not remove existing tracks.",
+          "Include every currently staged track, then add or reorder tracks as needed.",
+          `Missing from this draft: ${omittedExistingTracks
+            .map((track) => track.sourceRelativePath)
+            .join(", ")}`,
+        ].join(" "),
+      );
+    }
+  }
+
+  const existingTrackBySource = new Map(
+    (existingReceipt?.tracks ?? []).map(
+      (track) => [
+        track.sourceRelativePath,
+        track,
+      ],
+    ),
+  );
+  const usedTrackIds = new Set(
+    existingReceipt?.tracks.map(
+      (track) => track.id,
+    ) ?? [],
+  );
 
   const tracks = includedTracks.map(
     (track) => {
@@ -1264,16 +1857,50 @@ export async function prepareIngestReleaseBuild(
         );
       }
 
-      const id = trackIdFor(track);
+      const existingTrack =
+        existingTrackBySource.get(
+          track.sourceRelativePath,
+        );
+      const id = existingTrack
+        ? existingTrack.id
+        : uniqueTrackIdFor(
+            track,
+            usedTrackIds,
+          );
+      const relativePath = existingTrack
+        ? path.posix.dirname(
+            existingTrack.destinationRelativePath,
+          )
+        : `${releaseRelativePath}/tracks/${id}`;
+      const audioDestination = existingTrack
+        ? path.posix.basename(
+            existingTrack.destinationRelativePath,
+          )
+        : expectedDestination;
+
+      if (
+        existingTrack &&
+        (
+          relativePath !==
+            `${releaseRelativePath}/tracks/${id}` ||
+          audioDestination !==
+            expectedDestination
+        )
+      ) {
+        throw new Error(
+          `Existing receipt has an unsupported track destination for ${track.sourceRelativePath}.`,
+        );
+      }
 
       return {
         draft: track,
         file,
         id,
-        relativePath:
-          `${releaseRelativePath}/tracks/${id}`,
-        audioDestination:
-          expectedDestination,
+        relativePath,
+        audioDestination,
+        ...(existingTrack
+          ? { existingTrack }
+          : {}),
       };
     },
   );
@@ -1392,6 +2019,38 @@ export async function prepareIngestReleaseBuild(
       };
     },
   );
+
+  const existingCopyBySource = new Map(
+    (existingReceipt?.copies ?? []).map(
+      (copy) => [
+        copy.sourceRelativePath,
+        copy,
+      ],
+    ),
+  );
+
+  if (existingReceipt) {
+    const newlyIncludedAssets =
+      normalizedAssets.filter(
+        (asset) =>
+          !existingCopyBySource.has(
+            asset.draft.sourceRelativePath,
+          ),
+      );
+
+    if (newlyIncludedAssets.length > 0) {
+      throw new Error(
+        [
+          "This staging-update milestone adds audio tracks and preserves existing sidecars.",
+          "Add new artwork or text sidecars in a separate future asset-update workflow.",
+          `New sidecars: ${newlyIncludedAssets
+            .map((asset) => asset.draft.sourceRelativePath)
+            .join(", ")}`,
+        ].join(" "),
+      );
+    }
+  }
+
   const artworkAssets: PreparedArtworkAsset[] =
     normalizedAssets
       .filter((asset) => asset.file.mediaKind === "image")
@@ -1417,7 +2076,7 @@ export async function prepareIngestReleaseBuild(
         artworkAssets,
       ),
     );
-  const documents =
+  const generatedDocuments =
     customizeGeneratedDocuments(
       generated.documents,
       draft,
@@ -1426,39 +2085,402 @@ export async function prepareIngestReleaseBuild(
       releaseRelativePath,
     );
   const copies: PreparedCopy[] = [];
+  const preservedCopies: PreparedCopy[] = [];
+  const blockedItems: IngestBuildPlanItem[] = [];
 
   for (const track of tracks) {
-    copies.push(
-      await prepareCopy(
-        canonicalIngestRoot,
-        track.file,
-        `tracks/${track.id}/${track.audioDestination}`,
-        `${track.relativePath}/${track.audioDestination}`,
-        [
-          "audio-master",
-          "audio-player-source",
-        ],
+    const preparedCopy = await prepareCopy(
+      canonicalIngestRoot,
+      track.file,
+      `tracks/${track.id}/${track.audioDestination}`,
+      `${track.relativePath}/${track.audioDestination}`,
+      [
+        "audio-master",
+        "audio-player-source",
+      ],
+    );
+
+    if (!track.existingTrack) {
+      copies.push(preparedCopy);
+      continue;
+    }
+
+    const receiptCopy =
+      existingCopyBySource.get(
+        track.draft.sourceRelativePath,
+      );
+
+    if (
+      !receiptCopy ||
+      receiptCopy.destinationRelativePath !==
+        preparedCopy.destinationRelativePath
+    ) {
+      blockedItems.push({
+        kind: "copy",
+        sourceRelativePath:
+          preparedCopy.sourceRelativePath,
+        destinationRelativePath:
+          preparedCopy.destinationRelativePath,
+        mediaKind: preparedCopy.mediaKind,
+        sizeBytes: preparedCopy.bytes,
+        sha256: preparedCopy.sha256,
+        logicalRoles:
+          preparedCopy.logicalRoles,
+        action: "blocked",
+        reason:
+          "The existing ingest receipt does not contain the expected audio-master mapping.",
+      });
+      continue;
+    }
+
+    if (
+      receiptCopy.sourceSha256 !==
+        preparedCopy.sha256
+    ) {
+      blockedItems.push({
+        kind: "copy",
+        sourceRelativePath:
+          preparedCopy.sourceRelativePath,
+        destinationRelativePath:
+          preparedCopy.destinationRelativePath,
+        mediaKind: preparedCopy.mediaKind,
+        sizeBytes: preparedCopy.bytes,
+        sha256: preparedCopy.sha256,
+        logicalRoles:
+          preparedCopy.logicalRoles,
+        action: "blocked",
+        reason:
+          "The source bytes changed after the original staging build. Incremental updates do not silently replace an existing audio master.",
+      });
+      continue;
+    }
+
+    const stagedDestination = assertPathWithinRoot(
+      releasePath,
+      path.join(
+        releasePath,
+        ...withinReleasePath(
+          releaseRelativePath,
+          preparedCopy.destinationRelativePath,
+        ).split("/"),
       ),
     );
+
+    if (
+      !(await pathExists(stagedDestination)) ||
+      (await sha256File(stagedDestination)) !==
+        receiptCopy.sourceSha256
+    ) {
+      blockedItems.push({
+        kind: "copy",
+        sourceRelativePath:
+          preparedCopy.sourceRelativePath,
+        destinationRelativePath:
+          preparedCopy.destinationRelativePath,
+        mediaKind: preparedCopy.mediaKind,
+        sizeBytes: preparedCopy.bytes,
+        sha256: preparedCopy.sha256,
+        logicalRoles:
+          preparedCopy.logicalRoles,
+        action: "blocked",
+        reason:
+          "The staged audio master no longer matches its ingest receipt. Resolve the modified or missing destination before applying an incremental update.",
+      });
+      continue;
+    }
+
+    preservedCopies.push(preparedCopy);
   }
 
   for (const asset of normalizedAssets) {
-    copies.push(
-      await prepareCopy(
-        canonicalIngestRoot,
-        asset.file,
-        asset.destinationRelativePath,
-        `${releaseRelativePath}/${asset.destinationRelativePath}`,
-        asset.file.mediaKind === "image"
-          ? asset.draft.artworkAssignments.map(
-              (assignment) =>
-                assignment.scope === "release"
-                  ? `release-artwork:${assignment.role}`
-                  : `track-artwork:${assignment.role}:${assignment.trackSourceRelativePaths.length}-tracks`,
-            )
-          : ["imported-text-sidecar"],
-      ),
+    const preparedCopy = await prepareCopy(
+      canonicalIngestRoot,
+      asset.file,
+      asset.destinationRelativePath,
+      `${releaseRelativePath}/${asset.destinationRelativePath}`,
+      asset.file.mediaKind === "image"
+        ? asset.draft.artworkAssignments.map(
+            (assignment) =>
+              assignment.scope === "release"
+                ? `release-artwork:${assignment.role}`
+                : `track-artwork:${assignment.role}:${assignment.trackSourceRelativePaths.length}-tracks`,
+          )
+        : ["imported-text-sidecar"],
     );
+
+    if (!existingReceipt) {
+      copies.push(preparedCopy);
+      continue;
+    }
+
+    const receiptCopy =
+      existingCopyBySource.get(
+        asset.draft.sourceRelativePath,
+      );
+
+    if (
+      !receiptCopy ||
+      receiptCopy.destinationRelativePath !==
+        preparedCopy.destinationRelativePath ||
+      receiptCopy.sourceSha256 !==
+        preparedCopy.sha256
+    ) {
+      blockedItems.push({
+        kind: "copy",
+        sourceRelativePath:
+          preparedCopy.sourceRelativePath,
+        destinationRelativePath:
+          preparedCopy.destinationRelativePath,
+        mediaKind: preparedCopy.mediaKind,
+        sizeBytes: preparedCopy.bytes,
+        sha256: preparedCopy.sha256,
+        logicalRoles:
+          preparedCopy.logicalRoles,
+        action: "blocked",
+        reason:
+          "Existing staging sidecars are preserved only when their source mapping and bytes still match the ingest receipt.",
+      });
+      continue;
+    }
+
+    preservedCopies.push(preparedCopy);
+  }
+
+  const documents: PreparedDocument[] = [];
+  const documentItems: IngestBuildPlanItem[] = [];
+  const preservedDocumentPaths = new Set<string>();
+
+  if (!existingReceipt) {
+    for (const document of generatedDocuments) {
+      documents.push({
+        ...document,
+        writeAction: "create",
+      });
+      documentItems.push({
+        kind: "toml",
+        destinationRelativePath:
+          document.relativePath,
+        action: "create",
+        reason:
+          "A parse-validated metadata template will be created.",
+      });
+    }
+  } else {
+    const newTracks = tracks.filter(
+      (track) => !track.existingTrack,
+    );
+
+    for (const track of newTracks) {
+      const trackPrefix = `${track.relativePath}/`;
+
+      for (const document of generatedDocuments) {
+        if (
+          !document.relativePath.startsWith(
+            trackPrefix,
+          )
+        ) {
+          continue;
+        }
+
+        documents.push({
+          ...document,
+          writeAction: "create",
+        });
+        documentItems.push({
+          kind: "toml",
+          destinationRelativePath:
+            document.relativePath,
+          action: "add",
+          adjustment:
+            `New track ${track.draft.trackNumber}`,
+          reason:
+            "A starter metadata document will be added for the new track.",
+        });
+      }
+    }
+
+    const releaseTomlPath =
+      `${releaseRelativePath}/release.toml`;
+    const releaseToml =
+      await readTomlRecordForUpdate(
+        releasePath,
+        releaseRelativePath,
+        releaseTomlPath,
+      );
+    const previousTrackTotal =
+      readNestedRecordValue(
+        releaseToml.data,
+        [
+          "release",
+          "numbering",
+          "track_total",
+        ],
+      );
+
+    if (previousTrackTotal !== tracks.length) {
+      setNestedRecordValue(
+        releaseToml.data,
+        ["release", "numbering"],
+        "track_total",
+        tracks.length,
+      );
+      documents.push({
+        storageRole: "release",
+        filename: "release.toml",
+        relativePath: releaseTomlPath,
+        content: stringifyValidatedToml(
+          releaseToml.data,
+        ),
+        validated: true,
+        writeAction: "replace",
+      });
+      documentItems.push({
+        kind: "toml",
+        destinationRelativePath:
+          releaseTomlPath,
+        action: "update",
+        adjustment:
+          `Track total ${String(previousTrackTotal ?? "unknown")} → ${tracks.length}`,
+        reason:
+          "The release track total will be synchronized while all other authored values are retained.",
+      });
+    } else {
+      preservedDocumentPaths.add(
+        releaseTomlPath,
+      );
+    }
+
+    for (const track of tracks.filter(
+      (candidate) => candidate.existingTrack,
+    )) {
+      const trackTomlPath =
+        `${track.relativePath}/track.toml`;
+      const trackToml =
+        await readTomlRecordForUpdate(
+          releasePath,
+          releaseRelativePath,
+          trackTomlPath,
+        );
+      const previousTrackNumber =
+        readNestedRecordValue(
+          trackToml.data,
+          [
+            "track",
+            "numbering",
+            "track_number",
+          ],
+        );
+      const previousTrackTotalValue =
+        readNestedRecordValue(
+          trackToml.data,
+          [
+            "track",
+            "numbering",
+            "track_total",
+          ],
+        );
+      const numberChanged =
+        previousTrackNumber !==
+          track.draft.trackNumber;
+      const totalChanged =
+        previousTrackTotalValue !==
+          tracks.length;
+
+      if (numberChanged || totalChanged) {
+        setNestedRecordValue(
+          trackToml.data,
+          ["track", "numbering"],
+          "track_number",
+          track.draft.trackNumber,
+        );
+        setNestedRecordValue(
+          trackToml.data,
+          ["track", "numbering"],
+          "track_total",
+          tracks.length,
+        );
+        documents.push({
+          storageRole: "track",
+          filename: "track.toml",
+          relativePath: trackTomlPath,
+          content: stringifyValidatedToml(
+            trackToml.data,
+          ),
+          validated: true,
+          writeAction: "replace",
+        });
+        documentItems.push({
+          kind: "toml",
+          destinationRelativePath:
+            trackTomlPath,
+          action: numberChanged
+            ? "reorder"
+            : "update",
+          adjustment: numberChanged
+            ? `Track ${String(previousTrackNumber ?? track.existingTrack?.number ?? "?")} → ${track.draft.trackNumber}`
+            : `Track total ${String(previousTrackTotalValue ?? "unknown")} → ${tracks.length}`,
+          reason:
+            "Only track numbering fields will change; the track directory ID and all other authored metadata are retained.",
+        });
+      } else {
+        preservedDocumentPaths.add(
+          trackTomlPath,
+        );
+      }
+
+      for (const filename of [
+        "track-credits.toml",
+        "track-production-notes.toml",
+      ]) {
+        const relativePath =
+          `${track.relativePath}/${filename}`;
+        const target = assertPathWithinRoot(
+          releasePath,
+          path.join(
+            releasePath,
+            ...withinReleasePath(
+              releaseRelativePath,
+              relativePath,
+            ).split("/"),
+          ),
+        );
+
+        if (await pathExists(target)) {
+          preservedDocumentPaths.add(
+            relativePath,
+          );
+        }
+      }
+    }
+
+    for (const filename of [
+      "release-settings.toml",
+      "release-production-notes.toml",
+    ]) {
+      const relativePath =
+        `${releaseRelativePath}/${filename}`;
+      const target = assertPathWithinRoot(
+        releasePath,
+        path.join(releasePath, filename),
+      );
+
+      if (await pathExists(target)) {
+        preservedDocumentPaths.add(
+          relativePath,
+        );
+      }
+    }
+
+    for (const relativePath of preservedDocumentPaths) {
+      documentItems.push({
+        kind: "toml",
+        destinationRelativePath:
+          relativePath,
+        action: "preserve",
+        reason:
+          "The existing authored metadata file will be copied into the temporary update workspace unchanged.",
+      });
+    }
   }
 
   const destinationSet = new Set<string>();
@@ -1468,11 +2490,15 @@ export async function prepareIngestReleaseBuild(
       (copy) =>
         copy.destinationRelativePath,
     ),
-    ...documents.map(
-      (document) =>
-        document.relativePath,
-    ),
-    `${releaseRelativePath}/ingest-receipt.json`,
+    ...documents
+      .filter(
+        (document) =>
+          document.writeAction === "create",
+      )
+      .map(
+        (document) =>
+          document.relativePath,
+      ),
   ]) {
     if (destinationSet.has(destination)) {
       throw new Error(
@@ -1483,31 +2509,51 @@ export async function prepareIngestReleaseBuild(
     destinationSet.add(destination);
   }
 
-  const blockedReason = finalExists
-    ? "The destination release already exists; ingestion never overwrites a release."
-    : "";
-  const action = finalExists
-    ? ("blocked" as const)
-    : ("create" as const);
   const items: IngestBuildPlanItem[] = [
     {
       kind: "directory",
       destinationRelativePath:
         releaseRelativePath,
-      action,
-      reason:
-        blockedReason ||
-        "A fresh release directory will be created.",
+      action: operation === "create"
+        ? "create"
+        : "preserve",
+      reason: operation === "create"
+        ? "A fresh release directory will be created."
+        : "The existing release will be copied into an isolated temporary update workspace before changes are applied.",
     },
     ...tracks.map(
       (track): IngestBuildPlanItem => ({
         kind: "directory",
         destinationRelativePath:
           track.relativePath,
-        action,
+        action: track.existingTrack
+          ? "preserve"
+          : operation === "create"
+            ? "create"
+            : "add",
+        adjustment: track.existingTrack
+          ? `Stable ID: ${track.id}`
+          : `New track ${track.draft.trackNumber}`,
+        reason: track.existingTrack
+          ? "The existing track directory and stable ID will be retained even when its track number changes."
+          : "A new track directory will be added.",
+      }),
+    ),
+    ...preservedCopies.map(
+      (copy): IngestBuildPlanItem => ({
+        kind: "copy",
+        sourceRelativePath:
+          copy.sourceRelativePath,
+        destinationRelativePath:
+          copy.destinationRelativePath,
+        mediaKind: copy.mediaKind,
+        sizeBytes: copy.bytes,
+        sha256: copy.sha256,
+        logicalRoles:
+          copy.logicalRoles,
+        action: "preserve",
         reason:
-          blockedReason ||
-          "A fresh track directory will be created.",
+          "The existing verified staging copy matches the ingest receipt and will not be recopied or replaced.",
       }),
     ),
     ...copies.map(
@@ -1522,83 +2568,132 @@ export async function prepareIngestReleaseBuild(
         sha256: copy.sha256,
         logicalRoles:
           copy.logicalRoles,
-        action,
+        action: operation === "create"
+          ? "create"
+          : "add",
         reason:
-          blockedReason ||
-          "Source bytes will be copied and verified without changing the source.",
+          "Source bytes will be copied and hash-verified without changing the ingest source.",
       }),
     ),
-    ...documents.map(
-      (document): IngestBuildPlanItem => ({
-        kind: "toml",
-        destinationRelativePath:
-          document.relativePath,
-        action,
-        reason:
-          blockedReason ||
-          "A parse-validated metadata template will be created.",
-      }),
-    ),
+    ...documentItems,
+    ...blockedItems,
     {
       kind: "receipt",
       destinationRelativePath:
         `${releaseRelativePath}/ingest-receipt.json`,
-      action,
-      reason:
-        blockedReason ||
-        "A local source-to-destination audit receipt will be created.",
+      action: operation === "create"
+        ? "create"
+        : "update",
+      adjustment: operation === "update"
+        ? "Merge new tracks and current order"
+        : undefined,
+      reason: operation === "create"
+        ? "A local source-to-destination audit receipt will be created."
+        : "The existing audit receipt will be retained and extended with the incremental update history.",
     },
   ];
-  const receiptContent =
-    createReceiptContent(
-      inspection,
-      draft,
-      releaseRelativePath,
-      tracks,
-      copies,
+
+  const receiptContent = existingReceipt
+    ? buildUpdatedReceiptContent(
+        existingReceipt,
+        inspection,
+        draft,
+        releaseRelativePath,
+        tracks,
+        copies,
+      )
+    : createReceiptContent(
+        inspection,
+        draft,
+        releaseRelativePath,
+        tracks,
+        copies,
+      );
+  const preservedFiles = items
+    .filter(
+      (item) =>
+        item.action === "preserve" &&
+        item.kind !== "directory",
+    )
+    .map(
+      (item) =>
+        item.destinationRelativePath,
     );
+  const summary = {
+    trackCount: tracks.length,
+    copiedFileCount: copies.length,
+    tomlCount: documents.length,
+    totalCopyBytes: copies.reduce(
+      (total, copy) =>
+        total + copy.bytes,
+      0,
+    ),
+    blockedCount: items.filter(
+      (item) => item.action === "blocked",
+    ).length,
+    artworkSourceCount:
+      artworkAssets.length,
+    artworkAssignmentCount:
+      artworkAssets.reduce(
+        (total, asset) =>
+          total +
+          asset.draft.artworkAssignments.length,
+        0,
+      ),
+    addedTrackCount: tracks.filter(
+      (track) => !track.existingTrack,
+    ).length,
+    reorderedTrackCount: tracks.filter(
+      (track) =>
+        track.existingTrack &&
+        track.existingTrack.number !==
+          track.draft.trackNumber,
+    ).length,
+    updatedFileCount: items.filter(
+      (item) =>
+        item.action === "update" ||
+        item.action === "reorder",
+    ).length,
+    preservedFileCount: items.filter(
+      (item) => item.action === "preserve",
+    ).length,
+    removedFileCount: 0,
+  };
 
   return {
     preview: {
       candidateId: draft.candidateId,
+      operation,
+      existingReleaseDetected:
+        operation === "update",
       releaseId,
       releaseRelativePath,
       outputRootLabel,
       items,
-      summary: {
-        trackCount: tracks.length,
-        copiedFileCount: copies.length,
-        tomlCount: documents.length,
-        totalCopyBytes: copies.reduce(
-          (total, copy) =>
-            total + copy.bytes,
-          0,
-        ),
-        blockedCount: finalExists
-          ? items.length
-          : 0,
-        artworkSourceCount:
-          artworkAssets.length,
-        artworkAssignmentCount:
-          artworkAssets.reduce(
-            (total, asset) =>
-              total +
-              asset.draft.artworkAssignments.length,
-            0,
-          ),
-      },
-      warnings: [
-        "Ingestion copies source bytes without rewriting embedded metadata.",
-        "Audio sources are renamed to audio-master while retaining their original container extension.",
-        "The copied audio master is also referenced as the initial audio-player source; no duplicate derivative is created.",
-      ],
+      summary,
+      warnings: operation === "create"
+        ? [
+            "Ingestion copies source bytes without rewriting embedded metadata.",
+            "Audio sources are renamed to audio-master while retaining their original container extension.",
+            "The copied audio master is also referenced as the initial audio-player source; no duplicate derivative is created.",
+          ]
+        : [
+            "Existing authored metadata is preserved; the update changes only release/track numbering plus starter files for newly added tracks.",
+            "Track directory IDs remain stable when the displayed track order changes.",
+            "No existing track or file is removed by an incremental staging update.",
+            "Playback audio, embedded tags, waveform data, and catalog output may require regeneration after the update.",
+          ],
       confirmationPhrase:
-        INGEST_BUILD_CONFIRMATION_PHRASE,
+        operation === "create"
+          ? INGEST_BUILD_CONFIRMATION_PHRASE
+          : INGEST_UPDATE_CONFIRMATION_PHRASE,
     },
+    operation,
     releasePath,
     releaseRelativePath,
     documents,
     copies,
+    preservedFiles,
     receiptContent,
   };
 }
@@ -1621,6 +2716,40 @@ async function writeTextFile(
     await handle.sync();
   } finally {
     await handle.close();
+  }
+}
+
+async function writeTextFileReplacing(
+  filename: string,
+  content: string,
+): Promise<void> {
+  const temporaryPath =
+    `${filename}.${randomUUID()}.tmp`;
+  let temporaryCreated = false;
+
+  try {
+    const handle = await open(
+      temporaryPath,
+      "wx",
+      0o600,
+    );
+    temporaryCreated = true;
+
+    try {
+      await handle.writeFile(content, "utf8");
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+
+    await rename(temporaryPath, filename);
+    temporaryCreated = false;
+  } finally {
+    if (temporaryCreated) {
+      await unlink(temporaryPath).catch(
+        () => undefined,
+      );
+    }
   }
 }
 
@@ -1720,15 +2849,6 @@ export async function executeIngestReleaseBuild(
     process.env.INGEST_OUTPUT_ROOT ??
     defaultIngestOutputRoot,
 ): Promise<IngestBuildResult> {
-  if (
-    confirmation !==
-      INGEST_BUILD_CONFIRMATION_PHRASE
-  ) {
-    throw new Error(
-      `Confirmation must exactly match ${INGEST_BUILD_CONFIRMATION_PHRASE}.`,
-    );
-  }
-
   const prepared =
     await prepareIngestReleaseBuild(
       ingestRoot,
@@ -1737,12 +2857,22 @@ export async function executeIngestReleaseBuild(
       draft,
       outputRootLabel,
     );
+  const expectedConfirmation =
+    prepared.preview.confirmationPhrase;
+
+  if (confirmation !== expectedConfirmation) {
+    throw new Error(
+      `Confirmation must exactly match ${expectedConfirmation}.`,
+    );
+  }
 
   if (
     prepared.preview.summary.blockedCount > 0
   ) {
     throw new Error(
-      "The staging release cannot be created because one or more destinations are blocked.",
+      prepared.operation === "create"
+        ? "The staging release cannot be created because one or more destinations are blocked."
+        : "The staging release cannot be updated because one or more changes are blocked.",
     );
   }
 
@@ -1775,14 +2905,23 @@ export async function executeIngestReleaseBuild(
     "wx",
     0o600,
   );
+  const operationId = randomUUID();
   const stagingPath = assertPathWithinRoot(
     canonicalReleasesRoot,
     path.join(
       canonicalReleasesRoot,
-      `.${draft.releaseId}.${randomUUID()}.ingest-tmp`,
+      `.${draft.releaseId}.${operationId}.ingest-tmp`,
+    ),
+  );
+  const backupPath = assertPathWithinRoot(
+    canonicalReleasesRoot,
+    path.join(
+      canonicalReleasesRoot,
+      `.${draft.releaseId}.${operationId}.ingest-backup`,
     ),
   );
   let stagingCreated = false;
+  let backupCreated = false;
 
   try {
     await lock.writeFile(
@@ -1791,19 +2930,50 @@ export async function executeIngestReleaseBuild(
     );
     await lock.sync();
 
+    const targetExists = await pathExists(
+      prepared.releasePath,
+    );
+
     if (
-      await pathExists(prepared.releasePath)
+      prepared.operation === "create" &&
+      targetExists
     ) {
       throw new Error(
         `Refusing to overwrite existing release: ${prepared.releaseRelativePath}`,
       );
     }
 
-    await mkdir(stagingPath, {
-      recursive: false,
-      mode: 0o700,
-    });
-    stagingCreated = true;
+    if (
+      prepared.operation === "update" &&
+      !targetExists
+    ) {
+      throw new Error(
+        `The staging release disappeared before the update could begin: ${prepared.releaseRelativePath}`,
+      );
+    }
+
+    if (prepared.operation === "create") {
+      await mkdir(stagingPath, {
+        recursive: false,
+        mode: 0o700,
+      });
+      stagingCreated = true;
+    } else {
+      await assertSafeReleaseTree(
+        prepared.releasePath,
+      );
+      await cp(
+        prepared.releasePath,
+        stagingPath,
+        {
+          recursive: true,
+          force: false,
+          errorOnExist: true,
+          preserveTimestamps: true,
+        },
+      );
+      stagingCreated = true;
+    }
 
     const receipts: IngestBuildCopyReceipt[] =
       [];
@@ -1827,9 +2997,9 @@ export async function executeIngestReleaseBuild(
       parse(document.content);
 
       const withinRelease =
-        document.relativePath.slice(
-          `${prepared.releaseRelativePath}/`
-            .length,
+        withinReleasePath(
+          prepared.releaseRelativePath,
+          document.relativePath,
         );
       const target = assertPathWithinRoot(
         stagingPath,
@@ -1842,67 +3012,159 @@ export async function executeIngestReleaseBuild(
       await mkdir(path.dirname(target), {
         recursive: true,
       });
-      await writeTextFile(
-        target,
-        document.content,
-      );
+
+      if (document.writeAction === "create") {
+        await writeTextFile(
+          target,
+          document.content,
+        );
+      } else {
+        await writeTextFileReplacing(
+          target,
+          document.content,
+        );
+      }
     }
 
     const receipt = JSON.parse(
       prepared.receiptContent,
     ) as Record<string, unknown>;
+    const previousCopyReceipts =
+      prepared.operation === "update" &&
+      Array.isArray(receipt.copyReceipts)
+        ? receipt.copyReceipts
+        : [];
 
     receipt.completedAt =
       new Date().toISOString();
-    receipt.copyReceipts = receipts;
+    receipt.copyReceipts = [
+      ...previousCopyReceipts,
+      ...receipts,
+    ];
 
-    await writeTextFile(
-      assertPathWithinRoot(
+    const receiptPath = assertPathWithinRoot(
+      stagingPath,
+      path.join(
         stagingPath,
-        path.join(
-          stagingPath,
-          "ingest-receipt.json",
-        ),
+        "ingest-receipt.json",
       ),
-      `${JSON.stringify(
-        receipt,
-        null,
-        2,
-      )}\n`,
     );
+    const receiptText = `${JSON.stringify(
+      receipt,
+      null,
+      2,
+    )}\n`;
 
-    if (
-      await pathExists(prepared.releasePath)
-    ) {
-      throw new Error(
-        `Refusing to publish over existing release: ${prepared.releaseRelativePath}`,
+    if (prepared.operation === "create") {
+      await writeTextFile(
+        receiptPath,
+        receiptText,
+      );
+    } else {
+      await writeTextFileReplacing(
+        receiptPath,
+        receiptText,
       );
     }
 
-    await rename(
-      stagingPath,
-      prepared.releasePath,
-    );
-    stagingCreated = false;
+    if (prepared.operation === "create") {
+      if (
+        await pathExists(prepared.releasePath)
+      ) {
+        throw new Error(
+          `Refusing to publish over existing release: ${prepared.releaseRelativePath}`,
+        );
+      }
+
+      await rename(
+        stagingPath,
+        prepared.releasePath,
+      );
+      stagingCreated = false;
+    } else {
+      if (
+        !(await pathExists(prepared.releasePath))
+      ) {
+        throw new Error(
+          `The staging release disappeared before promotion: ${prepared.releaseRelativePath}`,
+        );
+      }
+
+      await rename(
+        prepared.releasePath,
+        backupPath,
+      );
+      backupCreated = true;
+
+      try {
+        await rename(
+          stagingPath,
+          prepared.releasePath,
+        );
+        stagingCreated = false;
+      } catch (error) {
+        await rename(
+          backupPath,
+          prepared.releasePath,
+        ).catch(() => undefined);
+        backupCreated = false;
+        throw error;
+      }
+
+      await rm(backupPath, {
+        recursive: true,
+        force: true,
+      });
+      backupCreated = false;
+    }
 
     const createdFiles = [
       ...prepared.copies.map(
         (copy) =>
           copy.destinationRelativePath,
       ),
-      ...prepared.documents.map(
-        (document) =>
-          document.relativePath,
-      ),
-      `${prepared.releaseRelativePath}/ingest-receipt.json`,
+      ...prepared.documents
+        .filter(
+          (document) =>
+            document.writeAction === "create",
+        )
+        .map(
+          (document) =>
+            document.relativePath,
+        ),
+      ...(prepared.operation === "create"
+        ? [
+            `${prepared.releaseRelativePath}/ingest-receipt.json`,
+          ]
+        : []),
+    ];
+    const updatedFiles = [
+      ...prepared.documents
+        .filter(
+          (document) =>
+            document.writeAction === "replace",
+        )
+        .map(
+          (document) =>
+            document.relativePath,
+        ),
+      ...(prepared.operation === "update"
+        ? [
+            `${prepared.releaseRelativePath}/ingest-receipt.json`,
+          ]
+        : []),
     ];
 
     return {
       candidateId: draft.candidateId,
+      operation: prepared.operation,
       releaseId: draft.releaseId,
       releaseRelativePath:
         prepared.releaseRelativePath,
       createdFiles,
+      updatedFiles,
+      preservedFiles:
+        prepared.preservedFiles,
       receipts,
       completedAt:
         String(receipt.completedAt),
@@ -1920,6 +3182,24 @@ export async function executeIngestReleaseBuild(
         recursive: true,
         force: true,
       }).catch(() => undefined);
+    }
+
+    if (backupCreated) {
+      if (
+        !(await pathExists(
+          prepared.releasePath,
+        ))
+      ) {
+        await rename(
+          backupPath,
+          prepared.releasePath,
+        ).catch(() => undefined);
+      } else {
+        await rm(backupPath, {
+          recursive: true,
+          force: true,
+        }).catch(() => undefined);
+      }
     }
   }
 }

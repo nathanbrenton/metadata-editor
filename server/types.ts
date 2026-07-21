@@ -15,6 +15,7 @@ export type TrackScanResult = {
   relativePath: string;
   metadataFiles: MetadataFileStatus[];
   audioMasters: DiscoveredAsset[];
+  playbackAudio?: DiscoveredAsset[];
   artworkMasters: DiscoveredAsset[];
 };
 
@@ -167,12 +168,18 @@ export type PerformerRecordInput = {
   sortName: string;
 };
 
-export type TechnicalContributorRecordInput = {
+export type ContributorRecordInput = {
   sourceIndex: number | null;
   name: string;
   role: string;
   sortName: string;
 };
+
+export type TechnicalContributorRecordInput =
+  ContributorRecordInput;
+
+export type ArrangementContributorRecordInput =
+  ContributorRecordInput;
 
 export type ScalarMetadataSaveRequest = {
   releaseId: string;
@@ -417,7 +424,8 @@ export type MetadataFieldDefinition = {
       | "Movement & Work"
       | "Performers"
       | "Production"
-      | "Arrangement"
+      | "Arrangement & Orchestration"
+      | "Conducting & Musical Direction"
       | "Recording"
       | "Editing"
       | "Mixing"

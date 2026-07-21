@@ -230,6 +230,27 @@ export const performanceRoleOptions = [
   "orchestra",
 ] as const;
 
+export const arrangementContributorRoleOptions = [
+  "arranger",
+  "co-arranger",
+  "additional arranger",
+  "sub-arranger",
+  "vocal arranger",
+  "background-vocal arranger",
+  "choir arranger",
+  "string arranger",
+  "brass arranger",
+  "horn arranger",
+  "woodwind arranger",
+  "rhythm arranger",
+  "percussion arranger",
+  "drum arranger",
+  "keyboard arranger",
+  "synthesizer arranger",
+  "orchestrator",
+  "additional orchestration",
+] as const;
+
 export const technicalContributorRoleOptions = [
   "recorded by",
   "recording engineer",
@@ -266,8 +287,7 @@ export const contributorRoleOptions = [
   "sound designer",
   "programmer",
   "MIDI programmer",
-  "arranger",
-  "orchestrator",
+  ...arrangementContributorRoleOptions,
   "conductor",
   "composer",
   "lyricist",
@@ -293,6 +313,19 @@ export function isTechnicalContributorRole(
 
   return (
     /\b(?:record(?:ed|ing)?|tracking|engineer(?:ed|ing)?|edit(?:ed|ing|or)?|mix(?:ed|er|ing)?|mixdown|master(?:ed|ing)?|remaster(?:ed|ing)?|transfer(?:red|ring)?|restor(?:ation|ed|ing)?|tape operator)\b/.test(
+      normalizedRole,
+    )
+  );
+}
+export function isArrangementContributorRole(
+  role: string,
+): boolean {
+  const normalizedRole = role
+    .trim()
+    .toLowerCase();
+
+  return (
+    /\b(?:arrang(?:e[dr]?|ement|er|ing)?|orchestrat(?:e[dr]?|ion|or|ing)?)\b/.test(
       normalizedRole,
     )
   );

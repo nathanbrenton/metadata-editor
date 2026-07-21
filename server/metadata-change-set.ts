@@ -16,10 +16,13 @@ import {
   type EditableMetadataValue,
 } from "./metadata-editability.js";
 import type {
+  ArrangementContributorRecordInput,
+  ContributorRecordInput,
   PerformerRecordInput,
   TechnicalContributorRecordInput,
 } from "./types.js";
 import {
+  isArrangementContributorRole,
   isTechnicalContributorRole,
 } from "./metadata-vocabularies.js";
 
@@ -620,47 +623,108 @@ export function applyPerformerRecords(
 
 
 /*
- * Rebuilds only the technical track.contributors records managed by the
- * Recording, Mixing & Mastering editor. Contributor records outside the
- * managed source-index set are preserved byte-for-byte at the parsed-object
- * level, including unknown sibling keys.
+ * Contributor editors manage disjoint role families inside one shared
+ * contributors array. Rebuild every changed family against the same original
+ * source indexes so saving technical and arrangement edits together cannot
+ * shift or overwrite neighboring contributor records.
  */
-export function applyTechnicalContributorRecords(
+type ContributorPath =
+  | "track.contributors"
+  | "release.credits.contributors";
+
+type ManagedContributorFamily = {
+  label: string;
+  records: readonly ContributorRecordInput[];
+  managedSourceIndexes: readonly number[];
+  acceptsRole: (role: string) => boolean;
+  invalidExistingRoleDescription: string;
+};
+
+export type ContributorRecordFamilies = {
+  technical?: {
+    records: readonly TechnicalContributorRecordInput[];
+    managedSourceIndexes: readonly number[];
+  };
+  arrangement?: {
+    records: readonly ArrangementContributorRecordInput[];
+    managedSourceIndexes: readonly number[];
+  };
+};
+
+function buildManagedContributorFamilies(
+  families: ContributorRecordFamilies,
+): ManagedContributorFamily[] {
+  return [
+    ...(families.technical
+      ? [
+          {
+            label: "Technical contributor",
+            records: families.technical.records,
+            managedSourceIndexes:
+              families.technical.managedSourceIndexes,
+            acceptsRole: isTechnicalContributorRole,
+            invalidExistingRoleDescription:
+              "a recording, mixing, or mastering credit",
+          },
+        ]
+      : []),
+    ...(families.arrangement
+      ? [
+          {
+            label: "Arrangement contributor",
+            records: families.arrangement.records,
+            managedSourceIndexes:
+              families.arrangement.managedSourceIndexes,
+            acceptsRole: isArrangementContributorRole,
+            invalidExistingRoleDescription:
+              "an arrangement or orchestration credit",
+          },
+        ]
+      : []),
+  ];
+}
+
+export function applyContributorRecordFamilies(
   document: unknown,
-  contributors: readonly TechnicalContributorRecordInput[],
-  managedSourceIndexes: readonly number[],
-  contributorPath:
-    | "track.contributors"
-    | "release.credits.contributors" =
-      "track.contributors",
+  families: ContributorRecordFamilies,
+  contributorPath: ContributorPath =
+    "track.contributors",
 ): unknown {
+  const managedFamilies =
+    buildManagedContributorFamilies(families);
+
+  if (managedFamilies.length === 0) {
+    throw new Error(
+      "At least one contributor record family is required.",
+    );
+  }
+
   const scopeLabel =
     contributorPath ===
     "release.credits.contributors"
       ? "release"
       : "track";
 
-  if (contributors.length > 500) {
-    throw new Error(
-      `A ${scopeLabel} may not contain more than 500 technical contributor records.`,
-    );
+  for (const family of managedFamilies) {
+    if (family.records.length > 500) {
+      throw new Error(
+        `A ${scopeLabel} may not contain more than 500 ${family.label.toLowerCase()} records.`,
+      );
+    }
   }
 
   let existingValue: unknown = [];
   let pathExists = true;
 
   try {
-    existingValue =
-      readMetadataValueAtPath(
-        document,
-        contributorPath,
-      );
+    existingValue = readMetadataValueAtPath(
+      document,
+      contributorPath,
+    );
   } catch (error) {
     if (
       error instanceof Error &&
-      error.message.includes(
-        "does not exist",
-      )
+      error.message.includes("does not exist")
     ) {
       pathExists = false;
     } else {
@@ -668,214 +732,190 @@ export function applyTechnicalContributorRecords(
     }
   }
 
-  if (
-    pathExists &&
-    !Array.isArray(existingValue)
-  ) {
+  if (pathExists && !Array.isArray(existingValue)) {
     throw new Error(
       `${contributorPath} must be an array.`,
     );
   }
 
-  const existingRecords =
-    Array.isArray(existingValue)
-      ? existingValue
-      : [];
+  const existingRecords = Array.isArray(existingValue)
+    ? existingValue
+    : [];
+  const globallyManagedIndexes = new Set<number>();
+  const updatedBySourceIndex = new Map<
+    number,
+    Record<string, unknown>
+  >();
+  const appendedRecords: Record<string, unknown>[] = [];
 
-  const managedIndexes =
-    new Set<number>();
+  for (const family of managedFamilies) {
+    const familyManagedIndexes = new Set<number>();
 
-  managedSourceIndexes.forEach(
-    (sourceIndex) => {
-      if (
-        !Number.isSafeInteger(sourceIndex) ||
-        sourceIndex < 0 ||
-        sourceIndex >= existingRecords.length
-      ) {
-        throw new Error(
-          `Technical contributor source index is out of bounds: ${sourceIndex}`,
-        );
-      }
-
-      if (managedIndexes.has(sourceIndex)) {
-        throw new Error(
-          `Duplicate managed technical contributor source index: ${sourceIndex}`,
-        );
-      }
-
-      const existingRecord =
-        existingRecords[
-          sourceIndex
-        ];
-
-      if (
-        !isMetadataRecord(
-          existingRecord,
-        ) ||
-        typeof existingRecord.role !==
-          "string" ||
-        !isTechnicalContributorRole(
-          existingRecord.role,
-        )
-      ) {
-        throw new Error(
-          `Contributor source index is not a recording, mixing, or mastering credit: ${sourceIndex}`,
-        );
-      }
-
-      managedIndexes.add(sourceIndex);
-    },
-  );
-
-  const usedSourceIndexes =
-    new Set<number>();
-  const updatedBySourceIndex =
-    new Map<number, Record<string, unknown>>();
-  const appendedRecords:
-    Record<string, unknown>[] = [];
-
-  contributors.forEach(
-    (contributor, recordIndex) => {
-      validatePerformerText(
-        `Technical contributor ${recordIndex + 1} name`,
-        contributor.name,
-      );
-      validatePerformerText(
-        `Technical contributor ${recordIndex + 1} role`,
-        contributor.role,
-      );
-      validatePerformerText(
-        `Technical contributor ${recordIndex + 1} sort name`,
-        contributor.sortName,
-      );
-
-      if (
-        !contributor.name.trim() ||
-        !contributor.role.trim()
-      ) {
-        throw new Error(
-          `Technical contributor ${recordIndex + 1} requires both a name and role.`,
-        );
-      }
-
-      if (
-        !isTechnicalContributorRole(
-          contributor.role,
-        )
-      ) {
-        throw new Error(
-          `Technical contributor ${recordIndex + 1} role must describe recording, mixing, or mastering work.`,
-        );
-      }
-
-      if (
-        contributor.sourceIndex === null
-      ) {
-        appendedRecords.push({
-          name: contributor.name,
-          role: contributor.role,
-          ...(contributor.sortName
-            ? {
-                sort_name:
-                  contributor.sortName,
-              }
-            : {}),
-        });
-        return;
-      }
-
-      if (
-        !managedIndexes.has(
-          contributor.sourceIndex,
-        )
-      ) {
-        throw new Error(
-          `Technical contributor source index is not managed by this editor: ${contributor.sourceIndex}`,
-        );
-      }
-
-      if (
-        usedSourceIndexes.has(
-          contributor.sourceIndex,
-        )
-      ) {
-        throw new Error(
-          `Duplicate technical contributor source index: ${contributor.sourceIndex}`,
-        );
-      }
-
-      usedSourceIndexes.add(
-        contributor.sourceIndex,
-      );
-
-      const existingRecord =
-        existingRecords[
-          contributor.sourceIndex
-        ];
-
-      if (
-        !isMetadataRecord(
-          existingRecord,
-        )
-      ) {
-        throw new Error(
-          `Existing contributor ${contributor.sourceIndex + 1} is not a record.`,
-        );
-      }
-
-      const nextRecord: Record<
-        string,
-        unknown
-      > = {
-        ...existingRecord,
-        name: contributor.name,
-        role: contributor.role,
-      };
-
-      if (
-        contributor.sortName ||
-        Object.prototype.hasOwnProperty.call(
-          existingRecord,
-          "sort_name",
-        )
-      ) {
-        nextRecord.sort_name =
-          contributor.sortName;
-      }
-
-      updatedBySourceIndex.set(
-        contributor.sourceIndex,
-        nextRecord,
-      );
-    },
-  );
-
-  const nextRecords:
-    Record<string, unknown>[] = [];
-
-  existingRecords.forEach(
-    (record, sourceIndex) => {
-      if (!managedIndexes.has(sourceIndex)) {
-        if (!isMetadataRecord(record)) {
+    family.managedSourceIndexes.forEach(
+      (sourceIndex) => {
+        if (
+          !Number.isSafeInteger(sourceIndex) ||
+          sourceIndex < 0 ||
+          sourceIndex >= existingRecords.length
+        ) {
           throw new Error(
-            `Existing contributor ${sourceIndex + 1} is not a record.`,
+            `${family.label} source index is out of bounds: ${sourceIndex}`,
           );
         }
 
-        nextRecords.push(record);
-        return;
-      }
+        if (familyManagedIndexes.has(sourceIndex)) {
+          throw new Error(
+            `Duplicate managed ${family.label.toLowerCase()} source index: ${sourceIndex}`,
+          );
+        }
 
-      const replacement =
-        updatedBySourceIndex.get(
-          sourceIndex,
+        if (globallyManagedIndexes.has(sourceIndex)) {
+          throw new Error(
+            `Contributor source index is managed by more than one editor: ${sourceIndex}`,
+          );
+        }
+
+        const existingRecord =
+          existingRecords[sourceIndex];
+
+        if (
+          !isMetadataRecord(existingRecord) ||
+          typeof existingRecord.role !== "string" ||
+          !family.acceptsRole(existingRecord.role)
+        ) {
+          throw new Error(
+            `Contributor source index is not ${family.invalidExistingRoleDescription}: ${sourceIndex}`,
+          );
+        }
+
+        familyManagedIndexes.add(sourceIndex);
+        globallyManagedIndexes.add(sourceIndex);
+      },
+    );
+
+    const usedSourceIndexes = new Set<number>();
+
+    family.records.forEach(
+      (contributor, recordIndex) => {
+        validatePerformerText(
+          `${family.label} ${recordIndex + 1} name`,
+          contributor.name,
+        );
+        validatePerformerText(
+          `${family.label} ${recordIndex + 1} role`,
+          contributor.role,
+        );
+        validatePerformerText(
+          `${family.label} ${recordIndex + 1} sort name`,
+          contributor.sortName,
         );
 
-      if (replacement) {
-        nextRecords.push(replacement);
+        if (
+          !contributor.name.trim() ||
+          !contributor.role.trim()
+        ) {
+          throw new Error(
+            `${family.label} ${recordIndex + 1} requires both a name and role.`,
+          );
+        }
+
+        if (!family.acceptsRole(contributor.role)) {
+          throw new Error(
+            `${family.label} ${recordIndex + 1} role is not supported by this editor.`,
+          );
+        }
+
+        if (contributor.sourceIndex === null) {
+          appendedRecords.push({
+            name: contributor.name,
+            role: contributor.role,
+            ...(contributor.sortName
+              ? { sort_name: contributor.sortName }
+              : {}),
+          });
+          return;
+        }
+
+        if (
+          !familyManagedIndexes.has(
+            contributor.sourceIndex,
+          )
+        ) {
+          throw new Error(
+            `${family.label} source index is not managed by this editor: ${contributor.sourceIndex}`,
+          );
+        }
+
+        if (
+          usedSourceIndexes.has(
+            contributor.sourceIndex,
+          )
+        ) {
+          throw new Error(
+            `Duplicate ${family.label.toLowerCase()} source index: ${contributor.sourceIndex}`,
+          );
+        }
+
+        usedSourceIndexes.add(
+          contributor.sourceIndex,
+        );
+
+        const existingRecord =
+          existingRecords[
+            contributor.sourceIndex
+          ];
+
+        if (!isMetadataRecord(existingRecord)) {
+          throw new Error(
+            `Existing contributor ${contributor.sourceIndex + 1} is not a record.`,
+          );
+        }
+
+        const nextRecord: Record<string, unknown> = {
+          ...existingRecord,
+          name: contributor.name,
+          role: contributor.role,
+        };
+
+        if (
+          contributor.sortName ||
+          Object.prototype.hasOwnProperty.call(
+            existingRecord,
+            "sort_name",
+          )
+        ) {
+          nextRecord.sort_name = contributor.sortName;
+        }
+
+        updatedBySourceIndex.set(
+          contributor.sourceIndex,
+          nextRecord,
+        );
+      },
+    );
+  }
+
+  const nextRecords: Record<string, unknown>[] = [];
+
+  existingRecords.forEach((record, sourceIndex) => {
+    if (!globallyManagedIndexes.has(sourceIndex)) {
+      if (!isMetadataRecord(record)) {
+        throw new Error(
+          `Existing contributor ${sourceIndex + 1} is not a record.`,
+        );
       }
-    },
-  );
+
+      nextRecords.push(record);
+      return;
+    }
+
+    const replacement =
+      updatedBySourceIndex.get(sourceIndex);
+
+    if (replacement) {
+      nextRecords.push(replacement);
+    }
+  });
 
   nextRecords.push(...appendedRecords);
 
@@ -890,4 +930,42 @@ export function applyTechnicalContributorRecords(
         contributorPath,
         nextRecords,
       );
+}
+
+export function applyTechnicalContributorRecords(
+  document: unknown,
+  contributors: readonly TechnicalContributorRecordInput[],
+  managedSourceIndexes: readonly number[],
+  contributorPath: ContributorPath =
+    "track.contributors",
+): unknown {
+  return applyContributorRecordFamilies(
+    document,
+    {
+      technical: {
+        records: contributors,
+        managedSourceIndexes,
+      },
+    },
+    contributorPath,
+  );
+}
+
+export function applyArrangementContributorRecords(
+  document: unknown,
+  contributors: readonly ArrangementContributorRecordInput[],
+  managedSourceIndexes: readonly number[],
+  contributorPath: ContributorPath =
+    "track.contributors",
+): unknown {
+  return applyContributorRecordFamilies(
+    document,
+    {
+      arrangement: {
+        records: contributors,
+        managedSourceIndexes,
+      },
+    },
+    contributorPath,
+  );
 }

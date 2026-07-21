@@ -8,6 +8,22 @@ import type {
 export const INGEST_BUILD_CONFIRMATION_PHRASE =
   "CREATE_STAGING_RELEASE";
 
+export const INGEST_UPDATE_CONFIRMATION_PHRASE =
+  "UPDATE_STAGING_RELEASE";
+
+export type IngestBuildOperation =
+  | "create"
+  | "update";
+
+export type IngestBuildPlanAction =
+  | "create"
+  | "add"
+  | "update"
+  | "reorder"
+  | "preserve"
+  | "remove"
+  | "blocked";
+
 export type IngestBuildTrackDraft = {
   sourceRelativePath: string;
   include: boolean;
@@ -100,12 +116,15 @@ export type IngestBuildPlanItem = {
   sizeBytes?: number;
   sha256?: string;
   logicalRoles?: string[];
-  action: "create" | "blocked";
+  action: IngestBuildPlanAction;
   reason: string;
+  adjustment?: string;
 };
 
 export type IngestBuildPreview = {
   candidateId: string;
+  operation: IngestBuildOperation;
+  existingReleaseDetected: boolean;
   releaseId: string;
   releaseRelativePath: string;
   outputRootLabel: string;
@@ -118,9 +137,23 @@ export type IngestBuildPreview = {
     blockedCount: number;
     artworkSourceCount: number;
     artworkAssignmentCount: number;
+    addedTrackCount: number;
+    reorderedTrackCount: number;
+    updatedFileCount: number;
+    preservedFileCount: number;
+    removedFileCount: number;
   };
   warnings: string[];
-  confirmationPhrase: typeof INGEST_BUILD_CONFIRMATION_PHRASE;
+  confirmationPhrase:
+    | typeof INGEST_BUILD_CONFIRMATION_PHRASE
+    | typeof INGEST_UPDATE_CONFIRMATION_PHRASE;
+};
+
+export type IngestStagingTargetStatus = {
+  releaseId: string;
+  exists: boolean;
+  operation: IngestBuildOperation;
+  releaseRelativePath: string;
 };
 
 export type IngestBuildCopyReceipt = {
@@ -135,9 +168,12 @@ export type IngestBuildCopyReceipt = {
 
 export type IngestBuildResult = {
   candidateId: string;
+  operation: IngestBuildOperation;
   releaseId: string;
   releaseRelativePath: string;
   createdFiles: string[];
+  updatedFiles: string[];
+  preservedFiles: string[];
   receipts: IngestBuildCopyReceipt[];
   completedAt: string;
 };

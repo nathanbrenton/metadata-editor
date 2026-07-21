@@ -30,6 +30,9 @@ Implemented capabilities:
 - Return SHA-256 verification receipts
 - Display parsed metadata as document-style key/value tables
 - Show raw TOML alongside structured metadata
+- Preview release tracks with sidebar play/pause buttons and a desktop transport bar
+- Stream preview audio through a root-confined, byte-range-aware local API
+- Prefer generated `audio-playback` files and fall back to one unambiguous audio master
 - Edit scalar values locally in the browser with dirty-state tracking
 
 Scalar edits are currently browser-local only. Persisting edits to existing TOML files is planned but not yet implemented.
@@ -73,6 +76,8 @@ The backend binds only to localhost during development. The public audio player 
 - Parsed TOML key/value tables
 - Read-only raw TOML inspection
 - Browser-local scalar draft editing
+- Read-only playback-MP3 and waveform processing plans
+- In-memory multiband waveform generation for PCM WAV sources
 
 ### Backend
 
@@ -83,6 +88,22 @@ The backend binds only to localhost during development. The public audio player 
 - TOML parsing and generation with `smol-toml`
 - Atomic create-only writer
 - SHA-256 post-write verification
+
+## In-App Workflow Documentation
+
+The hamburger menus include a compact **Release workflow** card, and the footer links to a dedicated **Workflow & Help** page. The page distinguishes currently available, partially available, and planned operations across:
+
+```text
+Ingest → Author → Prepare → Preflight → Publish
+```
+
+The maintained workflow content lives in:
+
+```text
+src/workflow-help-content.ts
+```
+
+Whenever the pipeline, lifecycle statuses, derivative-generation behavior, preflight rules, publishing model, or related UI changes, update that module, the rendered guide, and `tests/workflow-help.test.ts` in the same patch. Do not present planned write operations as available before their safety controls are implemented.
 
 ## Media Root
 
@@ -237,6 +258,27 @@ API:
 GET /api/library/scan
 ```
 
+### Playback and Waveform Processing Plan
+
+The first media-processing milestone is intentionally read-only. It inspects each track's audio master, `audio-playback.mp3`, and `waveform-peaks.json`, then reports whether each derivative is current, missing, stale, or blocked. It does not create, replace, or delete files.
+
+The active profile preserves the audio-player conventions:
+
+```text
+audio-playback.mp3   320 kbps MP3 target
+waveform-peaks.json  schema v2, 400 peaks/second, 1024-point Hann FFT
+```
+
+API:
+
+```text
+GET /api/media-processing/plan?release=<release-id>
+GET /api/media-processing/plan?release=<release-id>&track=<track-id>
+GET /api/media-processing/plan?release=<release-id>&peaksPerSecond=400
+```
+
+The response includes `writesEnabled: false`, a profile SHA-256, per-track checks, and create/replace/block recommendations for a future confirmed executor. Native PCM WAV waveform analysis is implemented in memory; non-WAV masters are planned as requiring FFmpeg decoding before analysis.
+
 ### Inferred Metadata Preview
 
 The editor may infer only low-risk values such as release ID, release date, release title, track ID, artist name, track number, track title, and relative asset paths.
@@ -312,6 +354,20 @@ curl --silent \
 ```
 
 The endpoint rescans the release, regenerates and validates TOML, rebuilds the plan, creates only missing files, refuses overwrites, re-reads each created file, and returns SHA-256 verification receipts.
+
+## Audio Preview
+
+Release detail views provide per-track play/pause controls in the sidebar plus previous, play/pause, next, and volume controls above the metadata tabs. The local API resolves tracks by release and track IDs, prefers `audio-playback.*`, and falls back to one unambiguous `audio-master.*`.
+
+API:
+
+```text
+GET /api/library/audio-preview?release=<release-id>&track=<track-id>
+```
+
+MP3 sources are served directly with HTTP byte-range support. Other recognized formats are decoded by FFmpeg and streamed as a temporary 192 kbps stereo MP3 preview. This live transcode does not rewrite the archival source or create a derivative inside the media library. Recognized source extensions include AAC, AIFF, ALAC, APE, AU/SND, CAF, DFF/DSF, FLAC, M4A, MKA, MP3, Ogg/Vorbis, Opus, TTA, WAV/WAVE, WMA, and WavPack. Actual decode support depends on the installed FFmpeg build.
+
+A generated `audio-playback.mp3` remains preferred for instant startup, byte-range seeking, and repeatable browser playback.
 
 ## Metadata Detail View
 

@@ -1,9 +1,17 @@
 import {
+  createReadStream,
+} from "node:fs";
+import {
+  spawn,
+} from "node:child_process";
+import {
   readFile,
   realpath,
+  stat,
 } from "node:fs/promises";
 import {
   createServer,
+  type IncomingMessage,
   type ServerResponse,
 } from "node:http";
 import path from "node:path";
@@ -17,6 +25,14 @@ import {
   findProductionContextField,
 } from "../shared/production-context.js";
 
+import {
+  buildAudioPreviewTranscodeArgs,
+  getAudioPreviewContentType,
+  getAudioPreviewDeliveryMode,
+  parseSingleByteRange,
+  selectAudioPreviewMp3Encoder,
+  selectTrackAudioPreview,
+} from "./audio-preview.js";
 import { buildMetadataExportPlan } from "./export-plan.js";
 import {
   executeValidatedExportPlan,
@@ -28,6 +44,9 @@ import {
 import {
   detectFfmpegCapabilities,
 } from "./ffmpeg-capabilities.js";
+import {
+  buildMediaProcessingPlan,
+} from "./media-processing/plan.js";
 import {
   buildMetadataGenerationPlan,
   buildSingleMetadataDocumentPlan,
@@ -55,6 +74,7 @@ import {
 import {
   defaultIngestOutputRoot,
   executeIngestReleaseBuild,
+  inspectIngestStagingTarget,
   parseIngestBuildDraft,
   prepareIngestReleaseBuild,
   resolveIngestOutputRoot,
@@ -326,6 +346,322 @@ async function sendLibraryArtwork(
   }
 
   response.end(content);
+}
+
+
+let audioPreviewCapabilitiesPromise:
+  ReturnType<typeof detectFfmpegCapabilities> | null =
+    null;
+
+function getAudioPreviewFfmpegCapabilities() {
+  audioPreviewCapabilitiesPromise ??=
+    detectFfmpegCapabilities();
+
+  return audioPreviewCapabilitiesPromise;
+}
+
+function setAudioPreviewResponseHeaders(
+  response: ServerResponse,
+  sourceKind: "playback" | "master",
+  deliveryMode: "direct" | "transcoded",
+): void {
+  response.setHeader(
+    "Cache-Control",
+    "private, no-store",
+  );
+  response.setHeader(
+    "X-Content-Type-Options",
+    "nosniff",
+  );
+  response.setHeader(
+    "X-Audio-Preview-Source",
+    sourceKind,
+  );
+  response.setHeader(
+    "X-Audio-Preview-Delivery",
+    deliveryMode,
+  );
+}
+
+async function sendTranscodedAudioPreview(
+  request: IncomingMessage,
+  response: ServerResponse,
+  sourcePath: string,
+  sourceKind: "playback" | "master",
+): Promise<void> {
+  const capabilities =
+    await getAudioPreviewFfmpegCapabilities();
+
+  let encoder: string;
+
+  try {
+    encoder =
+      selectAudioPreviewMp3Encoder(
+        capabilities,
+      );
+  } catch (error) {
+    sendJson(response, 503, {
+      error:
+        error instanceof Error
+          ? error.message
+          : "Live audio preview transcoding is unavailable.",
+    });
+    return;
+  }
+
+  response.statusCode = 200;
+  response.setHeader(
+    "Content-Type",
+    "audio/mpeg",
+  );
+  setAudioPreviewResponseHeaders(
+    response,
+    sourceKind,
+    "transcoded",
+  );
+
+  if (request.method === "HEAD") {
+    response.end();
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    const child = spawn(
+      capabilities.executable,
+      buildAudioPreviewTranscodeArgs(
+        sourcePath,
+        encoder,
+      ),
+      {
+        stdio: [
+          "ignore",
+          "pipe",
+          "pipe",
+        ],
+      },
+    );
+    let stderr = "";
+    let settled = false;
+
+    const settle = () => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      request.removeListener(
+        "aborted",
+        stopChild,
+      );
+      response.removeListener(
+        "close",
+        stopChild,
+      );
+      resolve();
+    };
+
+    const stopChild = () => {
+      if (!child.killed) {
+        child.kill("SIGKILL");
+      }
+    };
+
+    child.stderr.on("data", (chunk) => {
+      if (stderr.length < 16_384) {
+        stderr += chunk.toString();
+      }
+    });
+
+    child.once("spawn", () => {
+      child.stdout.pipe(response);
+    });
+
+    child.once("error", (error) => {
+      if (!response.headersSent) {
+        sendJson(response, 503, {
+          error:
+            `Unable to start FFmpeg preview transcoding: ${error.message}`,
+        });
+      } else if (!response.destroyed) {
+        response.destroy(error);
+      }
+
+      settle();
+    });
+
+    child.once("close", (code, signal) => {
+      if (
+        code !== 0 &&
+        !request.destroyed &&
+        !response.destroyed
+      ) {
+        const reason = stderr.trim() ||
+          `FFmpeg exited with code ${String(code)}${
+            signal ? ` (${signal})` : ""
+          }.`;
+
+        if (!response.headersSent) {
+          sendJson(response, 415, {
+            error:
+              `Unable to decode this audio preview source: ${reason}`,
+          });
+        } else {
+          response.destroy(
+            new Error(reason),
+          );
+        }
+      }
+
+      settle();
+    });
+
+    request.once("aborted", stopChild);
+    response.once("close", stopChild);
+  });
+}
+
+async function sendLibraryAudioPreview(
+  request: IncomingMessage,
+  response: ServerResponse,
+  releaseId: string,
+  trackId: string,
+): Promise<void> {
+  const mediaRoot = await resolveMediaRoot();
+  const release = await scanReleaseById(
+    mediaRoot,
+    releaseId,
+  );
+
+  if (!release) {
+    throw new Error(
+      `Release not found: ${releaseId}`,
+    );
+  }
+
+  const track = release.tracks.find(
+    (candidate) => candidate.id === trackId,
+  );
+
+  if (!track) {
+    throw new Error(
+      `Track not found: ${trackId}`,
+    );
+  }
+
+  const selection =
+    selectTrackAudioPreview(track);
+  const deliveryMode =
+    getAudioPreviewDeliveryMode(
+      selection.asset.extension,
+    );
+
+  const candidatePath = assertPathWithinRoot(
+    mediaRoot,
+    path.join(
+      mediaRoot,
+      selection.asset.relativePath,
+    ),
+  );
+  const canonicalPath = await realpath(
+    candidatePath,
+  );
+  assertPathWithinRoot(mediaRoot, canonicalPath);
+
+  const fileStats = await stat(canonicalPath);
+
+  if (!fileStats.isFile()) {
+    throw new Error(
+      "Audio preview source is not a regular file.",
+    );
+  }
+
+  if (fileStats.size <= 0) {
+    throw new Error(
+      "Audio preview source is empty.",
+    );
+  }
+
+  if (deliveryMode === "transcoded") {
+    await sendTranscodedAudioPreview(
+      request,
+      response,
+      canonicalPath,
+      selection.sourceKind,
+    );
+    return;
+  }
+
+  const contentType =
+    getAudioPreviewContentType(
+      selection.asset.extension,
+    );
+
+  if (!contentType) {
+    response.statusCode = 415;
+    response.end();
+    return;
+  }
+
+  let range = null;
+
+  try {
+    range = parseSingleByteRange(
+      request.headers.range,
+      fileStats.size,
+    );
+  } catch {
+    response.statusCode = 416;
+    response.setHeader(
+      "Content-Range",
+      `bytes */${fileStats.size}`,
+    );
+    response.end();
+    return;
+  }
+
+  const start = range?.start ?? 0;
+  const end =
+    range?.end ?? Math.max(0, fileStats.size - 1);
+  const contentLength = end - start + 1;
+
+  response.statusCode = range ? 206 : 200;
+  response.setHeader("Content-Type", contentType);
+  response.setHeader(
+    "Content-Length",
+    String(contentLength),
+  );
+  response.setHeader("Accept-Ranges", "bytes");
+  setAudioPreviewResponseHeaders(
+    response,
+    selection.sourceKind,
+    "direct",
+  );
+
+  if (range) {
+    response.setHeader(
+      "Content-Range",
+      `bytes ${start}-${end}/${fileStats.size}`,
+    );
+  }
+
+  if (request.method === "HEAD") {
+    response.end();
+    return;
+  }
+
+  const stream = createReadStream(
+    canonicalPath,
+    { start, end },
+  );
+
+  stream.on("error", () => {
+    if (!response.headersSent) {
+      response.statusCode = 500;
+    }
+
+    response.destroy();
+  });
+  stream.pipe(response);
 }
 
 function assertIngestSourcesReviewed(
@@ -649,6 +985,44 @@ const server = createServer(
     }
 
     if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/ingest/staging-target"
+    ) {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+
+      if (!releaseId) {
+        sendJson(response, 400, {
+          error: "Missing staging release ID",
+        });
+        return;
+      }
+
+      try {
+        const outputRoot =
+          await resolveIngestOutputRoot();
+        sendJson(
+          response,
+          200,
+          await inspectIngestStagingTarget(
+            outputRoot,
+            releaseId,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown staging-target error",
+        });
+      }
+
+      return;
+    }
+
+    if (
       request.method === "POST" &&
       requestUrl.pathname ===
         "/api/ingest/build-preview"
@@ -790,13 +1164,55 @@ const server = createServer(
               defaultIngestOutputRoot,
           );
 
-        sendJson(response, 201, result);
+        sendJson(
+          response,
+          result.operation === "create" ? 201 : 200,
+          result,
+        );
       } catch (error) {
         sendJson(response, 400, {
           error:
             error instanceof Error
               ? error.message
               : "Unknown ingest build error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      (request.method === "GET" ||
+        request.method === "HEAD") &&
+      requestUrl.pathname ===
+        "/api/library/audio-preview"
+    ) {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+      const trackId =
+        requestUrl.searchParams.get("track");
+
+      if (!releaseId || !trackId) {
+        sendJson(response, 400, {
+          error:
+            "Missing release or track query parameter",
+        });
+        return;
+      }
+
+      try {
+        await sendLibraryAudioPreview(
+          request,
+          response,
+          releaseId,
+          trackId,
+        );
+      } catch (error) {
+        sendJson(response, 404, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Audio preview not found",
         });
       }
 
@@ -845,6 +1261,99 @@ const server = createServer(
         200,
         await detectFfmpegCapabilities(),
       );
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/media-processing/plan"
+    ) {
+      try {
+        const releaseId =
+          requestUrl.searchParams.get(
+            "release",
+          );
+        const trackId =
+          requestUrl.searchParams.get(
+            "track",
+          ) ?? undefined;
+        const peaksPerSecondValue =
+          requestUrl.searchParams.get(
+            "peaksPerSecond",
+          );
+
+        if (!releaseId) {
+          sendJson(response, 400, {
+            error:
+              "Missing release query parameter",
+          });
+          return;
+        }
+
+        const mediaRoot =
+          await resolveMediaRoot();
+        const release =
+          await scanReleaseById(
+            mediaRoot,
+            releaseId,
+          );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        if (
+          trackId &&
+          !release.tracks.some(
+            (track) =>
+              track.id === trackId,
+          )
+        ) {
+          sendJson(response, 404, {
+            error: "Track not found",
+          });
+          return;
+        }
+
+        const capabilities =
+          await detectFfmpegCapabilities();
+
+        sendJson(
+          response,
+          200,
+          await buildMediaProcessingPlan(
+            mediaRoot,
+            release,
+            capabilities,
+            {
+              ...(trackId
+                ? { trackId }
+                : {}),
+              ...(peaksPerSecondValue ===
+              null
+                ? {}
+                : {
+                    peaksPerSecond:
+                      Number(
+                        peaksPerSecondValue,
+                      ),
+                  }),
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown media-processing plan error",
+        });
+      }
+
       return;
     }
 
@@ -2596,6 +3105,24 @@ const server = createServer(
             ? body.managedTechnicalContributorSourceIndexes
             : undefined;
 
+        const arrangementContributors =
+          "arrangementContributors" in body
+            ? body.arrangementContributors
+            : undefined;
+
+        const managedArrangementContributorSourceIndexes =
+          "managedArrangementContributorSourceIndexes" in
+          body
+            ? body.managedArrangementContributorSourceIndexes
+            : undefined;
+
+        const arrangementContributorPath =
+          "arrangementContributorPath" in body &&
+          typeof body.arrangementContributorPath ===
+            "string"
+            ? body.arrangementContributorPath
+            : "track.contributors";
+
         const technicalContributorPath =
           "technicalContributorPath" in body &&
           typeof body.technicalContributorPath ===
@@ -2624,6 +3151,13 @@ const server = createServer(
             )
           ) ||
           !(
+            arrangementContributors ===
+              undefined ||
+            Array.isArray(
+              arrangementContributors,
+            )
+          ) ||
+          !(
             managedTechnicalContributorSourceIndexes ===
               undefined ||
             (
@@ -2637,10 +3171,27 @@ const server = createServer(
               )
             )
           ) ||
+          !(
+            managedArrangementContributorSourceIndexes ===
+              undefined ||
+            (
+              Array.isArray(
+                managedArrangementContributorSourceIndexes,
+              ) &&
+              managedArrangementContributorSourceIndexes.every(
+                (value: unknown) =>
+                  typeof value === "number",
+              )
+            )
+          ) ||
           ![
             "track.contributors",
             "release.credits.contributors",
-          ].includes(technicalContributorPath)
+          ].includes(technicalContributorPath) ||
+          ![
+            "track.contributors",
+            "release.credits.contributors",
+          ].includes(arrangementContributorPath)
         ) {
           sendJson(response, 400, {
             error:
@@ -2781,11 +3332,54 @@ const server = createServer(
                 },
               );
 
+        const normalizedArrangementContributors =
+          arrangementContributors === undefined
+            ? undefined
+            : arrangementContributors.map(
+                (
+                  contributor,
+                  contributorIndex,
+                ) => {
+                  if (
+                    typeof contributor !== "object" ||
+                    contributor === null ||
+                    !("sourceIndex" in contributor) ||
+                    !(
+                      contributor.sourceIndex === null ||
+                      typeof contributor.sourceIndex === "number"
+                    ) ||
+                    !("name" in contributor) ||
+                    typeof contributor.name !== "string" ||
+                    !("role" in contributor) ||
+                    typeof contributor.role !== "string" ||
+                    !("sortName" in contributor) ||
+                    typeof contributor.sortName !== "string"
+                  ) {
+                    throw new Error(
+                      `Arrangement contributor ${contributorIndex + 1} requires sourceIndex, name, role, and sortName`,
+                    );
+                  }
+
+                  return {
+                    sourceIndex: contributor.sourceIndex,
+                    name: contributor.name,
+                    role: contributor.role,
+                    sortName: contributor.sortName,
+                  };
+                },
+              );
+
         const normalizedManagedTechnicalContributorSourceIndexes =
           managedTechnicalContributorSourceIndexes ===
             undefined
             ? []
             : managedTechnicalContributorSourceIndexes;
+
+        const normalizedManagedArrangementContributorSourceIndexes =
+          managedArrangementContributorSourceIndexes ===
+            undefined
+            ? []
+            : managedArrangementContributorSourceIndexes;
 
         const mediaRoot =
           await resolveMediaRoot();
@@ -2822,6 +3416,11 @@ const server = createServer(
             performerPath as
               | "track.performers"
               | "release.credits.performers",
+            normalizedArrangementContributors,
+            normalizedManagedArrangementContributorSourceIndexes,
+            arrangementContributorPath as
+              | "track.contributors"
+              | "release.credits.contributors",
           );
 
         const totals =

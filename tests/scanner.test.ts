@@ -162,6 +162,13 @@ test(
             ),
             "",
           ),
+          writeFile(
+            path.join(
+              trackPath,
+              "audio-playback.mp3",
+            ),
+            "",
+          ),
         ]);
 
         const result =
@@ -200,6 +207,75 @@ test(
             (asset) => asset.filename,
           ),
           ["audio-master.wav"],
+        );
+        assert.deepEqual(
+          track.playbackAudio?.map(
+            (asset) => asset.filename,
+          ),
+          ["audio-playback.mp3"],
+        );
+      },
+    );
+  },
+);
+
+test(
+  "discovers extended archival audio-master formats for live preview transcoding",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const releasePath = path.join(
+          mediaRoot,
+          "releases",
+          "2026-07-21_extended-audio",
+        );
+        const cafTrackPath = path.join(
+          releasePath,
+          "tracks",
+          "artist_01_caf-track",
+        );
+        const wmaTrackPath = path.join(
+          releasePath,
+          "tracks",
+          "artist_02_wma-track",
+        );
+
+        await mkdir(cafTrackPath, {
+          recursive: true,
+        });
+        await mkdir(wmaTrackPath, {
+          recursive: true,
+        });
+        await writeFile(
+          path.join(
+            cafTrackPath,
+            "audio-master.caf",
+          ),
+          "",
+        );
+        await writeFile(
+          path.join(
+            wmaTrackPath,
+            "audio-master.wma",
+          ),
+          "",
+        );
+
+        const result =
+          await scanMediaLibrary(mediaRoot);
+        const tracks =
+          result.releases[0]?.tracks ?? [];
+
+        assert.deepEqual(
+          tracks.flatMap((track) =>
+            track.audioMasters.map(
+              (asset) => asset.filename,
+            ),
+          ),
+          [
+            "audio-master.caf",
+            "audio-master.wma",
+          ],
         );
       },
     );

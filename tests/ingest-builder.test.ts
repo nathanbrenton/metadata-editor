@@ -16,6 +16,8 @@ import {
 } from "smol-toml";
 
 import {
+  INGEST_BUILD_CONFIRMATION_PHRASE,
+  INGEST_UPDATE_CONFIRMATION_PHRASE,
   createDefaultIngestBuildDraft,
 } from "../shared/ingest-builder.js";
 import type {
@@ -24,6 +26,7 @@ import type {
 } from "../shared/ingest-types.js";
 import {
   executeIngestReleaseBuild,
+  inspectIngestStagingTarget,
   prepareIngestReleaseBuild,
 } from "../server/ingest-builder.js";
 
@@ -534,10 +537,9 @@ test(
 );
 
 test(
-  "refuses an existing release and a changed inspected source",
+  "requires an ingest receipt before updating an existing release and still rejects changed inspected sources",
   async (t) => {
-    const fixture =
-      await createFixture();
+    const fixture = await createFixture();
 
     t.after(async () => {
       await rm(fixture.root, {
@@ -557,17 +559,14 @@ test(
       },
     );
 
-    const blocked =
-      await prepareIngestReleaseBuild(
+    await assert.rejects(
+      prepareIngestReleaseBuild(
         fixture.ingestRoot,
         fixture.outputRoot,
         fixture.inspection,
         fixture.draft,
-      );
-
-    assert.ok(
-      blocked.preview.summary
-        .blockedCount > 0,
+      ),
+      /ingest-receipt\.json is missing/i,
     );
 
     await rm(
@@ -596,6 +595,267 @@ test(
       ),
       /changed after inspection/i,
     );
+  },
+);
+
+test(
+  "adds and reorders tracks while preserving stable IDs and authored metadata",
+  async (t) => {
+    const fixture = await createFixture();
+
+    t.after(async () => {
+      await rm(fixture.root, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    const created = await executeIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      fixture.inspection,
+      fixture.draft,
+      INGEST_BUILD_CONFIRMATION_PHRASE,
+    );
+
+    assert.equal(created.operation, "create");
+
+    const releaseRoot = path.join(
+      fixture.outputRoot,
+      created.releaseRelativePath,
+    );
+    const initialReceipt = JSON.parse(
+      await readFile(
+        path.join(releaseRoot, "ingest-receipt.json"),
+        "utf8",
+      ),
+    ) as {
+      tracks: Array<{
+        id: string;
+        sourceRelativePath: string;
+        destinationRelativePath: string;
+      }>;
+    };
+    const originalTrack = initialReceipt.tracks[0];
+    const originalTrackRoot = path.join(
+      fixture.outputRoot,
+      path.posix.dirname(
+        originalTrack.destinationRelativePath,
+      ),
+    );
+    const originalTrackTomlPath = path.join(
+      originalTrackRoot,
+      "track.toml",
+    );
+    await writeFile(
+      originalTrackTomlPath,
+      `${await readFile(originalTrackTomlPath, "utf8")}\n[editor]\ncustom_note = "preserve me"\n`,
+      "utf8",
+    );
+
+    const secondFilename = "160726_New_Song_v1.m4a";
+    const secondSourcePath = path.join(
+      fixture.ingestRoot,
+      fixture.inspection.candidate.id,
+      secondFilename,
+    );
+    await writeFile(
+      secondSourcePath,
+      "second-fake-m4a-source-bytes",
+      "utf8",
+    );
+    const secondStats = await stat(secondSourcePath);
+    const firstAudio = fixture.inspection.files.find(
+      (file) => file.mediaKind === "audio",
+    );
+    assert.ok(firstAudio);
+
+    const secondInspection: IngestFileInspection = {
+      ...firstAudio,
+      relativePath: `${fixture.inspection.candidate.id}/${secondFilename}`,
+      filename: secondFilename,
+      sizeBytes: secondStats.size,
+      modifiedAt: secondStats.mtime.toISOString(),
+      embeddedMetadata: {
+        artist: "Nathan Brenton",
+        title: "New Song",
+      },
+      evidence: [
+        {
+          field: "date",
+          value: "2016-07-26",
+          source: "filename",
+          rawValue: secondFilename,
+          confidence: "high",
+          rule: "date-yymmdd-anchor-v1",
+        },
+        {
+          field: "track.title",
+          value: "New Song",
+          source: "filename",
+          rawValue: secondFilename,
+          confidence: "high",
+          rule: "filename-title-v1",
+        },
+      ],
+    };
+    const updateInspection: IngestCandidateInspection = {
+      ...fixture.inspection,
+      files: [
+        ...fixture.inspection.files,
+        secondInspection,
+      ],
+      candidate: {
+        ...fixture.inspection.candidate,
+        fileCount:
+          fixture.inspection.candidate.fileCount + 1,
+        audioCount:
+          fixture.inspection.candidate.audioCount + 1,
+        totalSizeBytes:
+          fixture.inspection.candidate.totalSizeBytes +
+          secondStats.size,
+      },
+    };
+    const updateDraft = createDefaultIngestBuildDraft(
+      updateInspection,
+    );
+    updateDraft.releaseArtist = "Nathan Brenton";
+    updateDraft.tracks = updateDraft.tracks.map((track) => ({
+      ...track,
+      artist: "Nathan Brenton",
+      trackNumber:
+        track.sourceRelativePath ===
+        originalTrack.sourceRelativePath
+          ? 2
+          : 1,
+    }));
+
+    const status = await inspectIngestStagingTarget(
+      fixture.outputRoot,
+      updateDraft.releaseId,
+    );
+    assert.equal(status.operation, "update");
+    assert.equal(status.exists, true);
+
+    const prepared = await prepareIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      updateInspection,
+      updateDraft,
+    );
+
+    assert.equal(prepared.preview.operation, "update");
+    assert.equal(
+      prepared.preview.summary.addedTrackCount,
+      1,
+    );
+    assert.equal(
+      prepared.preview.summary.reorderedTrackCount,
+      1,
+    );
+    assert.equal(
+      prepared.preview.summary.removedFileCount,
+      0,
+    );
+    assert.ok(
+      prepared.preview.items.some(
+        (item) => item.action === "add",
+      ),
+    );
+    assert.ok(
+      prepared.preview.items.some(
+        (item) => item.action === "reorder",
+      ),
+    );
+    assert.ok(
+      prepared.preview.items.some(
+        (item) => item.action === "preserve",
+      ),
+    );
+    assert.ok(
+      prepared.preview.items.some(
+        (item) =>
+          item.destinationRelativePath ===
+            path.posix.dirname(
+              originalTrack.destinationRelativePath,
+            ) &&
+          item.adjustment?.includes(originalTrack.id),
+      ),
+    );
+
+    await assert.rejects(
+      executeIngestReleaseBuild(
+        fixture.ingestRoot,
+        fixture.outputRoot,
+        updateInspection,
+        updateDraft,
+        INGEST_BUILD_CONFIRMATION_PHRASE,
+      ),
+      /UPDATE_STAGING_RELEASE/,
+    );
+
+    const updated = await executeIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      updateInspection,
+      updateDraft,
+      INGEST_UPDATE_CONFIRMATION_PHRASE,
+    );
+
+    assert.equal(updated.operation, "update");
+    assert.ok(updated.createdFiles.length > 0);
+    assert.ok(updated.updatedFiles.length > 0);
+    assert.ok(updated.preservedFiles.length > 0);
+
+    const preservedTrackToml = parse(
+      await readFile(originalTrackTomlPath, "utf8"),
+    ) as {
+      track?: {
+        numbering?: {
+          track_number?: number;
+          track_total?: number;
+        };
+      };
+      editor?: {
+        custom_note?: string;
+      };
+    };
+    assert.equal(
+      preservedTrackToml.track?.numbering?.track_number,
+      2,
+    );
+    assert.equal(
+      preservedTrackToml.track?.numbering?.track_total,
+      2,
+    );
+    assert.equal(
+      preservedTrackToml.editor?.custom_note,
+      "preserve me",
+    );
+
+    const updatedReceipt = JSON.parse(
+      await readFile(
+        path.join(releaseRoot, "ingest-receipt.json"),
+        "utf8",
+      ),
+    ) as {
+      tracks: Array<{
+        id: string;
+        number: number;
+        sourceRelativePath: string;
+      }>;
+      updates?: unknown[];
+    };
+    assert.equal(updatedReceipt.tracks.length, 2);
+    assert.equal(
+      updatedReceipt.tracks.find(
+        (track) =>
+          track.sourceRelativePath ===
+          originalTrack.sourceRelativePath,
+      )?.id,
+      originalTrack.id,
+    );
+    assert.equal(updatedReceipt.updates?.length, 1);
   },
 );
 

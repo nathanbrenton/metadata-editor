@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   applyMetadataChanges,
+  applyArrangementContributorRecords,
+  applyContributorRecordFamilies,
   applyMetadataDeletions,
   applyPerformerRecords,
   applyTechnicalContributorRecords,
@@ -1079,6 +1081,133 @@ test(
           role: "guitar",
         },
       ],
+    );
+  },
+);
+
+test(
+  "rebuilds arrangement contributors while preserving other contributor families",
+  () => {
+    const updated = applyContributorRecordFamilies(
+      {
+        track: {
+          contributors: [
+            {
+              name: "Producer",
+              role: "producer",
+              credit_id: "keep-producer",
+            },
+            {
+              name: "Engineer",
+              role: "recording engineer",
+              credit_id: "keep-engineer",
+            },
+            {
+              name: "Original Arranger",
+              role: "string arranger",
+              credit_id: "keep-arranger",
+            },
+            {
+              name: "Conductor",
+              role: "conductor",
+              credit_id: "keep-conductor",
+            },
+          ],
+        },
+      },
+      {
+        technical: {
+          records: [
+            {
+              sourceIndex: 1,
+              name: "Updated Engineer",
+              role: "recording engineer",
+              sortName: "Engineer, Updated",
+            },
+          ],
+          managedSourceIndexes: [1],
+        },
+        arrangement: {
+          records: [
+            {
+              sourceIndex: 2,
+              name: "Updated Arranger",
+              role: "string arranger",
+              sortName: "Arranger, Updated",
+            },
+            {
+              sourceIndex: null,
+              name: "New Orchestrator",
+              role: "orchestrator",
+              sortName: "Orchestrator, New",
+            },
+          ],
+          managedSourceIndexes: [2],
+        },
+      },
+    ) as {
+      track: {
+        contributors: Array<Record<string, unknown>>;
+      };
+    };
+
+    assert.deepEqual(
+      updated.track.contributors,
+      [
+        {
+          name: "Producer",
+          role: "producer",
+          credit_id: "keep-producer",
+        },
+        {
+          name: "Updated Engineer",
+          role: "recording engineer",
+          sort_name: "Engineer, Updated",
+          credit_id: "keep-engineer",
+        },
+        {
+          name: "Updated Arranger",
+          role: "string arranger",
+          sort_name: "Arranger, Updated",
+          credit_id: "keep-arranger",
+        },
+        {
+          name: "Conductor",
+          role: "conductor",
+          credit_id: "keep-conductor",
+        },
+        {
+          name: "New Orchestrator",
+          role: "orchestrator",
+          sort_name: "Orchestrator, New",
+        },
+      ],
+    );
+  },
+);
+
+test(
+  "keeps arrangement and conducting contributor roles in separate editors",
+  () => {
+    assert.throws(
+      () =>
+        applyArrangementContributorRecords(
+          {
+            track: {
+              contributors: [],
+            },
+          },
+          [
+            {
+              sourceIndex: null,
+              name: "Conductor",
+              role: "conductor",
+              sortName: "",
+            },
+          ],
+          [],
+        ),
+      /not supported by this editor/,
     );
   },
 );

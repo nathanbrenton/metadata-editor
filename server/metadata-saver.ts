@@ -26,14 +26,15 @@ import {
   applyMetadataChanges,
   applyMetadataCreations,
   applyMetadataDeletions,
+  applyContributorRecordFamilies,
   applyPerformerRecords,
-  applyTechnicalContributorRecords,
 } from "./metadata-change-set.js";
 import type {
   ReleaseScanResult,
   MetadataValueChange,
   PerformerRecordInput,
   TechnicalContributorRecordInput,
+  ArrangementContributorRecordInput,
   ScalarMetadataSaveReceipt,
 } from "./types.js";
 
@@ -100,6 +101,14 @@ export async function saveScalarMetadataChanges(
     | "track.performers"
     | "release.credits.performers" =
       "track.performers",
+  arrangementContributorRecords?:
+    ArrangementContributorRecordInput[],
+  managedArrangementContributorSourceIndexes:
+    number[] = [],
+  arrangementContributorPath:
+    | "track.contributors"
+    | "release.credits.contributors" =
+      "track.contributors",
 ): Promise<ScalarMetadataSaveReceipt> {
   if (!/^[a-f0-9]{64}$/.test(originalSha256)) {
     throw new Error(
@@ -111,6 +120,8 @@ export async function saveScalarMetadataChanges(
     changes.length === 0 &&
     performerRecords === undefined &&
     technicalContributorRecords ===
+      undefined &&
+    arrangementContributorRecords ===
       undefined &&
     deletePaths.length === 0 &&
     createChanges.length === 0
@@ -125,6 +136,8 @@ export async function saveScalarMetadataChanges(
     (
       performerRecords !== undefined ||
       technicalContributorRecords !==
+        undefined ||
+      arrangementContributorRecords !==
         undefined
     )
   ) {
@@ -135,7 +148,11 @@ export async function saveScalarMetadataChanges(
 
   if (
     createChanges.length > 0 &&
-    (performerRecords !== undefined || technicalContributorRecords !== undefined)
+    (
+      performerRecords !== undefined ||
+      technicalContributorRecords !== undefined ||
+      arrangementContributorRecords !== undefined
+    )
   ) {
     throw new Error(
       "Derived field creation and record replacement cannot be combined.",
@@ -160,6 +177,8 @@ export async function saveScalarMetadataChanges(
       createChanges.length > 0 ||
       performerRecords !== undefined ||
       technicalContributorRecords !==
+        undefined ||
+      arrangementContributorRecords !==
         undefined
     )
   ) {
@@ -213,6 +232,28 @@ export async function saveScalarMetadataChanges(
   }
 
   if (
+    arrangementContributorRecords !==
+      undefined
+  ) {
+    const targetFilename =
+      path.basename(relativePath);
+    const expectedFilename =
+      arrangementContributorPath ===
+      "release.credits.contributors"
+        ? "release.toml"
+        : "track-credits.toml";
+
+    if (targetFilename !== expectedFilename) {
+      throw new Error(
+        arrangementContributorPath ===
+        "release.credits.contributors"
+          ? "Release arrangement contributor records may only be saved in release.toml."
+          : "Arrangement contributor records may only be saved in track-credits.toml.",
+      );
+    }
+  }
+
+  if (
     performerRecords !== undefined &&
     changes.some((change) =>
       change.path.startsWith(
@@ -236,6 +277,20 @@ export async function saveScalarMetadataChanges(
   ) {
     throw new Error(
       "Indexed contributor changes cannot be combined with a technical-credit replacement.",
+    );
+  }
+
+  if (
+    arrangementContributorRecords !==
+      undefined &&
+    changes.some((change) =>
+      change.path.startsWith(
+        arrangementContributorPath,
+      ),
+    )
+  ) {
+    throw new Error(
+      "Indexed contributor changes cannot be combined with an arrangement-credit replacement.",
     );
   }
 
@@ -334,15 +389,48 @@ export async function saveScalarMetadataChanges(
   }
 
   if (
-    technicalContributorRecords !==
-      undefined
+    technicalContributorRecords !== undefined ||
+    arrangementContributorRecords !== undefined
   ) {
+    if (
+      technicalContributorRecords !== undefined &&
+      arrangementContributorRecords !== undefined &&
+      technicalContributorPath !== arrangementContributorPath
+    ) {
+      throw new Error(
+        "Technical and arrangement contributor records must target the same contributor array.",
+      );
+    }
+
+    const contributorPath =
+      technicalContributorRecords !== undefined
+        ? technicalContributorPath
+        : arrangementContributorPath;
+
     updatedDocument =
-      applyTechnicalContributorRecords(
+      applyContributorRecordFamilies(
         updatedDocument,
-        technicalContributorRecords,
-        managedTechnicalContributorSourceIndexes,
-        technicalContributorPath,
+        {
+          ...(technicalContributorRecords !== undefined
+            ? {
+                technical: {
+                  records: technicalContributorRecords,
+                  managedSourceIndexes:
+                    managedTechnicalContributorSourceIndexes,
+                },
+              }
+            : {}),
+          ...(arrangementContributorRecords !== undefined
+            ? {
+                arrangement: {
+                  records: arrangementContributorRecords,
+                  managedSourceIndexes:
+                    managedArrangementContributorSourceIndexes,
+                },
+              }
+            : {}),
+        },
+        contributorPath,
       );
   }
 

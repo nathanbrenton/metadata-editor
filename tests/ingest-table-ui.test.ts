@@ -48,3 +48,34 @@ test("keeps wide ingest tables scrollable with a sticky identity column", () => 
     /\.ingest-sticky-column\s*\{[^}]*position:\s*sticky;[^}]*left:\s*0;/s,
   );
 });
+
+test("makes each ingest candidate row mouse and keyboard actionable", () => {
+  assert.match(
+    appSource,
+    /className={`ingest-candidate-row\$\{/,
+  );
+  assert.match(
+    appSource,
+    /tabIndex=\{disabled \? -1 : 0\}/,
+  );
+  assert.match(
+    appSource,
+    /aria-label={`Inspect \$\{candidate\.displayTitle\}`}/,
+  );
+  assert.match(
+    appSource,
+    /event\.key === "Enter"[\s\S]*event\.key === " "/,
+  );
+  assert.match(
+    appSource,
+    /event\.stopPropagation\(\);[\s\S]*onInspect\(candidate\.id\);/,
+  );
+  assert.match(
+    styleSource,
+    /\.ingest-candidate-row:not\(\.is-disabled\)\s*\{[^}]*cursor:\s*pointer;/s,
+  );
+  assert.match(
+    styleSource,
+    /\.ingest-candidate-row:not\(\.is-disabled\):focus-visible\s*>\s*th,/,
+  );
+});
