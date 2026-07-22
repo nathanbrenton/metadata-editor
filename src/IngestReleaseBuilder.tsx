@@ -27,6 +27,9 @@ import type {
   IngestFileInspection,
 } from "../shared/ingest-types.js";
 import {
+  stagingDestinationPathForDisplay,
+} from "./ingest-build-display.js";
+import {
   useIngestDraft,
 } from "./useIngestDraft.js";
 
@@ -1117,7 +1120,7 @@ export function IngestReleaseBuilder({
               <thead>
                 <tr>
                   <th scope="col">Source</th>
-                  <th scope="col">Destination</th>
+                  <th scope="col">Relative destination</th>
                   <th scope="col">Roles</th>
                   <th
                     scope="col"
@@ -1147,10 +1150,13 @@ export function IngestReleaseBuilder({
                         </code>
                       </th>
                       <td>
-                        <code>
-                          {
-                            receipt.destinationRelativePath
-                          }
+                        <code
+                          title={receipt.destinationRelativePath}
+                        >
+                          {stagingDestinationPathForDisplay(
+                            receipt.destinationRelativePath,
+                            result.releaseRelativePath,
+                          )}
                         </code>
                       </td>
                       <td>
@@ -3058,7 +3064,7 @@ function BuildReview({
                 <tr>
                   <th scope="col">Action</th>
                   <th scope="col">Source</th>
-                  <th scope="col">Destination</th>
+                  <th scope="col">Relative destination</th>
                   <th scope="col">Adjustment / reason</th>
                   <th scope="col">Kind</th>
                   <th scope="col">Roles</th>
@@ -3097,8 +3103,13 @@ function BuildReview({
                         scope="row"
                         className="ingest-sticky-column"
                       >
-                        <code>
-                          {item.destinationRelativePath}
+                        <code
+                          title={item.destinationRelativePath}
+                        >
+                          {stagingDestinationPathForDisplay(
+                            item.destinationRelativePath,
+                            preview.releaseRelativePath,
+                          )}
                         </code>
                       </th>
                       <td title={item.reason}>

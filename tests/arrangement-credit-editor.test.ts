@@ -76,7 +76,7 @@ test(
 );
 
 test(
-  "creates the missing track credits document in the active credit editor",
+  "creates the missing track credits document in the selected credit family",
   () => {
     assert.match(
       appSource,
@@ -84,7 +84,7 @@ test(
     );
     assert.match(
       appSource,
-      /creatingArrangementCredits\s*=\s*activeMetadataTab === "credits"/,
+      /onCreateTrackCreditsDocument\(\s*missingTrackCreditsFile,\s*"arrangement"/,
     );
     assert.match(
       appSource,

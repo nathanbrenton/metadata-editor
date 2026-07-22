@@ -276,6 +276,19 @@ export const technicalContributorRoleOptions = [
   "transfer engineer",
 ] as const;
 
+export const writingContributorRoleOptions = [
+  "written by",
+  "songwriter",
+  "composer",
+  "music by",
+  "lyricist",
+  "lyrics by",
+  "words by",
+  "additional songwriter",
+  "additional composer",
+  "additional lyricist",
+] as const;
+
 export const contributorRoleOptions = [
   "producer",
   "co-producer",
@@ -289,9 +302,7 @@ export const contributorRoleOptions = [
   "MIDI programmer",
   ...arrangementContributorRoleOptions,
   "conductor",
-  "composer",
-  "lyricist",
-  "songwriter",
+  ...writingContributorRoleOptions,
   "publisher",
   "publishing administrator",
   "studio assistant",

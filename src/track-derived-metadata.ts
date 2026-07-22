@@ -9,6 +9,87 @@ export type GeneratedTrackSortTitle = {
   source: "Track Display Title" | "Track Title" | null;
 };
 
+export type TrackTitleDraftSnapshot = {
+  title: string;
+  version: string;
+  displayTitle: string;
+  sortTitle: string;
+};
+
+export function deriveTrackTitleDraftChanges({
+  current,
+  changedPath,
+  nextValue,
+}: {
+  current: TrackTitleDraftSnapshot;
+  changedPath:
+    | "track.title"
+    | "track.version"
+    | "track.display_title";
+  nextValue: string;
+}): DerivedMetadataChange[] {
+  const currentGeneratedDisplayTitle = formatTrackDisplayTitle(
+    current.title,
+    current.version,
+  );
+  const displayTitleIsGenerated =
+    !current.displayTitle.trim() ||
+    current.displayTitle.trim() === currentGeneratedDisplayTitle;
+  const currentGeneratedSortTitle = generateTrackSortTitle({
+    title: current.title,
+    version: current.version,
+    displayTitle: current.displayTitle,
+  }).value;
+  const sortTitleIsGenerated =
+    !current.sortTitle.trim() ||
+    current.sortTitle.trim() === currentGeneratedSortTitle;
+
+  const next = { ...current };
+  if (changedPath === "track.title") next.title = nextValue;
+  if (changedPath === "track.version") next.version = nextValue;
+  if (changedPath === "track.display_title") {
+    next.displayTitle = nextValue;
+  }
+
+  const changes: DerivedMetadataChange[] = [];
+
+  // Keep the display title live only while it still matches the generated form.
+  if (
+    changedPath !== "track.display_title" &&
+    displayTitleIsGenerated
+  ) {
+    const nextDisplayTitle = formatTrackDisplayTitle(
+      next.title,
+      next.version,
+    );
+    if (nextDisplayTitle !== current.displayTitle) {
+      changes.push({
+        path: "track.display_title",
+        value: nextDisplayTitle,
+      });
+    }
+    next.displayTitle = nextDisplayTitle;
+  }
+
+  // Keep the sort title synchronized only while it still follows the
+  // generated display/title fallback. A custom sort value remains untouched.
+  if (sortTitleIsGenerated) {
+    const nextSortTitle = generateTrackSortTitle({
+      title: next.title,
+      version: next.version,
+      displayTitle: next.displayTitle,
+    }).value;
+    if (nextSortTitle !== current.sortTitle) {
+      changes.push({
+        path: "track.sort_title",
+        value: nextSortTitle,
+      });
+    }
+  }
+
+  return changes;
+}
+
 /*
  * Prefer the display-ready title for sorting. When no authored display title
  * exists, preserve a version suffix through the generated display-title form;

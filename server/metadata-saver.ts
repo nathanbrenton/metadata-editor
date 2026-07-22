@@ -28,13 +28,21 @@ import {
   applyMetadataDeletions,
   applyContributorRecordFamilies,
   applyPerformerRecords,
+  applyWritingCreditRecords,
 } from "./metadata-change-set.js";
+import {
+  applySampleClearanceRecords,
+  applySampleRelationshipRecords,
+} from "./sample-records.js";
 import type {
   ReleaseScanResult,
   MetadataValueChange,
   PerformerRecordInput,
   TechnicalContributorRecordInput,
   ArrangementContributorRecordInput,
+  WritingCreditRecordInput,
+  SampleRelationshipRecordInput,
+  SampleClearanceRecordInput,
   ScalarMetadataSaveReceipt,
 } from "./types.js";
 
@@ -109,6 +117,12 @@ export async function saveScalarMetadataChanges(
     | "track.contributors"
     | "release.credits.contributors" =
       "track.contributors",
+  writingCreditRecords?: WritingCreditRecordInput[],
+  writingCreditBasePath:
+    | "track"
+    | "release.credits" = "track",
+  sampleRelationshipRecords?: SampleRelationshipRecordInput[],
+  sampleClearanceRecords?: SampleClearanceRecordInput[],
 ): Promise<ScalarMetadataSaveReceipt> {
   if (!/^[a-f0-9]{64}$/.test(originalSha256)) {
     throw new Error(
@@ -123,6 +137,9 @@ export async function saveScalarMetadataChanges(
       undefined &&
     arrangementContributorRecords ===
       undefined &&
+    writingCreditRecords === undefined &&
+    sampleRelationshipRecords === undefined &&
+    sampleClearanceRecords === undefined &&
     deletePaths.length === 0 &&
     createChanges.length === 0
   ) {
@@ -138,7 +155,10 @@ export async function saveScalarMetadataChanges(
       technicalContributorRecords !==
         undefined ||
       arrangementContributorRecords !==
-        undefined
+        undefined ||
+      writingCreditRecords !== undefined ||
+      sampleRelationshipRecords !== undefined ||
+      sampleClearanceRecords !== undefined
     )
   ) {
     throw new Error(
@@ -151,7 +171,10 @@ export async function saveScalarMetadataChanges(
     (
       performerRecords !== undefined ||
       technicalContributorRecords !== undefined ||
-      arrangementContributorRecords !== undefined
+      arrangementContributorRecords !== undefined ||
+      writingCreditRecords !== undefined ||
+      sampleRelationshipRecords !== undefined ||
+      sampleClearanceRecords !== undefined
     )
   ) {
     throw new Error(
@@ -179,7 +202,10 @@ export async function saveScalarMetadataChanges(
       technicalContributorRecords !==
         undefined ||
       arrangementContributorRecords !==
-        undefined
+        undefined ||
+      writingCreditRecords !== undefined ||
+      sampleRelationshipRecords !== undefined ||
+      sampleClearanceRecords !== undefined
     )
   ) {
     throw new Error(
@@ -253,6 +279,33 @@ export async function saveScalarMetadataChanges(
     }
   }
 
+  if (writingCreditRecords !== undefined) {
+    const targetFilename = path.basename(relativePath);
+    const expectedFilename =
+      writingCreditBasePath === "release.credits"
+        ? "release.toml"
+        : "track-credits.toml";
+
+    if (targetFilename !== expectedFilename) {
+      throw new Error(
+        writingCreditBasePath === "release.credits"
+          ? "Release writing-credit records may only be saved in release.toml."
+          : "Track writing-credit records may only be saved in track-credits.toml.",
+      );
+    }
+  }
+
+  if (
+    sampleRelationshipRecords !== undefined ||
+    sampleClearanceRecords !== undefined
+  ) {
+    if (path.basename(relativePath) !== "track-credits.toml") {
+      throw new Error(
+        "Sample relationships and clearance records may only be saved in track-credits.toml.",
+      );
+    }
+  }
+
   if (
     performerRecords !== undefined &&
     changes.some((change) =>
@@ -291,6 +344,43 @@ export async function saveScalarMetadataChanges(
   ) {
     throw new Error(
       "Indexed contributor changes cannot be combined with an arrangement-credit replacement.",
+    );
+  }
+
+  if (
+    writingCreditRecords !== undefined &&
+    changes.some((change) =>
+      [
+        `${writingCreditBasePath}.songwriters`,
+        `${writingCreditBasePath}.composers`,
+        `${writingCreditBasePath}.lyricists`,
+      ].some((pathPrefix) =>
+        change.path.startsWith(pathPrefix),
+      ),
+    )
+  ) {
+    throw new Error(
+      "Indexed writing-credit changes cannot be combined with a writing-credit replacement.",
+    );
+  }
+
+  if (
+    sampleRelationshipRecords !== undefined &&
+    changes.some((change) => change.path.startsWith("track.samples"))
+  ) {
+    throw new Error(
+      "Indexed sample changes cannot be combined with a sample-record replacement.",
+    );
+  }
+
+  if (
+    sampleClearanceRecords !== undefined &&
+    changes.some((change) =>
+      change.path.startsWith("track.sample_clearances"),
+    )
+  ) {
+    throw new Error(
+      "Indexed sample-clearance changes cannot be combined with a clearance-record replacement.",
     );
   }
 
@@ -432,6 +522,28 @@ export async function saveScalarMetadataChanges(
         },
         contributorPath,
       );
+  }
+
+  if (writingCreditRecords !== undefined) {
+    updatedDocument = applyWritingCreditRecords(
+      updatedDocument,
+      writingCreditRecords,
+      writingCreditBasePath,
+    );
+  }
+
+  if (sampleRelationshipRecords !== undefined) {
+    updatedDocument = applySampleRelationshipRecords(
+      updatedDocument,
+      sampleRelationshipRecords,
+    );
+  }
+
+  if (sampleClearanceRecords !== undefined) {
+    updatedDocument = applySampleClearanceRecords(
+      updatedDocument,
+      sampleClearanceRecords,
+    );
   }
 
   const updatedContent =

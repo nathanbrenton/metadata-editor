@@ -11,18 +11,17 @@ import {
 } from "../src/workflow-help-content.js";
 
 
-test("defines the maintained five-stage release workflow", () => {
+test("defines the maintained four-tab release workflow", () => {
   assert.equal(
     workflowPath,
-    "Ingest → Author → Prepare → Preflight → Publish",
+    "Ingest → Staging → Library → Publish",
   );
   assert.deepEqual(
     workflowStages.map(({ id }) => id),
     [
       "ingest",
-      "author",
-      "prepare",
-      "preflight",
+      "staging",
+      "library",
       "publish",
     ],
   );
@@ -39,9 +38,8 @@ test("does not present unfinished write stages as available", () => {
     ),
     [
       ["ingest", "available"],
-      ["author", "available"],
-      ["prepare", "partial"],
-      ["preflight", "planned"],
+      ["staging", "available"],
+      ["library", "partial"],
       ["publish", "planned"],
     ],
   );
@@ -80,13 +78,13 @@ test("explains the private canonical and public deployment boundary", () => {
 
 
 test("documents incremental staging updates and track reordering", () => {
-  const ingest = workflowStages.find(
-    ({ id }) => id === "ingest",
+  const staging = workflowStages.find(
+    ({ id }) => id === "staging",
   );
   const text = [
-    ingest?.summary,
-    ingest?.currentNote,
-    ...(ingest?.steps ?? []),
+    staging?.summary,
+    staging?.currentNote,
+    ...(staging?.steps ?? []),
     ...workflowFaqItems.map(({ answer }) => answer),
   ].join(" ");
 
@@ -115,12 +113,12 @@ test("includes operational troubleshooting for media preparation", () => {
 
 
 test("documents release audio preview controls", () => {
-  const author = workflowStages.find(
-    ({ id }) => id === "author",
+  const library = workflowStages.find(
+    ({ id }) => id === "library",
   );
   const combinedText = [
-    author?.currentNote,
-    ...(author?.steps ?? []),
+    library?.currentNote,
+    ...(library?.steps ?? []),
     ...workflowFaqItems.map(
       ({ question, answer }) =>
         `${question} ${answer}`,
@@ -134,4 +132,17 @@ test("documents release audio preview controls", () => {
   assert.match(combinedText, /audio preview/i);
   assert.match(combinedText, /audio-playback\.mp3/i);
   assert.match(combinedText, /sidebar|transport/i);
+});
+
+
+test("documents the active-tab summary in the sticky footer", () => {
+  const combinedText = workflowFaqItems
+    .map(({ question, answer }) =>
+      `${question} ${answer}`,
+    )
+    .join(" ");
+
+  assert.match(combinedText, /sticky footer/i);
+  assert.match(combinedText, /Ingest displays the drop point/i);
+  assert.match(combinedText, /Publish displays readiness counts/i);
 });

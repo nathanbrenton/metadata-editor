@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   deriveTrackSaveChanges,
+  deriveTrackTitleDraftChanges,
   generateTrackSortTitle,
 } from "../src/track-derived-metadata.js";
 
@@ -122,5 +123,67 @@ test("creates and updates generated sort titles while preserving custom values",
         change.path === "track.sort_title",
     ),
     false,
+  );
+});
+
+test("updates generated display and sort titles immediately when track version changes", () => {
+  assert.deepEqual(
+    deriveTrackTitleDraftChanges({
+      current: {
+        title: "Good Afternoon",
+        version: "Take 1",
+        displayTitle: "Good Afternoon (Take 1)",
+        sortTitle: "Good Afternoon (Take 1)",
+      },
+      changedPath: "track.version",
+      nextValue: "Take 2",
+    }),
+    [
+      {
+        path: "track.display_title",
+        value: "Good Afternoon (Take 2)",
+      },
+      {
+        path: "track.sort_title",
+        value: "Good Afternoon (Take 2)",
+      },
+    ],
+  );
+});
+
+test("preserves individual display and sort title overrides during version changes", () => {
+  assert.deepEqual(
+    deriveTrackTitleDraftChanges({
+      current: {
+        title: "Good Afternoon",
+        version: "Take 1",
+        displayTitle: "Good Afternoon — First Take",
+        sortTitle: "Afternoon, Good — First Take",
+      },
+      changedPath: "track.version",
+      nextValue: "Take 2",
+    }),
+    [],
+  );
+});
+
+test("keeps a generated sort title synchronized when display title is edited", () => {
+  assert.deepEqual(
+    deriveTrackTitleDraftChanges({
+      current: {
+        title: "Good Afternoon",
+        version: "Take 1",
+        displayTitle: "Good Afternoon (Take 1)",
+        sortTitle: "Good Afternoon (Take 1)",
+      },
+      changedPath: "track.display_title",
+      nextValue: "Good Afternoon — Take One",
+    }),
+    [
+      {
+        path: "track.sort_title",
+        value: "Good Afternoon — Take One",
+      },
+    ],
   );
 });

@@ -279,7 +279,15 @@ test(
       ],
       [
         "track.composers[].name",
-        "Writing, Lyrics & Language",
+        "Songwriting & Composition",
+      ],
+      [
+        "track.samples[].relationship_type",
+        "Samples & Interpolations",
+      ],
+      [
+        "track.sample_clearances[].status",
+        "Sample Clearance",
       ],
       [
         "release.rights.copyright",
@@ -416,7 +424,7 @@ test(
       ],
       [
         "track.composers[].name",
-        "Writing, Lyrics & Language",
+        "Songwriting & Composition",
       ],
       [
         "release.rights.publisher",
@@ -425,6 +433,14 @@ test(
       [
         "track.performers[].sort_name",
         "Performers",
+      ],
+      [
+        "track.samples[].credit_text",
+        "Samples & Interpolations",
+      ],
+      [
+        "track.sample_clearances[].agreement_reference",
+        "Sample Clearance",
       ],
     ]);
 
@@ -441,6 +457,47 @@ test(
         expectedGroup,
       );
     }
+  },
+);
+
+test(
+  "registers structured sample relationships and private clearance fields",
+  () => {
+    const expectedFields = new Map([
+      ["track.samples[].relationship_type", "Samples & Interpolations"],
+      ["track.samples[].source_title", "Samples & Interpolations"],
+      ["track.samples[].source_artist", "Samples & Interpolations"],
+      ["track.samples[].source_writers", "Samples & Interpolations"],
+      ["track.samples[].source_release", "Samples & Interpolations"],
+      ["track.samples[].source_year", "Samples & Interpolations"],
+      ["track.samples[].source_isrc", "Samples & Interpolations"],
+      ["track.samples[].source_iswc", "Samples & Interpolations"],
+      ["track.samples[].usage_description", "Samples & Interpolations"],
+      ["track.samples[].credit_text", "Samples & Interpolations"],
+      ["track.samples[].notes", "Samples & Interpolations"],
+      ["track.sample_clearances[].sample_reference", "Sample Clearance"],
+      ["track.sample_clearances[].status", "Sample Clearance"],
+      ["track.sample_clearances[].master_use_cleared", "Sample Clearance"],
+      ["track.sample_clearances[].publishing_cleared", "Sample Clearance"],
+      ["track.sample_clearances[].agreement_reference", "Sample Clearance"],
+      ["track.sample_clearances[].territories", "Sample Clearance"],
+      ["track.sample_clearances[].expiration_date", "Sample Clearance"],
+      ["track.sample_clearances[].notes", "Sample Clearance"],
+    ]);
+
+    for (const [path, expectedGroup] of expectedFields) {
+      const field = findMetadataField(path);
+      assert.ok(field, `Expected ${path} to be registered.`);
+      assert.equal(field.presentation?.group, expectedGroup);
+      assert.equal(field.inherited, false);
+      assert.equal(field.storageFileRole, "track-credits");
+    }
+
+    const editorOnly = findMetadataField(
+      "track.sample_clearances[].editor_only",
+    );
+    assert.ok(editorOnly);
+    assert.equal(editorOnly.displayPolicy, "developer");
   },
 );
 

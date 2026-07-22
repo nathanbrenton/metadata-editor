@@ -32,6 +32,22 @@ import {
 } from "./arrangement-credit-role.js";
 
 import {
+  defaultWritingRoleForFamily,
+  getWritingCreditDisplayPriority,
+  sortWritingCreditDisplayRecords,
+  writingCreditFamilyForRole,
+  writingCreditRoleOptions,
+  type WritingCreditFamily,
+} from "./writing-credit-role.js";
+
+import {
+  sampleClearanceStatusOptions,
+  sampleRelationshipTypeOptions,
+  type SampleClearanceRecordDraft,
+  type SampleRelationshipRecordDraft,
+} from "./sample-relationship.js";
+
+import {
   isTechnicalContributorRoleValue,
 } from "./technical-credit-role.js";
 
@@ -96,6 +112,7 @@ import {
 
 import {
   deriveTrackSaveChanges,
+  deriveTrackTitleDraftChanges,
   generateTrackSortTitle,
 } from "./track-derived-metadata.js";
 
@@ -182,6 +199,15 @@ import {
   workflowPath,
 } from "./workflow-help-content.js";
 
+import {
+  WorkflowNavigation,
+  type WorkflowApplicationView,
+} from "./WorkflowNavigation.js";
+
+import {
+  buildTrackNavigationOrder,
+} from "./track-navigation-order.js";
+
 // Defer secondary workflows until they are opened so the initial editor
 // bundle remains smaller and faster to parse.
 const LazyIngestReleaseBuilder = lazy(async () => {
@@ -201,6 +227,26 @@ const LazyWorkflowHelpView = lazy(async () => {
 
   return {
     default: module.WorkflowHelpView,
+  };
+});
+
+const LazySampleRelationshipRecordEditor = lazy(async () => {
+  const module = await import(
+    "./SampleRecordEditors.js"
+  );
+
+  return {
+    default: module.SampleRelationshipRecordEditor,
+  };
+});
+
+const LazySampleClearanceRecordEditor = lazy(async () => {
+  const module = await import(
+    "./SampleRecordEditors.js"
+  );
+
+  return {
+    default: module.SampleClearanceRecordEditor,
   };
 });
 
@@ -403,6 +449,9 @@ type MetadataFieldDefinition = {
       | "Track & Disc Numbering"
       | "Movement & Work"
       | "Performers"
+      | "Songwriting & Composition"
+      | "Samples & Interpolations"
+      | "Sample Clearance"
       | "Production"
       | "Arrangement & Orchestration"
       | "Conducting & Musical Direction"
@@ -442,8 +491,7 @@ type MetadataRegistryResponse = {
 
 
 type ApplicationView =
-  | "library"
-  | "ingest"
+  | WorkflowApplicationView
   | "compatibility"
   | "help";
 
@@ -1007,7 +1055,8 @@ export function App() {
 
   useEffect(() => {
     if (
-      applicationView === "ingest" &&
+      (applicationView === "ingest" ||
+        applicationView === "staging") &&
       ingestScan === null &&
       !ingestLoading
     ) {
@@ -1124,6 +1173,28 @@ export function App() {
     workflowHelpReturnTarget,
   ]);
 
+  const navigateWorkflowView = useCallback((
+    view: WorkflowApplicationView,
+  ) => {
+    setSelectedReleaseDetail(null);
+    setApplicationView(view);
+    setMenuOpen(false);
+  }, []);
+
+  const openReleaseInLibrary = useCallback(async (
+    releaseId: string,
+  ) => {
+    setApplicationView("library");
+    setSelectedReleaseDetail(null);
+    await openReleaseDetail(releaseId);
+  }, [openReleaseDetail]);
+
+  const openTagSearch = useCallback(() => {
+    setSelectedReleaseDetail(null);
+    setApplicationView("compatibility");
+    setMenuOpen(false);
+  }, []);
+
   const summary = useMemo(() => {
     if (!scan) {
       return null;
@@ -1176,6 +1247,258 @@ export function App() {
     };
   }, [scan]);
 
+  const footerSummary = useMemo(() => {
+    const formatCount = (
+      count: number,
+      singular: string,
+      plural = `${singular}s`,
+    ) =>
+      `${count} ${count === 1 ? singular : plural}`;
+
+    const selectedRelease = selectedReleaseDetail
+      ? scan?.releases.find(
+          (release) =>
+            release.id ===
+            selectedReleaseDetail.releaseId,
+        )
+      : null;
+
+    if (selectedRelease) {
+      const readiness =
+        summarizeReleaseScanReadiness(
+          selectedRelease,
+        );
+      const audioMasterCount =
+        selectedRelease.tracks.reduce(
+          (count, track) =>
+            count + track.audioMasters.length,
+          0,
+        );
+      const artworkCount =
+        selectedRelease.artworkMasters.length +
+        selectedRelease.tracks.reduce(
+          (count, track) =>
+            count + track.artworkMasters.length,
+          0,
+        );
+
+      return [
+        "Library",
+        formatReleaseTitle(selectedRelease.id),
+        formatCount(
+          selectedRelease.tracks.length,
+          "track",
+        ),
+        formatCount(
+          audioMasterCount,
+          "audio master",
+        ),
+        formatCount(
+          artworkCount,
+          "artwork file",
+        ),
+        readinessBadgeLabel(readiness),
+      ].join(" · ");
+    }
+
+    if (applicationView === "ingest") {
+      if (ingestInspection) {
+        const candidate =
+          ingestInspection.candidate;
+
+        return [
+          "Ingest",
+          candidate.displayTitle,
+          formatCount(
+            candidate.fileCount,
+            "file",
+          ),
+          formatCount(
+            candidate.audioCount,
+            "audio file",
+          ),
+          formatCount(
+            candidate.imageCount,
+            "image",
+          ),
+          formatByteSize(
+            candidate.totalSizeBytes,
+          ),
+          "source read-only",
+        ].join(" · ");
+      }
+
+      if (ingestScan) {
+        return [
+          "Ingest",
+          `Drop point ${ingestScan.configuredRoot}`,
+          formatCount(
+            ingestScan.candidateCount,
+            "candidate",
+          ),
+          formatCount(
+            ingestScan.fileCount,
+            "file",
+          ),
+          `ffprobe ${
+            ingestScan.capabilities.ffprobe
+              .available
+              ? "available"
+              : "unavailable"
+          }`,
+          `MediaInfo ${
+            ingestScan.capabilities.mediainfo
+              .available
+              ? "available"
+              : "unavailable"
+          }`,
+          "inspection read-only",
+        ].join(" · ");
+      }
+
+      return ingestLoading
+        ? "Ingest · scanning drop point…"
+        : "Ingest · drop summary unavailable";
+    }
+
+    if (applicationView === "staging") {
+      if (ingestInspection) {
+        const candidate =
+          ingestInspection.candidate;
+
+        return [
+          "Staging",
+          candidate.displayTitle,
+          formatCount(
+            candidate.audioCount,
+            "audio file",
+          ),
+          formatCount(
+            candidate.imageCount,
+            "image",
+          ),
+          "candidate selected",
+        ].join(" · ");
+      }
+
+      return [
+        "Staging",
+        formatCount(
+          scan?.releases.length ?? 0,
+          "release workspace",
+        ),
+        "no ingest candidate selected",
+      ].join(" · ");
+    }
+
+    if (applicationView === "publish") {
+      const publishCounts = {
+        needsWork: 0,
+        reviewCandidate: 0,
+        preflightCandidate: 0,
+      };
+
+      for (const release of scan?.releases ?? []) {
+        const label =
+          assessPublishReadiness(
+            release,
+          ).preflightLabel;
+
+        if (label === "Needs work") {
+          publishCounts.needsWork += 1;
+        } else if (label === "Review candidate") {
+          publishCounts.reviewCandidate += 1;
+        } else {
+          publishCounts.preflightCandidate += 1;
+        }
+      }
+
+      return [
+        "Publish",
+        formatCount(
+          scan?.releases.length ?? 0,
+          "release",
+        ),
+        `${publishCounts.needsWork} ${
+          publishCounts.needsWork === 1
+            ? "needs"
+            : "need"
+        } work`,
+        formatCount(
+          publishCounts.reviewCandidate,
+          "review candidate",
+        ),
+        formatCount(
+          publishCounts.preflightCandidate,
+          "preflight candidate",
+        ),
+        "publishing disabled",
+      ].join(" · ");
+    }
+
+    if (applicationView === "compatibility") {
+      return [
+        "Metadata Tag Search",
+        formatCount(
+          metadataRegistry.length,
+          "registered field",
+        ),
+        "player compatibility reference",
+      ].join(" · ");
+    }
+
+    if (applicationView === "help") {
+      return `Workflow & Help · ${workflowPath}`;
+    }
+
+    if (!summary) {
+      return loading
+        ? "Library · scanning releases…"
+        : "Library · summary unavailable";
+    }
+
+    const parts = [
+      "Library",
+      formatCount(
+        summary.releaseCount,
+        "release",
+      ),
+      formatCount(
+        summary.trackCount,
+        "track",
+      ),
+      formatCount(
+        summary.audioMasterCount,
+        "audio master",
+      ),
+      formatCount(
+        summary.artworkMasterCount,
+        "artwork file",
+      ),
+    ];
+
+    if (summary.missingMetadataCount > 0) {
+      parts.push(
+        summary.missingCoreMetadataCount > 0 ||
+          summary.missingCreditMetadataCount > 0
+          ? `${summary.missingMetadataCount} missing TOMLs (${summary.missingCoreMetadataCount} core · ${summary.missingCreditMetadataCount} credits · ${summary.missingSupplementalMetadataCount} optional)`
+          : `${summary.missingSupplementalMetadataCount} optional TOMLs not created`,
+      );
+    }
+
+    return parts.join(" · ");
+  }, [
+    applicationView,
+    ingestInspection,
+    ingestLoading,
+    ingestScan,
+    loading,
+    metadataRegistry.length,
+    scan,
+    selectedReleaseDetail,
+    summary,
+  ]);
+
   return (
     <main>
       {selectedReleaseDetail ? (
@@ -1203,6 +1526,8 @@ export function App() {
             )
           }
           onOpenWorkflowHelp={openWorkflowHelp}
+          onNavigateWorkflow={navigateWorkflowView}
+          onOpenTagSearch={openTagSearch}
         />
       ) : (
         <>
@@ -1211,43 +1536,39 @@ export function App() {
               <h1>
                 {applicationView === "help"
                   ? "Workflow & Help"
-                  : "Metadata Editor"}
+                  : applicationView === "compatibility"
+                    ? "Metadata Tag Search"
+                    : "Metadata Editor"}
               </h1>
               <p className="subtitle">
-                {applicationView === "library"
-                  ? "Library discovery and metadata editing"
-                  : applicationView === "ingest"
-                    ? "Source inspection and staging release creation"
-                    : applicationView === "compatibility"
-                      ? "Metadata field reference and player mappings"
-                      : "Release workflow, status reference, FAQ, and troubleshooting"}
+                {applicationView === "ingest"
+                  ? "Find and inspect source assets"
+                  : applicationView === "staging"
+                    ? "Build or update a release workspace"
+                    : applicationView === "library"
+                      ? "Author metadata and prepare media"
+                      : applicationView === "publish"
+                        ? "Preflight and deploy releases"
+                        : applicationView === "compatibility"
+                          ? "Metadata field reference and player mappings"
+                          : "Release workflow, status reference, FAQ, and troubleshooting"}
               </p>
             </div>
 
             <div className="page-header-actions">
-              {applicationView === "library" &&
+              {(applicationView === "library" ||
+                applicationView === "publish") &&
                 scan && (
-                  <>
-                    <p className="scan-time">
-                      Last scan:{" "}
-                      {new Date(
-                        scan.scannedAt,
-                      ).toLocaleString()}
-                    </p>
-                    <button
-                      type="button"
-                      className="primary-button"
-                      onClick={() => {
-                        setApplicationView("ingest");
-                        setIngestInspection(null);
-                      }}
-                    >
-                      Ingest
-                    </button>
-                  </>
+                  <p className="scan-time">
+                    Library scan:{" "}
+                    {new Date(
+                      scan.scannedAt,
+                    ).toLocaleString()}
+                  </p>
                 )}
 
-              {applicationView === "ingest" &&
+              {(applicationView === "ingest" ||
+                applicationView === "staging") &&
                 ingestScan && (
                   <p className="scan-time">
                     Drop scan:{" "}
@@ -1277,7 +1598,8 @@ export function App() {
               className="application-menu"
               aria-label="Application menu"
             >
-              {applicationView === "library" && (
+              {(applicationView === "library" ||
+                applicationView === "publish") && (
                 <section className="menu-card">
                   <h2>Refresh Library</h2>
                   <button
@@ -1295,7 +1617,8 @@ export function App() {
                 </section>
               )}
 
-              {applicationView === "ingest" && (
+              {(applicationView === "ingest" ||
+                applicationView === "staging") && (
                 <section className="menu-card">
                   <h2>Refresh Ingest Drop</h2>
                   <button
@@ -1320,16 +1643,39 @@ export function App() {
                     {workflowPath}
                   </p>
                   <p>
-                    Build a private release, complete
-                    its metadata, prepare public
-                    derivatives, validate it, and
-                    publish a sanitized copy.
+                    Inspect sources, stage a controlled
+                    release, author the private library,
+                    then validate and publish a sanitized
+                    deployment copy.
                   </p>
                   <button
                     type="button"
                     onClick={openWorkflowHelp}
                   >
                     View workflow guide
+                  </button>
+                </section>
+              )}
+
+              {applicationView !== "help" && (
+                <section className="menu-card">
+                  <h2>Metadata Reference</h2>
+                  <p>
+                    Search canonical fields and verified
+                    player-visible tag mappings outside the
+                    four-step release workflow.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={
+                      applicationView === "compatibility"
+                        ? () => navigateWorkflowView("library")
+                        : openTagSearch
+                    }
+                  >
+                    {applicationView === "compatibility"
+                      ? "Return to Library"
+                      : "Open Tag Search"}
                   </button>
                 </section>
               )}
@@ -1370,69 +1716,17 @@ export function App() {
             </aside>
           )}
 
-          <nav
-            className="application-tabs"
-            aria-label="Metadata editor sections"
-          >
-            <button
-              type="button"
-              className={
-                applicationView === "library"
-                  ? "active"
-                  : undefined
-              }
-              aria-pressed={
-                applicationView === "library"
-              }
-              onClick={() =>
-                setApplicationView("library")
-              }
-            >
-              Library
-            </button>
-
-            <button
-              type="button"
-              className={
-                applicationView === "ingest"
-                  ? "active"
-                  : undefined
-              }
-              aria-pressed={
-                applicationView === "ingest"
-              }
-              onClick={() => {
-                setApplicationView("ingest");
-                setIngestInspection(null);
-              }}
-            >
-              Ingest
-            </button>
-
-            <button
-              type="button"
-              className={[
-                "tag-search-tab",
-                applicationView ===
-                "compatibility"
-                  ? "active"
-                  : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-              aria-pressed={
-                applicationView ===
-                "compatibility"
-              }
-              onClick={() =>
-                setApplicationView(
-                  "compatibility",
-                )
-              }
-            >
-              Tag Search
-            </button>
-          </nav>
+          <WorkflowNavigation
+            activeView={
+              applicationView === "ingest" ||
+              applicationView === "staging" ||
+              applicationView === "library" ||
+              applicationView === "publish"
+                ? applicationView
+                : null
+            }
+            onNavigate={navigateWorkflowView}
+          />
 
           {applicationView === "help" ? (
             <Suspense
@@ -1478,18 +1772,50 @@ export function App() {
               onBackToCandidates={() =>
                 setIngestInspection(null)
               }
+              onOpenStaging={() =>
+                navigateWorkflowView("staging")
+              }
+            />
+          ) : applicationView === "staging" ? (
+            <StagingWorkspace
+              inspection={ingestInspection}
+              releases={scan?.releases ?? []}
+              inspectionError={
+                ingestInspectionError
+              }
+              onChooseCandidate={() =>
+                navigateWorkflowView("ingest")
+              }
+              onBackToInspection={() =>
+                navigateWorkflowView("ingest")
+              }
+              onOpenRelease={(releaseId) =>
+                void openReleaseInLibrary(releaseId)
+              }
               onReleaseCreated={async (
                 releaseId,
               ) => {
                 setIngestInspection(null);
-                setApplicationView(
-                  "library",
-                );
                 await refreshLibrary();
-                await openReleaseDetail(
+                await openReleaseInLibrary(
                   releaseId,
                 );
               }}
+            />
+          ) : applicationView === "publish" ? (
+            <PublishWorkspace
+              releases={scan?.releases ?? []}
+              loading={loading}
+              error={error}
+              onRefresh={() =>
+                void refreshLibrary(true)
+              }
+              onOpenRelease={(releaseId) =>
+                void openReleaseInLibrary(releaseId)
+              }
+              onOpenWorkflowHelp={
+                openWorkflowHelp
+              }
             />
           ) : (
             <>
@@ -1560,34 +1886,14 @@ export function App() {
         </>
       )}
       <footer className="app-footer">
-        {summary && (
-          <p className="library-counters">
-            {summary.releaseCount}{" "}
-            {summary.releaseCount === 1
-              ? "release"
-              : "releases"}
-            {" · "}
-            {summary.trackCount}{" "}
-            {summary.trackCount === 1
-              ? "track"
-              : "tracks"}
-            {" · "}
-            {summary.audioMasterCount} audio
-            masters
-            {" · "}
-            {summary.artworkMasterCount} artwork
-            files
-            {summary.missingMetadataCount > 0 && (
-              <>
-                {" · "}
-                {summary.missingCoreMetadataCount > 0 ||
-                summary.missingCreditMetadataCount > 0
-                  ? `${summary.missingMetadataCount} missing TOMLs (${summary.missingCoreMetadataCount} core · ${summary.missingCreditMetadataCount} credits · ${summary.missingSupplementalMetadataCount} optional)`
-                  : `${summary.missingSupplementalMetadataCount} optional TOMLs not created`}
-              </>
-            )}
-          </p>
-        )}
+        <p
+          className="footer-summary"
+          title={footerSummary}
+          aria-live="polite"
+          aria-atomic="true"
+        >
+          {footerSummary}
+        </p>
 
         <p className="footer-links">
           {!selectedReleaseDetail && (
@@ -3559,6 +3865,384 @@ function CompatibilityPlayerCell({
   );
 }
 
+function StagingWorkspace({
+  inspection,
+  releases,
+  inspectionError,
+  onChooseCandidate,
+  onBackToInspection,
+  onOpenRelease,
+  onReleaseCreated,
+}: {
+  inspection: IngestCandidateInspection | null;
+  releases: ReleaseScanResult[];
+  inspectionError: string | null;
+  onChooseCandidate: () => void;
+  onBackToInspection: () => void;
+  onOpenRelease: (releaseId: string) => void;
+  onReleaseCreated: (
+    releaseId: string,
+  ) => void | Promise<void>;
+}) {
+  if (inspection) {
+    return (
+      <Suspense
+        fallback={
+          <section
+            className="workflow-workspace"
+            aria-live="polite"
+          >
+            <p>Loading staging workspace…</p>
+          </section>
+        }
+      >
+        <LazyIngestReleaseBuilder
+          inspection={inspection}
+          onCancel={onBackToInspection}
+          onReleaseCreated={onReleaseCreated}
+        />
+      </Suspense>
+    );
+  }
+
+  return (
+    <section className="workflow-workspace staging-workspace">
+      <header className="workflow-workspace-header">
+        <div>
+          <p className="eyebrow">Step 2 · Staging</p>
+          <h2>Build or update a release workspace</h2>
+          <p>
+            Staging turns one inspected ingest candidate
+            into a reviewed release plan. Select a source
+            candidate in Ingest before configuring track
+            order, destinations, and create/update actions.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={onChooseCandidate}
+        >
+          Choose ingest candidate
+        </button>
+      </header>
+
+      <div className="workflow-workspace-notice">
+        <strong>No candidate selected</strong>
+        <span>
+          Inspect a candidate first. Returning to this tab
+          preserves the selected inspection and opens its
+          staging builder or updater.
+        </span>
+      </div>
+
+      {inspectionError && (
+        <p className="message error">
+          {inspectionError}
+        </p>
+      )}
+
+      <section className="workflow-table-panel">
+        <header>
+          <div>
+            <h3>Existing release workspaces</h3>
+            <p>
+              These library releases can be targeted by an
+              incremental update when a matching release ID
+              is configured in the staging builder.
+            </p>
+          </div>
+          <strong>{releases.length} releases</strong>
+        </header>
+
+        <div className="workflow-table-scroll">
+          <table className="workflow-workspace-table staging-release-table">
+            <thead>
+              <tr>
+                <th scope="col">Release</th>
+                <th scope="col" className="numeric">Tracks</th>
+                <th scope="col" className="numeric">Audio masters</th>
+                <th scope="col">Metadata</th>
+                <th scope="col">Update behavior</th>
+                <th scope="col" className="action-column">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {releases.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="workflow-empty-cell">
+                    No staged release workspaces were found in the configured library root.
+                  </td>
+                </tr>
+              ) : (
+                releases.map((release) => {
+                  const readiness =
+                    summarizeReleaseScanReadiness(release);
+                  const masterCount = release.tracks.reduce(
+                    (count, track) =>
+                      count + track.audioMasters.length,
+                    0,
+                  );
+
+                  return (
+                    <tr key={release.id}>
+                      <th scope="row">
+                        <strong>{formatReleaseTitle(release.id)}</strong>
+                        <code>{release.relativePath}</code>
+                      </th>
+                      <td className="numeric">{release.tracks.length}</td>
+                      <td className="numeric">{masterCount}</td>
+                      <td>
+                        <span
+                          className={`badge ${readinessTone(readiness)}`}
+                        >
+                          {readinessBadgeLabel(readiness)}
+                        </span>
+                      </td>
+                      <td>
+                        Preserve authored files; add new
+                        tracks and apply validated numbering
+                        changes only.
+                      </td>
+                      <td className="action-column">
+                        <button
+                          type="button"
+                          onClick={() => onOpenRelease(release.id)}
+                        >
+                          Open Library
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function assessPublishReadiness(
+  release: ReleaseScanResult,
+): {
+  metadataLabel: string;
+  metadataTone: string;
+  masterLabel: string;
+  playbackLabel: string;
+  artworkLabel: string;
+  preflightLabel: string;
+  preflightTone: string;
+  note: string;
+} {
+  const metadata = summarizeReleaseScanReadiness(release);
+  const readyMasters = release.tracks.filter(
+    (track) => track.audioMasters.length === 1,
+  ).length;
+  const playbackCount = release.tracks.filter(
+    (track) => track.playbackAudio !== undefined,
+  ).length;
+  const artworkCount =
+    release.artworkMasters.length +
+    release.tracks.reduce(
+      (count, track) =>
+        count + track.artworkMasters.length,
+      0,
+    );
+  const metadataBlockers = metadata.core + metadata.credits;
+  const masterBlockers =
+    release.tracks.length === 0 ||
+    readyMasters !== release.tracks.length;
+
+  if (metadataBlockers > 0 || masterBlockers) {
+    return {
+      metadataLabel: readinessBadgeLabel(metadata),
+      metadataTone: readinessTone(metadata),
+      masterLabel: `${readyMasters}/${release.tracks.length} unambiguous`,
+      playbackLabel: `${playbackCount}/${release.tracks.length} available`,
+      artworkLabel: `${artworkCount} source${artworkCount === 1 ? "" : "s"}`,
+      preflightLabel: "Needs work",
+      preflightTone: "missing",
+      note:
+        "Resolve core/credit metadata gaps and ensure exactly one audio master per track before release-wide preflight.",
+    };
+  }
+
+  if (
+    playbackCount !== release.tracks.length ||
+    artworkCount === 0 ||
+    metadata.supplemental > 0
+  ) {
+    return {
+      metadataLabel: readinessBadgeLabel(metadata),
+      metadataTone: readinessTone(metadata),
+      masterLabel: `${readyMasters}/${release.tracks.length} unambiguous`,
+      playbackLabel: `${playbackCount}/${release.tracks.length} available`,
+      artworkLabel: `${artworkCount} source${artworkCount === 1 ? "" : "s"}`,
+      preflightLabel: "Review candidate",
+      preflightTone: "warning",
+      note:
+        "Core sources are present. Prepare missing playback media, review optional metadata, and confirm artwork before publishing.",
+    };
+  }
+
+  return {
+    metadataLabel: readinessBadgeLabel(metadata),
+    metadataTone: readinessTone(metadata),
+    masterLabel: `${readyMasters}/${release.tracks.length} unambiguous`,
+    playbackLabel: `${playbackCount}/${release.tracks.length} available`,
+    artworkLabel: `${artworkCount} source${artworkCount === 1 ? "" : "s"}`,
+    preflightLabel: "Preflight candidate",
+    preflightTone: "preview",
+    note:
+      "Visible prerequisites look complete, but consolidated preflight and deployment writes are not enabled yet.",
+  };
+}
+
+function PublishWorkspace({
+  releases,
+  loading,
+  error,
+  onRefresh,
+  onOpenRelease,
+  onOpenWorkflowHelp,
+}: {
+  releases: ReleaseScanResult[];
+  loading: boolean;
+  error: string | null;
+  onRefresh: () => void;
+  onOpenRelease: (releaseId: string) => void;
+  onOpenWorkflowHelp: () => void;
+}) {
+  return (
+    <section className="workflow-workspace publish-workspace">
+      <header className="workflow-workspace-header">
+        <div>
+          <p className="eyebrow">Step 4 · Publish</p>
+          <h2>Preflight and deploy releases</h2>
+          <p>
+            Review private-library readiness before a
+            sanitized player-facing deployment is built.
+            This workspace is intentionally read-only until
+            consolidated preflight and atomic publishing are
+            implemented.
+          </p>
+        </div>
+        <div className="workflow-workspace-actions">
+          <button
+            type="button"
+            disabled={loading}
+            onClick={onRefresh}
+          >
+            {loading ? "Refreshing…" : "Refresh readiness"}
+          </button>
+          <button
+            type="button"
+            onClick={onOpenWorkflowHelp}
+          >
+            Publishing guide
+          </button>
+        </div>
+      </header>
+
+      <div className="workflow-workspace-notice planned">
+        <strong>Publishing writes are not enabled</strong>
+        <span>
+          The table consolidates currently visible evidence.
+          It does not mark a release Ready, generate a public
+          snapshot, or change deployment output.
+        </span>
+      </div>
+
+      {error && (
+        <p className="message error">{error}</p>
+      )}
+
+      <section className="workflow-table-panel">
+        <header>
+          <div>
+            <h3>Release readiness overview</h3>
+            <p>
+              Open a release in Library to resolve metadata,
+              source, playback, artwork, or derivative gaps.
+            </p>
+          </div>
+          <strong>{releases.length} releases</strong>
+        </header>
+
+        <div className="workflow-table-scroll">
+          <table className="workflow-workspace-table publish-readiness-table">
+            <thead>
+              <tr>
+                <th scope="col">Release</th>
+                <th scope="col">Metadata</th>
+                <th scope="col">Audio masters</th>
+                <th scope="col">Playback media</th>
+                <th scope="col">Artwork</th>
+                <th scope="col">Preflight</th>
+                <th scope="col">Current guidance</th>
+                <th scope="col">Publication</th>
+                <th scope="col" className="action-column">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {releases.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="workflow-empty-cell">
+                    No releases are available for readiness review.
+                  </td>
+                </tr>
+              ) : (
+                releases.map((release) => {
+                  const assessment =
+                    assessPublishReadiness(release);
+
+                  return (
+                    <tr key={release.id}>
+                      <th scope="row">
+                        <strong>{formatReleaseTitle(release.id)}</strong>
+                        <code>{release.relativePath}</code>
+                      </th>
+                      <td>
+                        <span className={`badge ${assessment.metadataTone}`}>
+                          {assessment.metadataLabel}
+                        </span>
+                      </td>
+                      <td>{assessment.masterLabel}</td>
+                      <td>{assessment.playbackLabel}</td>
+                      <td>{assessment.artworkLabel}</td>
+                      <td>
+                        <span className={`badge ${assessment.preflightTone}`}>
+                          {assessment.preflightLabel}
+                        </span>
+                      </td>
+                      <td>{assessment.note}</td>
+                      <td>
+                        <span className="badge planned">
+                          Not enabled
+                        </span>
+                      </td>
+                      <td className="action-column">
+                        <button
+                          type="button"
+                          onClick={() => onOpenRelease(release.id)}
+                        >
+                          Open Library
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  );
+}
+
 function IngestView({
   scan,
   error,
@@ -3569,7 +4253,7 @@ function IngestView({
   onRefresh,
   onInspect,
   onBackToCandidates,
-  onReleaseCreated,
+  onOpenStaging,
 }: {
   scan: IngestScanResult | null;
   error: string | null;
@@ -3580,16 +4264,14 @@ function IngestView({
   onRefresh: () => void;
   onInspect: (candidateId: string) => void;
   onBackToCandidates: () => void;
-  onReleaseCreated: (
-    releaseId: string,
-  ) => void | Promise<void>;
+  onOpenStaging: () => void;
 }) {
   if (inspection) {
     return (
       <IngestCandidateInspectionView
         inspection={inspection}
         onBack={onBackToCandidates}
-        onReleaseCreated={onReleaseCreated}
+        onOpenStaging={onOpenStaging}
       />
     );
   }
@@ -3599,12 +4281,13 @@ function IngestView({
       <header className="ingest-view-header">
         <div>
           <p className="eyebrow">
-            Source inspection and staging
+            Step 1 · Ingest
           </p>
           <h2>Ingest drop</h2>
           <p>
             Inspect top-level folders and loose media,
-            then build a reviewed staging release.
+            then continue with the selected candidate in
+            Staging.
           </p>
         </div>
 
@@ -3618,15 +4301,6 @@ function IngestView({
             : "Refresh drop point"}
         </button>
       </header>
-
-      <div className="ingest-safety-banner">
-        <strong>Source files stay untouched</strong>
-        <span>
-          Inspection is read-only. The release builder
-          copies selected bytes into a fresh staging
-          directory only after an explicit review.
-        </span>
-      </div>
 
       {error && (
         <p className="message error">{error}</p>
@@ -3647,57 +4321,6 @@ function IngestView({
 
       {scan && (
         <>
-          <section
-            className="ingest-table-panel"
-            aria-labelledby="ingest-drop-summary-heading"
-          >
-            <header className="ingest-table-panel-header">
-              <h3 id="ingest-drop-summary-heading">
-                Drop summary
-              </h3>
-            </header>
-            <div className="ingest-table-scroll">
-              <table className="ingest-table ingest-drop-summary-table">
-                <thead>
-                  <tr>
-                    <th scope="col">Drop point</th>
-                    <th scope="col" className="numeric">
-                      Candidates
-                    </th>
-                    <th scope="col" className="numeric">
-                      Files
-                    </th>
-                    <th scope="col">ffprobe</th>
-                    <th scope="col">MediaInfo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>
-                      <code>{scan.configuredRoot}</code>
-                    </td>
-                    <td className="numeric">
-                      {scan.candidateCount}
-                    </td>
-                    <td className="numeric">
-                      {scan.fileCount}
-                    </td>
-                    <td>
-                      {scan.capabilities.ffprobe.available
-                        ? "Available"
-                        : "Unavailable"}
-                    </td>
-                    <td>
-                      {scan.capabilities.mediainfo.available
-                        ? "Available"
-                        : "Unavailable"}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
           {scan.warnings.length > 0 && (
             <section className="warning-panel">
               <h3>Inspection capabilities</h3>
@@ -3888,17 +4511,13 @@ function IngestCandidateTable({
 function IngestCandidateInspectionView({
   inspection,
   onBack,
-  onReleaseCreated,
+  onOpenStaging,
 }: {
   inspection: IngestCandidateInspection;
   onBack: () => void;
-  onReleaseCreated: (
-    releaseId: string,
-  ) => void | Promise<void>;
+  onOpenStaging: () => void;
 }) {
   const { candidate } = inspection;
-  const [builderOpen, setBuilderOpen] =
-    useState(false);
   const [expandedFiles, setExpandedFiles] = useState<
     string[]
   >([]);
@@ -3912,31 +4531,6 @@ function IngestCandidateInspectionView({
         : [...current, relativePath],
     );
   };
-
-  if (builderOpen) {
-    return (
-      <Suspense
-        fallback={
-          <section
-            className="ingest-view"
-            aria-live="polite"
-          >
-            <p>Loading release builder…</p>
-          </section>
-        }
-      >
-        <LazyIngestReleaseBuilder
-          inspection={inspection}
-          onCancel={() =>
-            setBuilderOpen(false)
-          }
-          onReleaseCreated={
-            onReleaseCreated
-          }
-        />
-      </Suspense>
-    );
-  }
 
   return (
     <section className="ingest-view ingest-inspection-view">
@@ -3972,23 +4566,12 @@ function IngestCandidateInspectionView({
             type="button"
             className="primary-button"
             disabled={candidate.audioCount === 0}
-            onClick={() =>
-              setBuilderOpen(true)
-            }
+            onClick={onOpenStaging}
           >
-            Build or update staging release
+            Continue to Staging
           </button>
         </div>
       </header>
-
-      <div className="ingest-safety-banner">
-        <strong>Source-safe inspection</strong>
-        <span>
-          Review evidence here, then use the staged
-          builder to confirm metadata and copy files.
-          The ingest source is never modified.
-        </span>
-      </div>
 
       <section
         className="ingest-table-panel"
@@ -5092,6 +5675,27 @@ type ArrangementCreditDraftMap = Record<
   PerformerRecordDraft[]
 >;
 
+type WritingCreditRecordDraft =
+  PerformerRecordDraft & {
+    family: WritingCreditFamily;
+    sourceFamily: WritingCreditFamily | null;
+  };
+
+type WritingCreditDraftMap = Record<
+  string,
+  WritingCreditRecordDraft[]
+>;
+
+type SampleRelationshipDraftMap = Record<
+  string,
+  SampleRelationshipRecordDraft[]
+>;
+
+type SampleClearanceDraftMap = Record<
+  string,
+  SampleClearanceRecordDraft[]
+>;
+
 
 type MetadataValueChange = {
   path: string;
@@ -5903,6 +6507,363 @@ function serializeArrangementCreditRecords(
   return serializePerformerRecords(records);
 }
 
+type WritingCreditBasePath =
+  | "track"
+  | "release.credits";
+
+function getWritingCreditBasePath(
+  document: ParsedMetadataDocument,
+): WritingCreditBasePath {
+  return document.scope === "release"
+    ? "release.credits"
+    : "track";
+}
+
+function readWritingCreditFamilyArray(
+  document: ParsedMetadataDocument,
+  family: WritingCreditFamily,
+): unknown[] {
+  const root = document.parsed;
+  const scopeRecord =
+    document.scope === "release"
+      ? root.release
+      : root.track;
+
+  if (
+    typeof scopeRecord !== "object" ||
+    scopeRecord === null ||
+    Array.isArray(scopeRecord)
+  ) {
+    return [];
+  }
+
+  const record =
+    document.scope === "release"
+      ? (
+          "credits" in scopeRecord &&
+          typeof scopeRecord.credits === "object" &&
+          scopeRecord.credits !== null &&
+          !Array.isArray(scopeRecord.credits)
+            ? scopeRecord.credits
+            : null
+        )
+      : scopeRecord;
+
+  if (!record) {
+    return [];
+  }
+
+  const familyValue =
+    (record as Record<string, unknown>)[family];
+
+  return Array.isArray(familyValue)
+    ? familyValue
+    : [];
+}
+
+function readWritingCreditRecords(
+  document: ParsedMetadataDocument,
+): WritingCreditRecordDraft[] {
+  const families: readonly WritingCreditFamily[] = [
+    "songwriters",
+    "composers",
+    "lyricists",
+  ];
+
+  return families.flatMap((family) =>
+    readWritingCreditFamilyArray(document, family).flatMap(
+      (value, sourceIndex) => {
+        if (
+          typeof value !== "object" ||
+          value === null ||
+          Array.isArray(value)
+        ) {
+          return [];
+        }
+
+        const role =
+          "role" in value &&
+          typeof value.role === "string" &&
+          value.role.trim()
+            ? value.role
+            : defaultWritingRoleForFamily(family);
+
+        return [
+          {
+            key: [
+              "existing-writing",
+              document.scope,
+              family,
+              sourceIndex,
+            ].join("-"),
+            family,
+            sourceFamily: family,
+            sourceIndex,
+            name:
+              "name" in value &&
+              typeof value.name === "string"
+                ? value.name
+                : "",
+            role,
+            sortName:
+              "sort_name" in value &&
+              typeof value.sort_name === "string"
+                ? value.sort_name
+                : "",
+          },
+        ];
+      },
+    ),
+  );
+}
+
+function writingCreditRecordsEqual(
+  left: readonly WritingCreditRecordDraft[],
+  right: readonly WritingCreditRecordDraft[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((record, index) => {
+      const other = right[index];
+
+      return (
+        other !== undefined &&
+        record.family === other.family &&
+        record.sourceFamily === other.sourceFamily &&
+        record.sourceIndex === other.sourceIndex &&
+        record.name === other.name &&
+        record.role === other.role &&
+        record.sortName === other.sortName
+      );
+    })
+  );
+}
+
+function mergeInheritedWritingCredits(
+  releaseRecords: readonly WritingCreditRecordDraft[],
+  trackRecords: readonly WritingCreditRecordDraft[],
+): {
+  effective: WritingCreditRecordDraft[];
+  inherited: WritingCreditRecordDraft[];
+} {
+  const localFamilies = new Set(
+    trackRecords.map((record) => record.family),
+  );
+  const inherited = releaseRecords
+    .filter((record) => !localFamilies.has(record.family))
+    .map((record, index) => ({
+      ...record,
+      key: [
+        "inherited-release-writing",
+        index,
+        record.key,
+      ].join("-"),
+      sourceFamily: null,
+      sourceIndex: null,
+    }));
+
+  return {
+    effective: [...trackRecords, ...inherited],
+    inherited,
+  };
+}
+
+function serializeWritingCreditRecords(
+  records:
+    | readonly WritingCreditRecordDraft[]
+    | undefined,
+): Array<{
+  family: WritingCreditFamily;
+  sourceFamily: WritingCreditFamily | null;
+  sourceIndex: number | null;
+  name: string;
+  role: string;
+  sortName: string;
+}> | undefined {
+  return records?.map((record) => ({
+    family: record.family,
+    sourceFamily: record.sourceFamily,
+    sourceIndex: record.sourceIndex,
+    name: record.name,
+    role: record.role,
+    sortName: record.sortName,
+  }));
+}
+
+function readTrackRecordArray(
+  document: ParsedMetadataDocument,
+  key: string,
+): unknown[] {
+  const track = document.parsed.track;
+
+  if (
+    typeof track !== "object" ||
+    track === null ||
+    Array.isArray(track)
+  ) {
+    return [];
+  }
+
+  const value = (track as Record<string, unknown>)[key];
+  return Array.isArray(value) ? value : [];
+}
+
+function stringArrayValue(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
+
+function readSampleRelationshipRecords(
+  document: ParsedMetadataDocument,
+): SampleRelationshipRecordDraft[] {
+  return readTrackRecordArray(document, "samples").flatMap(
+    (value, sourceIndex) => {
+      if (
+        typeof value !== "object" ||
+        value === null ||
+        Array.isArray(value)
+      ) {
+        return [];
+      }
+
+      const record = value as Record<string, unknown>;
+      const relationshipType =
+        typeof record.relationship_type === "string" &&
+        sampleRelationshipTypeOptions.includes(
+          record.relationship_type as
+            typeof sampleRelationshipTypeOptions[number],
+        )
+          ? record.relationship_type as
+              typeof sampleRelationshipTypeOptions[number]
+          : "sample";
+
+      return [{
+        key: `existing-sample-${sourceIndex}`,
+        sourceIndex,
+        relationshipType,
+        sourceTitle:
+          typeof record.source_title === "string"
+            ? record.source_title
+            : "",
+        sourceArtist:
+          typeof record.source_artist === "string"
+            ? record.source_artist
+            : "",
+        sourceWriters: stringArrayValue(record.source_writers),
+        sourceRelease:
+          typeof record.source_release === "string"
+            ? record.source_release
+            : "",
+        sourceYear:
+          typeof record.source_year === "number"
+            ? record.source_year
+            : null,
+        sourceIsrc:
+          typeof record.source_isrc === "string"
+            ? record.source_isrc
+            : "",
+        sourceIswc:
+          typeof record.source_iswc === "string"
+            ? record.source_iswc
+            : "",
+        usageDescription:
+          typeof record.usage_description === "string"
+            ? record.usage_description
+            : "",
+        creditText:
+          typeof record.credit_text === "string"
+            ? record.credit_text
+            : "",
+        notes:
+          typeof record.notes === "string"
+            ? record.notes
+            : "",
+      }];
+    },
+  );
+}
+
+function readSampleClearanceRecords(
+  document: ParsedMetadataDocument,
+): SampleClearanceRecordDraft[] {
+  return readTrackRecordArray(document, "sample_clearances").flatMap(
+    (value, sourceIndex) => {
+      if (
+        typeof value !== "object" ||
+        value === null ||
+        Array.isArray(value)
+      ) {
+        return [];
+      }
+
+      const record = value as Record<string, unknown>;
+      const status =
+        typeof record.status === "string" &&
+        sampleClearanceStatusOptions.includes(
+          record.status as
+            typeof sampleClearanceStatusOptions[number],
+        )
+          ? record.status as
+              typeof sampleClearanceStatusOptions[number]
+          : "not reviewed";
+
+      return [{
+        key: `existing-sample-clearance-${sourceIndex}`,
+        sourceIndex,
+        sampleReference:
+          typeof record.sample_reference === "number"
+            ? record.sample_reference
+            : sourceIndex + 1,
+        status,
+        masterUseCleared: record.master_use_cleared === true,
+        publishingCleared: record.publishing_cleared === true,
+        agreementReference:
+          typeof record.agreement_reference === "string"
+            ? record.agreement_reference
+            : "",
+        territories: stringArrayValue(record.territories),
+        expirationDate:
+          typeof record.expiration_date === "string"
+            ? record.expiration_date
+            : "",
+        notes:
+          typeof record.notes === "string"
+            ? record.notes
+            : "",
+      }];
+    },
+  );
+}
+
+function sampleRelationshipRecordsEqual(
+  left: readonly SampleRelationshipRecordDraft[],
+  right: readonly SampleRelationshipRecordDraft[],
+): boolean {
+  return JSON.stringify(left.map(({ key, ...record }) => record)) ===
+    JSON.stringify(right.map(({ key, ...record }) => record));
+}
+
+function sampleClearanceRecordsEqual(
+  left: readonly SampleClearanceRecordDraft[],
+  right: readonly SampleClearanceRecordDraft[],
+): boolean {
+  return JSON.stringify(left.map(({ key, ...record }) => record)) ===
+    JSON.stringify(right.map(({ key, ...record }) => record));
+}
+
+function serializeSampleRelationshipRecords(
+  records: readonly SampleRelationshipRecordDraft[] | undefined,
+) {
+  return records?.map(({ key: _key, ...record }) => record);
+}
+
+function serializeSampleClearanceRecords(
+  records: readonly SampleClearanceRecordDraft[] | undefined,
+) {
+  return records?.map(({ key: _key, ...record }) => record);
+}
+
 type PersonRoleDisplayRecord = {
   key: string;
   name: string;
@@ -6020,6 +6981,19 @@ function sortGroupedPerformerRoleDisplays(
       record.roles,
     ),
   }));
+}
+
+function isTrackTitleDraftPath(
+  metadataPath: string,
+): metadataPath is
+  | "track.title"
+  | "track.version"
+  | "track.display_title" {
+  return (
+    metadataPath === "track.title" ||
+    metadataPath === "track.version" ||
+    metadataPath === "track.display_title"
+  );
 }
 
 function buildDocumentDraftKey(
@@ -6178,6 +7152,61 @@ function parseDraftNumber(
     : null;
 }
 
+
+function readEffectiveTrackNavigationInteger({
+  trackId,
+  metadataPath,
+  documents,
+  draft,
+}: {
+  trackId: string;
+  metadataPath:
+    | "track.numbering.track_number"
+    | "track.numbering.disc_number";
+  documents: ParsedMetadataDocument[];
+  draft: MetadataDraft;
+}): number | null {
+  const trackDocuments = documents.filter(
+    (document) =>
+      document.scope === "track" &&
+      document.trackId === trackId,
+  );
+
+  for (const document of trackDocuments) {
+    const draftKey = buildDocumentDraftKey(
+      document,
+      metadataPath,
+    );
+    const row = flattenMetadata(
+      document.parsed,
+    ).find(
+      (candidate) =>
+        candidate.path === metadataPath,
+    );
+    const value = Object.prototype.hasOwnProperty.call(
+      draft,
+      draftKey,
+    )
+      ? draft[draftKey]
+      : row?.value;
+    const parsed =
+      typeof value === "number"
+        ? value
+        : typeof value === "string"
+          ? Number(value)
+          : Number.NaN;
+
+    if (
+      Number.isSafeInteger(parsed) &&
+      parsed > 0
+    ) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
 function normalizeMetadataRegistryPath(
   metadataPath: string,
 ): string {
@@ -6332,7 +7361,7 @@ const contributorRoleGroups: Array<{
   {
     pattern:
       /\b(composer|lyricist|songwriter|written|lyrics|music by)\b/i,
-    group: "Writing, Lyrics & Language",
+    group: "Songwriting & Composition",
   },
   {
     pattern:
@@ -6351,10 +7380,13 @@ const metadataGroupOrder = [
   "Track & Disc Numbering",
   "Artists",
   "Music Business & Rights",
+  "Sample Clearance",
   "Dates",
   "Musical Analysis",
   "Movement & Work",
   "Performers",
+  "Songwriting & Composition",
+  "Samples & Interpolations",
   "Writing, Lyrics & Language",
   ...lyricsMetadataGroupOrder,
   "Arrangement & Orchestration",
@@ -6659,7 +7691,15 @@ function resolveMetadataRowGroup(
       path,
     )
   ) {
-    return "Writing, Lyrics & Language";
+    return "Songwriting & Composition";
+  }
+
+  if (/^track\.samples(\[|\.|$)/.test(path)) {
+    return "Samples & Interpolations";
+  }
+
+  if (/^track\.sample_clearances(\[|\.|$)/.test(path)) {
+    return "Sample Clearance";
   }
 
   if (
@@ -9306,6 +10346,8 @@ function ReleaseMetadataDetailView({
   onBack,
   onRefresh,
   onOpenWorkflowHelp,
+  onNavigateWorkflow,
+  onOpenTagSearch,
 }: {
   detail: ReleaseMetadataDetail;
   release: ReleaseScanResult | null;
@@ -9321,6 +10363,10 @@ function ReleaseMetadataDetailView({
   onBack: () => void;
   onRefresh: () => void | Promise<void>;
   onOpenWorkflowHelp: () => void;
+  onNavigateWorkflow: (
+    view: WorkflowApplicationView,
+  ) => void;
+  onOpenTagSearch: () => void;
 }) {
   const [setupMode, setSetupMode] =
     useState(false);
@@ -9360,6 +10406,18 @@ function ReleaseMetadataDetailView({
     setArrangementCreditDrafts,
   ] = useState<ArrangementCreditDraftMap>({});
   const [
+    writingCreditDrafts,
+    setWritingCreditDrafts,
+  ] = useState<WritingCreditDraftMap>({});
+  const [
+    sampleRelationshipDrafts,
+    setSampleRelationshipDrafts,
+  ] = useState<SampleRelationshipDraftMap>({});
+  const [
+    sampleClearanceDrafts,
+    setSampleClearanceDrafts,
+  ] = useState<SampleClearanceDraftMap>({});
+  const [
     savingDocumentPath,
     setSavingDocumentPath,
   ] = useState<string | null>(null);
@@ -9384,6 +10442,14 @@ function ReleaseMetadataDetailView({
   const [
     pendingInitialArrangementCreditPath,
     setPendingInitialArrangementCreditPath,
+  ] = useState<string | null>(null);
+  const [
+    pendingInitialWritingCreditPath,
+    setPendingInitialWritingCreditPath,
+  ] = useState<string | null>(null);
+  const [
+    pendingInitialSamplePath,
+    setPendingInitialSamplePath,
   ] = useState<string | null>(null);
   const [saveError, setSaveError] =
     useState<string | null>(null);
@@ -9659,6 +10725,8 @@ function ReleaseMetadataDetailView({
     setPendingInitialArrangementCreditPath(
       null,
     );
+    setPendingInitialWritingCreditPath(null);
+    setPendingInitialSamplePath(null);
     setReadinessTarget(null);
     setCreatingReadinessPath(null);
     setPendingReadinessDocumentPath(null);
@@ -9768,6 +10836,86 @@ function ReleaseMetadataDetailView({
     detail.documents,
     pendingInitialArrangementCreditPath,
   ]);
+
+  useEffect(() => {
+    if (!pendingInitialWritingCreditPath) {
+      return;
+    }
+
+    const document = detail.documents.find(
+      (candidate) =>
+        candidate.relativePath ===
+          pendingInitialWritingCreditPath &&
+        candidate.filename === "track-credits.toml",
+    );
+
+    if (!document) {
+      return;
+    }
+
+    setWritingCreditDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [document.relativePath]:
+        currentDrafts[document.relativePath] ?? [
+          {
+            key: [
+              "new-writing",
+              Date.now(),
+              0,
+            ].join("-"),
+            family: "songwriters",
+            sourceFamily: null,
+            sourceIndex: null,
+            name: "",
+            role: "written by",
+            sortName: "",
+          },
+        ],
+    }));
+    setPendingInitialWritingCreditPath(null);
+  }, [
+    detail.documents,
+    pendingInitialWritingCreditPath,
+  ]);
+
+  useEffect(() => {
+    if (!pendingInitialSamplePath) {
+      return;
+    }
+
+    const document = detail.documents.find(
+      (candidate) =>
+        candidate.relativePath === pendingInitialSamplePath &&
+        candidate.filename === "track-credits.toml",
+    );
+
+    if (!document) {
+      return;
+    }
+
+    setSampleRelationshipDrafts((currentDrafts) => ({
+      ...currentDrafts,
+      [document.relativePath]:
+        currentDrafts[document.relativePath] ?? [
+          {
+            key: `new-sample-${Date.now()}`,
+            sourceIndex: null,
+            relationshipType: "sample",
+            sourceTitle: "",
+            sourceArtist: "",
+            sourceWriters: [],
+            sourceRelease: "",
+            sourceYear: null,
+            sourceIsrc: "",
+            sourceIswc: "",
+            usageDescription: "",
+            creditText: "",
+            notes: "",
+          },
+        ],
+    }));
+    setPendingInitialSamplePath(null);
+  }, [detail.documents, pendingInitialSamplePath]);
 
   useEffect(() => {
     if (!pendingReadinessDocumentPath) {
@@ -9914,6 +11062,15 @@ function ReleaseMetadataDetailView({
       document,
       metadataPath,
     );
+    const originalValues = new Map<
+      string,
+      EditableMetadataValue
+    >();
+    for (const row of flattenMetadata(document.parsed)) {
+      if (isEditableMetadataValue(row.value)) {
+        originalValues.set(row.path, row.value);
+      }
+    }
 
     setDraft((currentDraft) => {
       const nextDraft = {
@@ -9929,6 +11086,66 @@ function ReleaseMetadataDetailView({
         delete nextDraft[key];
       } else {
         nextDraft[key] = nextValue;
+      }
+
+      if (
+        document.scope === "track" &&
+        document.filename === "track.toml" &&
+        typeof nextValue === "string" &&
+        isTrackTitleDraftPath(metadataPath)
+      ) {
+        const derivedChanges =
+          deriveTrackTitleDraftChanges({
+            current: {
+              title: readDocumentDraftString(
+                document,
+                "track.title",
+                currentDraft,
+              ),
+              version: readDocumentDraftString(
+                document,
+                "track.version",
+                currentDraft,
+              ),
+              displayTitle: readDocumentDraftString(
+                document,
+                "track.display_title",
+                currentDraft,
+              ),
+              sortTitle: readDocumentDraftString(
+                document,
+                "track.sort_title",
+                currentDraft,
+              ),
+            },
+            changedPath: metadataPath,
+            nextValue,
+          });
+
+        for (const change of derivedChanges) {
+          // Existing fields update immediately in the browser. Missing default
+          // fields are still created by deriveTrackSaveChanges during save.
+          if (!originalValues.has(change.path)) continue;
+
+          const derivedKey = buildDocumentDraftKey(
+            document,
+            change.path,
+          );
+          const derivedOriginalValue =
+            originalValues.get(change.path);
+
+          if (
+            derivedOriginalValue !== undefined &&
+            metadataValuesEqual(
+              change.value,
+              derivedOriginalValue,
+            )
+          ) {
+            delete nextDraft[derivedKey];
+          } else {
+            nextDraft[derivedKey] = change.value;
+          }
+        }
       }
 
       return nextDraft;
@@ -10036,6 +11253,65 @@ function ReleaseMetadataDetailView({
     );
   };
 
+  const updateWritingCreditDraft = (
+    document: ParsedMetadataDocument,
+    nextRecords: WritingCreditRecordDraft[],
+  ) => {
+    const originalRecords =
+      readWritingCreditRecords(document);
+
+    setWritingCreditDrafts((currentDrafts) => {
+      const nextDrafts = { ...currentDrafts };
+
+      if (
+        writingCreditRecordsEqual(
+          originalRecords,
+          nextRecords,
+        )
+      ) {
+        delete nextDrafts[document.relativePath];
+      } else {
+        nextDrafts[document.relativePath] = nextRecords;
+      }
+
+      return nextDrafts;
+    });
+  };
+
+  const updateSampleRelationshipDraft = (
+    document: ParsedMetadataDocument,
+    nextRecords: SampleRelationshipRecordDraft[],
+  ) => {
+    const originalRecords = readSampleRelationshipRecords(document);
+
+    setSampleRelationshipDrafts((currentDrafts) => {
+      const nextDrafts = { ...currentDrafts };
+      if (sampleRelationshipRecordsEqual(originalRecords, nextRecords)) {
+        delete nextDrafts[document.relativePath];
+      } else {
+        nextDrafts[document.relativePath] = nextRecords;
+      }
+      return nextDrafts;
+    });
+  };
+
+  const updateSampleClearanceDraft = (
+    document: ParsedMetadataDocument,
+    nextRecords: SampleClearanceRecordDraft[],
+  ) => {
+    const originalRecords = readSampleClearanceRecords(document);
+
+    setSampleClearanceDrafts((currentDrafts) => {
+      const nextDrafts = { ...currentDrafts };
+      if (sampleClearanceRecordsEqual(originalRecords, nextRecords)) {
+        delete nextDrafts[document.relativePath];
+      } else {
+        nextDrafts[document.relativePath] = nextRecords;
+      }
+      return nextDrafts;
+    });
+  };
+
   const saveDocumentDraft = async (
     document: ParsedMetadataDocument,
   ) => {
@@ -10056,6 +11332,12 @@ function ReleaseMetadataDetailView({
       arrangementCreditDrafts[
         document.relativePath
       ];
+    const writingCreditRecords =
+      writingCreditDrafts[document.relativePath];
+    const sampleRelationshipRecords =
+      sampleRelationshipDrafts[document.relativePath];
+    const sampleClearanceRecords =
+      sampleClearanceDrafts[document.relativePath];
 
     if (
       changes.length === 0 &&
@@ -10064,7 +11346,10 @@ function ReleaseMetadataDetailView({
       technicalContributorRecords ===
         undefined &&
       arrangementContributorRecords ===
-        undefined
+        undefined &&
+      writingCreditRecords === undefined &&
+      sampleRelationshipRecords === undefined &&
+      sampleClearanceRecords === undefined
     ) {
       setSaveError(
         "This document has no metadata changes to save.",
@@ -10139,6 +11424,22 @@ function ReleaseMetadataDetailView({
                 : getArrangementContributorPath(
                     document,
                   ),
+            writingCredits:
+              serializeWritingCreditRecords(
+                writingCreditRecords,
+              ),
+            writingCreditBasePath:
+              writingCreditRecords === undefined
+                ? undefined
+                : getWritingCreditBasePath(document),
+            sampleRelationships:
+              serializeSampleRelationshipRecords(
+                sampleRelationshipRecords,
+              ),
+            sampleClearances:
+              serializeSampleClearanceRecords(
+                sampleClearanceRecords,
+              ),
           }),
         },
       );
@@ -10226,6 +11527,21 @@ function ReleaseMetadataDetailView({
           return nextDrafts;
         },
       );
+      setWritingCreditDrafts((currentDrafts) => {
+        const nextDrafts = { ...currentDrafts };
+        delete nextDrafts[document.relativePath];
+        return nextDrafts;
+      });
+      setSampleRelationshipDrafts((currentDrafts) => {
+        const nextDrafts = { ...currentDrafts };
+        delete nextDrafts[document.relativePath];
+        return nextDrafts;
+      });
+      setSampleClearanceDrafts((currentDrafts) => {
+        const nextDrafts = { ...currentDrafts };
+        delete nextDrafts[document.relativePath];
+        return nextDrafts;
+      });
       const synchronizedTrackFiles =
         (
           result as
@@ -10286,6 +11602,15 @@ function ReleaseMetadataDetailView({
             ] !== undefined ||
             arrangementCreditDrafts[
               document.relativePath
+            ] !== undefined ||
+            writingCreditDrafts[
+              document.relativePath
+            ] !== undefined ||
+            sampleRelationshipDrafts[
+              document.relativePath
+            ] !== undefined ||
+            sampleClearanceDrafts[
+              document.relativePath
             ] !== undefined,
         )
         /*
@@ -10338,6 +11663,12 @@ function ReleaseMetadataDetailView({
           arrangementCreditDrafts[
             document.relativePath
           ];
+        const writingCreditRecords =
+          writingCreditDrafts[document.relativePath];
+        const sampleRelationshipRecords =
+          sampleRelationshipDrafts[document.relativePath];
+        const sampleClearanceRecords =
+          sampleClearanceDrafts[document.relativePath];
 
         const response = await fetch(
           "/api/library/save-scalar-metadata",
@@ -10399,6 +11730,22 @@ function ReleaseMetadataDetailView({
                   : getArrangementContributorPath(
                       document,
                     ),
+              writingCredits:
+                serializeWritingCreditRecords(
+                  writingCreditRecords,
+                ),
+              writingCreditBasePath:
+                writingCreditRecords === undefined
+                  ? undefined
+                  : getWritingCreditBasePath(document),
+              sampleRelationships:
+                serializeSampleRelationshipRecords(
+                  sampleRelationshipRecords,
+                ),
+              sampleClearances:
+                serializeSampleClearanceRecords(
+                  sampleClearanceRecords,
+                ),
             }),
           },
         );
@@ -10484,6 +11831,21 @@ function ReleaseMetadataDetailView({
             return nextDrafts;
           },
         );
+        setWritingCreditDrafts((currentDrafts) => {
+          const nextDrafts = { ...currentDrafts };
+          delete nextDrafts[document.relativePath];
+          return nextDrafts;
+        });
+        setSampleRelationshipDrafts((currentDrafts) => {
+          const nextDrafts = { ...currentDrafts };
+          delete nextDrafts[document.relativePath];
+          return nextDrafts;
+        });
+        setSampleClearanceDrafts((currentDrafts) => {
+          const nextDrafts = { ...currentDrafts };
+          delete nextDrafts[document.relativePath];
+          return nextDrafts;
+        });
       }
 
       activeSaveDocument = null;
@@ -10769,6 +12131,11 @@ function ReleaseMetadataDetailView({
 
   const createTrackCreditsDocument = async (
     file: MetadataFileStatus,
+    initialCreditKind:
+      | "technical"
+      | "arrangement"
+      | "writing"
+      | "samples",
   ) => {
     setCreatingTrackCreditsPath(
       file.relativePath,
@@ -10810,30 +12177,36 @@ function ReleaseMetadataDetailView({
         );
       }
 
-      const creatingArrangementCredits =
-        activeMetadataTab === "credits";
-
-      if (creatingArrangementCredits) {
-        setPendingInitialArrangementCreditPath(
-          file.relativePath,
-        );
-        setPendingInitialTechnicalCreditPath(
-          null,
-        );
-      } else {
-        setPendingInitialTechnicalCreditPath(
-          file.relativePath,
-        );
-        setPendingInitialArrangementCreditPath(
-          null,
-        );
-      }
+      setPendingInitialTechnicalCreditPath(
+        initialCreditKind === "technical"
+          ? file.relativePath
+          : null,
+      );
+      setPendingInitialArrangementCreditPath(
+        initialCreditKind === "arrangement"
+          ? file.relativePath
+          : null,
+      );
+      setPendingInitialWritingCreditPath(
+        initialCreditKind === "writing"
+          ? file.relativePath
+          : null,
+      );
+      setPendingInitialSamplePath(
+        initialCreditKind === "samples"
+          ? file.relativePath
+          : null,
+      );
 
       await onRefresh();
       onNotify(
-        creatingArrangementCredits
-          ? "Arrangement credits are ready to edit"
-          : "Technical credits are ready to edit",
+        initialCreditKind === "technical"
+          ? "Technical credits are ready to edit"
+          : initialCreditKind === "arrangement"
+            ? "Arrangement credits are ready to edit"
+            : initialCreditKind === "writing"
+              ? "Songwriting credits are ready to edit"
+              : "Sample relationships are ready to edit",
         "success",
       );
     } catch (error) {
@@ -10848,11 +12221,17 @@ function ReleaseMetadataDetailView({
       setPendingInitialArrangementCreditPath(
         null,
       );
-      setSaveError(message);
+      setPendingInitialWritingCreditPath(null);
+      setPendingInitialSamplePath(null);
+        setSaveError(message);
       onNotify(
-        activeMetadataTab === "credits"
-          ? "Arrangement credits could not be initialized"
-          : "Technical credits could not be initialized",
+        initialCreditKind === "technical"
+          ? "Technical credits could not be initialized"
+          : initialCreditKind === "arrangement"
+            ? "Arrangement credits could not be initialized"
+            : initialCreditKind === "writing"
+              ? "Songwriting credits could not be initialized"
+              : "Sample relationships could not be initialized",
         "error",
       );
     } finally {
@@ -11002,6 +12381,9 @@ function ReleaseMetadataDetailView({
     setPerformerDrafts({});
     setTechnicalCreditDrafts({});
     setArrangementCreditDrafts({});
+    setWritingCreditDrafts({});
+    setSampleRelationshipDrafts({});
+    setSampleClearanceDrafts({});
     setEditMode(false);
     onNotify(
       "Changes discarded",
@@ -11044,16 +12426,66 @@ function ReleaseMetadataDetailView({
         (trackId): trackId is string =>
           Boolean(trackId),
       );
-
-  const trackIds = Array.from(
+  const discoveredTrackIds = Array.from(
     new Set([
       ...scannedTrackIds,
       ...documentTrackIds,
     ]),
   );
+  const trackNavigation =
+    buildTrackNavigationOrder(
+      discoveredTrackIds.map(
+        (trackId, sourceIndex) => {
+          const inferredNumber =
+            inferTrackSummary(
+              trackId,
+            ).number;
+
+          return {
+            trackId,
+            sourceIndex,
+            trackNumber:
+              readEffectiveTrackNavigationInteger({
+                trackId,
+                metadataPath:
+                  "track.numbering.track_number",
+                documents: detail.documents,
+                draft,
+              }) ?? inferredNumber,
+            discNumber:
+              readEffectiveTrackNavigationInteger({
+                trackId,
+                metadataPath:
+                  "track.numbering.disc_number",
+                documents: detail.documents,
+                draft,
+              }),
+          };
+        },
+      ),
+    );
+  const trackIds =
+    trackNavigation.entries.map(
+      (entry) => entry.trackId,
+    );
+  const trackNavigationById = new Map(
+    trackNavigation.entries.map(
+      (entry) => [entry.trackId, entry],
+    ),
+  );
+  const orderedScannedTracks = trackIds
+    .map((trackId) =>
+      release?.tracks.find(
+        (track) => track.id === trackId,
+      ),
+    )
+    .filter(
+      (track): track is TrackScanResult =>
+        Boolean(track),
+    );
 
   const playableTrackIds = getPlayableTrackIds(
-    release?.tracks ?? [],
+    orderedScannedTracks,
   );
   const activeTrackIsPlayable =
     activeDocumentGroup !== "release" &&
@@ -11262,12 +12694,36 @@ function ReleaseMetadataDetailView({
             document.relativePath
           ] !== undefined,
       ).length;
+    const writingCreditCount =
+      documents.filter(
+        (document) =>
+          writingCreditDrafts[
+            document.relativePath
+          ] !== undefined,
+      ).length;
+    const sampleRelationshipCount =
+      documents.filter(
+        (document) =>
+          sampleRelationshipDrafts[
+            document.relativePath
+          ] !== undefined,
+      ).length;
+    const sampleClearanceCount =
+      documents.filter(
+        (document) =>
+          sampleClearanceDrafts[
+            document.relativePath
+          ] !== undefined,
+      ).length;
 
     return (
       scalarCount +
       performerCount +
       technicalCreditCount +
-      arrangementCreditCount
+      arrangementCreditCount +
+      writingCreditCount +
+      sampleRelationshipCount +
+      sampleClearanceCount
     );
   };
 
@@ -11352,10 +12808,20 @@ function ReleaseMetadataDetailView({
             track.id === trackId,
         )?.displayTitle ??
         formatReleaseTitle(trackId);
+      const navigationEntry =
+        trackNavigationById.get(trackId);
+      const trackNumber =
+        navigationEntry?.trackNumber ??
+        index + 1;
+      const discPrefix =
+        navigationEntry &&
+        navigationEntry.effectiveDiscNumber > 1
+          ? `Disc ${navigationEntry.effectiveDiscNumber} · `
+          : "";
 
       return {
         trackId,
-        label: `Track ${index + 1} — ${readTrackDisplayTitle(
+        label: `${discPrefix}Track ${trackNumber} — ${readTrackDisplayTitle(
           trackId,
           trackDocuments,
           inferredTitle,
@@ -11384,6 +12850,43 @@ function ReleaseMetadataDetailView({
           )?.label ??
           performerCopySource.document.trackId
         : "Track";
+
+  const trackNumberConflictMessages =
+    trackNavigation.conflicts.map(
+      (conflict) => {
+        const trackLabels =
+          conflict.trackIds.map(
+            (trackId) => {
+              const trackDocuments =
+                detail.documents.filter(
+                  (document) =>
+                    document.trackId ===
+                    trackId,
+                );
+              const inferredTitle =
+                inferredTracks.find(
+                  (track) =>
+                    track.id === trackId,
+                )?.displayTitle ??
+                formatReleaseTitle(trackId);
+
+              return readTrackDisplayTitle(
+                trackId,
+                trackDocuments,
+                inferredTitle,
+              );
+            },
+          );
+        const discLabel =
+          conflict.discNumber > 1
+            ? `Disc ${conflict.discNumber}, track ${conflict.trackNumber}`
+            : `Track ${conflict.trackNumber}`;
+
+        return `${discLabel}: ${trackLabels.join(
+          ", ",
+        )}`;
+      },
+    );
 
   const inferredReleaseArtist =
     inferCommonReleaseArtist(
@@ -11726,6 +13229,38 @@ function ReleaseMetadataDetailView({
     },
   ];
 
+  const navigateFromRelease = (
+    view: WorkflowApplicationView,
+  ) => {
+    if (view === "library") {
+      return;
+    }
+
+    if (
+      dirtyCount > 0 &&
+      !window.confirm(
+        `Discard all unsaved metadata changes and open ${view[0].toUpperCase()}${view.slice(1)}?`,
+      )
+    ) {
+      return;
+    }
+
+    onNavigateWorkflow(view);
+  };
+
+  const openTagSearchFromRelease = () => {
+    if (
+      dirtyCount > 0 &&
+      !window.confirm(
+        "Discard all unsaved metadata changes and open Metadata Tag Search?",
+      )
+    ) {
+      return;
+    }
+
+    onOpenTagSearch();
+  };
+
   return (
     <section className="metadata-detail">
       <header className="metadata-detail-header">
@@ -11910,6 +13445,23 @@ function ReleaseMetadataDetailView({
             </section>
 
             <section className="menu-card">
+              <h2>Metadata Reference</h2>
+              <p>
+                Search canonical fields and verified
+                player-visible tag mappings.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setDetailMenuOpen(false);
+                  openTagSearchFromRelease();
+                }}
+              >
+                Open Tag Search
+              </button>
+            </section>
+
+            <section className="menu-card">
               <h2>Admin</h2>
               <label className="admin-toggle">
                 <input
@@ -11933,6 +13485,11 @@ function ReleaseMetadataDetailView({
           </aside>
         )}
       </header>
+
+      <WorkflowNavigation
+        activeView="library"
+        onNavigate={navigateFromRelease}
+      />
 
       {metadataReadiness && (
         <MetadataReadinessPanel
@@ -12192,6 +13749,30 @@ function ReleaseMetadataDetailView({
         <p className="message error">
           {saveError}
         </p>
+      )}
+
+      {trackNumberConflictMessages.length > 0 && (
+        <section
+          className="track-number-conflict-notice"
+          role="alert"
+          aria-label="Duplicate track numbering"
+        >
+          <strong>
+            Duplicate track numbering
+          </strong>
+          <span>
+            Track navigation uses the assigned sequence, but matching numbers on the same disc must be resolved.
+          </span>
+          <ul>
+            {trackNumberConflictMessages.map(
+              (message) => (
+                <li key={message}>
+                  {message}
+                </li>
+              ),
+            )}
+          </ul>
+        </section>
       )}
 
       {isMetadataEmpty && (
@@ -12610,6 +14191,20 @@ function ReleaseMetadataDetailView({
               (document) =>
                 document.trackId === trackId,
             );
+          const navigationEntry =
+            trackNavigationById.get(trackId);
+          const trackNumber =
+            navigationEntry?.trackNumber ??
+            index + 1;
+          const trackNavigationLabel =
+            navigationEntry &&
+            navigationEntry.effectiveDiscNumber > 1
+              ? `Disc ${navigationEntry.effectiveDiscNumber} · Track ${trackNumber}`
+              : `Track ${trackNumber}`;
+          const numberConflictTitle =
+            navigationEntry?.hasNumberConflict
+              ? `Duplicate track number ${trackNumber} on disc ${navigationEntry.effectiveDiscNumber}`
+              : undefined;
 
           const trackDocumentCount =
             trackDocuments.length;
@@ -12647,13 +14242,16 @@ function ReleaseMetadataDetailView({
                 trackIsPlaying
                   ? "is-playing"
                   : "",
+                navigationEntry?.hasNumberConflict
+                  ? "has-numbering-conflict"
+                  : "",
               ]
                 .filter(Boolean)
                 .join(" ")}
             >
               <button
                 type="button"
-                className="metadata-document-select"
+                className="metadata-document-select track-document-select"
                 aria-pressed={
                   activeDocumentGroup ===
                   trackId
@@ -12665,11 +14263,51 @@ function ReleaseMetadataDetailView({
                   )
                 }
               >
-                <span className="document-nav-label">
-                  <strong>
-                    Track {index + 1}
-                  </strong>
-                  <small>
+                <span className="document-nav-label track-document-nav-label">
+                  <span className="track-navigation-heading">
+                    <strong className="track-navigation-number">
+                      <span>
+                        {trackNavigationLabel}
+                      </span>
+                      {navigationEntry?.hasNumberConflict && (
+                        <small
+                          className="track-number-conflict-badge"
+                          title={numberConflictTitle}
+                          aria-label={numberConflictTitle}
+                        >
+                          !
+                        </small>
+                      )}
+                    </strong>
+
+                    <span
+                      className="track-navigation-badges"
+                      aria-label="Track metadata status"
+                    >
+                      <small
+                        className="document-count"
+                        title={`${trackDocumentCount} metadata documents`}
+                      >
+                        {trackDocumentCount}
+                      </small>
+
+                      <ReadinessNavBadge
+                        scope={trackReadinessScope}
+                        skippedPaths={skippedReadinessPathSet}
+                      />
+
+                      {trackDraftCount > 0 && (
+                        <small
+                          className="unsaved-count"
+                          title={`${trackDraftCount} unsaved changes`}
+                        >
+                          {trackDraftCount}
+                        </small>
+                      )}
+                    </span>
+                  </span>
+
+                  <small className="track-navigation-title">
                     {readTrackDisplayTitle(
                       trackId,
                       trackDocuments,
@@ -12681,26 +14319,6 @@ function ReleaseMetadataDetailView({
                     )}
                   </small>
                 </span>
-                <small
-                  className="document-count"
-                  title={`${trackDocumentCount} metadata documents`}
-                >
-                  {trackDocumentCount}
-                </small>
-
-                <ReadinessNavBadge
-                  scope={trackReadinessScope}
-                  skippedPaths={skippedReadinessPathSet}
-                />
-
-                {trackDraftCount > 0 && (
-                  <small
-                    className="unsaved-count"
-                    title={`${trackDraftCount} unsaved changes`}
-                  >
-                    {trackDraftCount}
-                  </small>
-                )}
               </button>
 
               <button
@@ -12708,8 +14326,8 @@ function ReleaseMetadataDetailView({
                 className="metadata-track-preview-button"
                 aria-label={
                   trackIsPlaying
-                    ? `Pause Track ${index + 1}`
-                    : `Play Track ${index + 1}`
+                    ? `Pause ${trackNavigationLabel}`
+                    : `Play ${trackNavigationLabel}`
                 }
                 title={
                   trackPlayable
@@ -12796,6 +14414,15 @@ function ReleaseMetadataDetailView({
           arrangementCreditDrafts={
             arrangementCreditDrafts
           }
+          writingCreditDrafts={
+            writingCreditDrafts
+          }
+          sampleRelationshipDrafts={
+            sampleRelationshipDrafts
+          }
+          sampleClearanceDrafts={
+            sampleClearanceDrafts
+          }
           onDraftValueChange={
             updateDraftValue
           }
@@ -12807,6 +14434,15 @@ function ReleaseMetadataDetailView({
           }
           onArrangementCreditDraftChange={
             updateArrangementCreditDraft
+          }
+          onWritingCreditDraftChange={
+            updateWritingCreditDraft
+          }
+          onSampleRelationshipDraftChange={
+            updateSampleRelationshipDraft
+          }
+          onSampleClearanceDraftChange={
+            updateSampleClearanceDraft
           }
           onCopyPerformerCredits={(
             document,
@@ -12837,9 +14473,11 @@ function ReleaseMetadataDetailView({
           }
           onCreateTrackCreditsDocument={(
             file,
+            initialCreditKind,
           ) =>
             void createTrackCreditsDocument(
               file,
+              initialCreditKind,
             )
           }
           onAddFields={
@@ -12889,6 +14527,15 @@ function ReleaseMetadataDetailView({
             arrangementCreditDrafts={
               arrangementCreditDrafts
             }
+            writingCreditDrafts={
+              writingCreditDrafts
+            }
+            sampleRelationshipDrafts={
+              sampleRelationshipDrafts
+            }
+            sampleClearanceDrafts={
+              sampleClearanceDrafts
+            }
             onDraftValueChange={
               updateDraftValue
             }
@@ -12900,6 +14547,15 @@ function ReleaseMetadataDetailView({
             }
             onArrangementCreditDraftChange={
               updateArrangementCreditDraft
+            }
+            onWritingCreditDraftChange={
+              updateWritingCreditDraft
+            }
+            onSampleRelationshipDraftChange={
+              updateSampleRelationshipDraft
+            }
+            onSampleClearanceDraftChange={
+              updateSampleClearanceDraft
             }
             onCopyPerformerCredits={(
               document,
@@ -12938,9 +14594,11 @@ function ReleaseMetadataDetailView({
             }
             onCreateTrackCreditsDocument={(
               file,
+              initialCreditKind,
             ) =>
               void createTrackCreditsDocument(
                 file,
+                initialCreditKind,
               )
             }
             onAddFields={
@@ -13270,10 +14928,16 @@ function MetadataDocumentSection({
   performerDrafts,
   technicalCreditDrafts,
   arrangementCreditDrafts,
+  writingCreditDrafts,
+  sampleRelationshipDrafts,
+  sampleClearanceDrafts,
   onDraftValueChange,
   onPerformerDraftChange,
   onTechnicalCreditDraftChange,
   onArrangementCreditDraftChange,
+  onWritingCreditDraftChange,
+  onSampleRelationshipDraftChange,
+  onSampleClearanceDraftChange,
   onCopyPerformerCredits,
   metadataRegistry,
   activeMetadataTab,
@@ -13300,6 +14964,12 @@ function MetadataDocumentSection({
     TechnicalCreditDraftMap;
   arrangementCreditDrafts:
     ArrangementCreditDraftMap;
+  writingCreditDrafts:
+    WritingCreditDraftMap;
+  sampleRelationshipDrafts:
+    SampleRelationshipDraftMap;
+  sampleClearanceDrafts:
+    SampleClearanceDraftMap;
   onDraftValueChange: (
     document: ParsedMetadataDocument,
     metadataPath: string,
@@ -13317,6 +14987,18 @@ function MetadataDocumentSection({
   onArrangementCreditDraftChange: (
     document: ParsedMetadataDocument,
     records: PerformerRecordDraft[],
+  ) => void;
+  onWritingCreditDraftChange: (
+    document: ParsedMetadataDocument,
+    records: WritingCreditRecordDraft[],
+  ) => void;
+  onSampleRelationshipDraftChange: (
+    document: ParsedMetadataDocument,
+    records: SampleRelationshipRecordDraft[],
+  ) => void;
+  onSampleClearanceDraftChange: (
+    document: ParsedMetadataDocument,
+    records: SampleClearanceRecordDraft[],
   ) => void;
   onCopyPerformerCredits: (
     document: ParsedMetadataDocument,
@@ -13343,6 +15025,11 @@ function MetadataDocumentSection({
   ) => void;
   onCreateTrackCreditsDocument: (
     file: MetadataFileStatus,
+    initialCreditKind:
+      | "technical"
+      | "arrangement"
+      | "writing"
+      | "samples",
   ) => void;
 }) {
   const releaseTechnicalCredits =
@@ -13390,6 +15077,25 @@ function MetadataDocumentSection({
             sortName: record.sortName,
           }),
         ),
+      ),
+    );
+
+  const releaseWritingCredits =
+    releaseDocuments.flatMap((releaseDocument) =>
+      releaseDocument.filename === "release.toml"
+        ? readWritingCreditRecords(releaseDocument)
+        : [],
+    );
+  const groupedReleaseWritingCredits =
+    groupPersonRoleDisplayRecords(
+      sortWritingCreditDisplayRecords(
+        releaseWritingCredits.map((record) => ({
+          key: record.key,
+          name: record.name,
+          role: record.role,
+          sortName: record.sortName,
+          family: record.family,
+        })),
       ),
     );
 
@@ -13464,6 +15170,7 @@ function MetadataDocumentSection({
                 onClick={() =>
                   onCreateTrackCreditsDocument(
                     missingTrackCreditsFile,
+                    "technical",
                   )
                 }
               >
@@ -13482,6 +15189,66 @@ function MetadataDocumentSection({
               <small>
                 Enter Edit mode to add the first technical
                 credit.
+              </small>
+            )}
+          </div>
+        )}
+
+      {activeMetadataTab ===
+        "credits" &&
+        missingTrackCreditsFile && (
+          <div className="technical-credit-file-empty-state writing-credit-file-empty-state">
+            <div>
+              <strong>Songwriting &amp; composition credits</strong>
+              <p>
+                {groupedReleaseWritingCredits.length > 0
+                  ? "This track is using the release-level songwriting defaults. Create a track credits document only when this track needs an override."
+                  : "No track-credits.toml document exists for this track yet."}
+              </p>
+
+              {groupedReleaseWritingCredits.length > 0 && (
+                <div className="missing-track-inherited-credit-list">
+                  {groupedReleaseWritingCredits.map((credit) => (
+                    <div key={credit.key}>
+                      <strong>{credit.roles.join(", ")}</strong>
+                      <span>{credit.name}</span>
+                      <small className="metadata-provenance-note metadata-inherited-note">
+                        Inherited from release
+                      </small>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {editMode ? (
+              <button
+                type="button"
+                className={[
+                  "performer-add-button",
+                  creatingTrackCredits ? "is-loading" : "",
+                ].filter(Boolean).join(" ")}
+                disabled={creatingTrackCredits}
+                aria-busy={creatingTrackCredits}
+                onClick={() =>
+                  onCreateTrackCreditsDocument(
+                    missingTrackCreditsFile,
+                    "writing",
+                  )
+                }
+              >
+                <span aria-hidden="true">+</span>
+                <span>
+                  {creatingTrackCredits
+                    ? "Preparing songwriting credits…"
+                    : groupedReleaseWritingCredits.length > 0
+                      ? "Add track override"
+                      : "Add songwriting credits"}
+                </span>
+              </button>
+            ) : (
+              <small>
+                Enter Edit mode to add the first songwriting credit.
               </small>
             )}
           </div>
@@ -13536,6 +15303,7 @@ function MetadataDocumentSection({
                 onClick={() =>
                   onCreateTrackCreditsDocument(
                     missingTrackCreditsFile,
+                    "arrangement",
                   )
                 }
               >
@@ -13556,6 +15324,53 @@ function MetadataDocumentSection({
             )}
           </div>
         )}
+
+      {activeMetadataTab === "credits" && missingTrackCreditsFile && (
+        <div className="technical-credit-file-empty-state sample-credit-file-empty-state">
+          <div>
+            <strong>Samples &amp; interpolations</strong>
+            <p>
+              Create track-credits.toml to record sampled recordings,
+              interpolations, musical quotations, or lyrical quotations.
+            </p>
+          </div>
+          {editMode ? (
+            <button
+              type="button"
+              className="performer-add-button"
+              disabled={creatingTrackCredits}
+              onClick={() =>
+                onCreateTrackCreditsDocument(
+                  missingTrackCreditsFile,
+                  "samples",
+                )
+              }
+            >
+              <span aria-hidden="true">+</span>
+              <span>{creatingTrackCredits ? "Preparing samples…" : "Add sample credit"}</span>
+            </button>
+          ) : (
+            <small>Enter Edit mode to add the first sample credit.</small>
+          )}
+        </div>
+      )}
+
+      {activeMetadataTab === "rights" && missingTrackCreditsFile && (
+        <div className="technical-credit-file-empty-state sample-clearance-file-empty-state">
+          <div>
+            <strong>Sample clearance</strong>
+            <p>
+              Create track-credits.toml to keep private master-use and
+              publishing-clearance status linked to numbered sample sources.
+            </p>
+          </div>
+          <small>
+            Add the related source under Artists, Performers &amp; Writers →
+            Samples &amp; Interpolations first. The clearance editor becomes
+            available after track-credits.toml exists.
+          </small>
+        </div>
+      )}
 
       {documents.length === 0 ? (
         <p className="empty-state">
@@ -13594,6 +15409,21 @@ function MetadataDocumentSection({
                   document.relativePath
                 ]
               }
+              writingCreditDraft={
+                writingCreditDrafts[
+                  document.relativePath
+                ]
+              }
+              sampleRelationshipDraft={
+                sampleRelationshipDrafts[
+                  document.relativePath
+                ]
+              }
+              sampleClearanceDraft={
+                sampleClearanceDrafts[
+                  document.relativePath
+                ]
+              }
               onDraftValueChange={
                 onDraftValueChange
               }
@@ -13620,6 +15450,20 @@ function MetadataDocumentSection({
                   document,
                   records,
                 )
+              }
+              onWritingCreditDraftChange={(
+                records,
+              ) =>
+                onWritingCreditDraftChange(
+                  document,
+                  records,
+                )
+              }
+              onSampleRelationshipDraftChange={(records) =>
+                onSampleRelationshipDraftChange(document, records)
+              }
+              onSampleClearanceDraftChange={(records) =>
+                onSampleClearanceDraftChange(document, records)
               }
               onCopyPerformerCredits={(
                 records,
@@ -14872,7 +16716,7 @@ function MetadataValueCell({
         )}
 
         <small className="metadata-provenance-note metadata-derived-note track-display-title-help">
-          Generated from Track Title plus the local Track Version. Existing custom wording is preserved until you choose the suggestion.
+          Generated from Track Title plus the local Track Version. It stays synchronized while using the generated wording; an individual custom title remains unchanged.
         </small>
 
         {changed && (
@@ -15022,6 +16866,8 @@ function metadataRowMatchesTab(
     return (
       group === "Artists" ||
       group === "Performers" ||
+      group === "Songwriting & Composition" ||
+      group === "Samples & Interpolations" ||
       group === "Arrangement & Orchestration" ||
       group === "Conducting & Musical Direction" ||
       isWritingCredit
@@ -15040,7 +16886,10 @@ function metadataRowMatchesTab(
   }
 
   if (tab === "rights") {
-    return group === "Music Business & Rights";
+    return (
+      group === "Music Business & Rights" ||
+      group === "Sample Clearance"
+    );
   }
 
   if (tab === "notes") {
@@ -15053,6 +16902,8 @@ function metadataRowMatchesTab(
   return ![
     "Artists",
     "Performers",
+    "Songwriting & Composition",
+    "Samples & Interpolations",
     "Writing, Lyrics & Language",
     "Language & Writing System",
     "Lyrics",
@@ -15066,6 +16917,7 @@ function metadataRowMatchesTab(
     "Mastering",
     "Technical Audio",
     "Music Business & Rights",
+    "Sample Clearance",
     "Artwork",
     "Text and Notes",
     "Files and Sources",
@@ -15797,6 +17649,577 @@ function PerformerRecordEditor({
     </div>
   );
 }
+
+
+function WritingCreditRecordEditor({
+  document,
+  records,
+  inheritedRecords = [],
+  releaseDefaultRecords = [],
+  editMode,
+  metadataRegistry,
+  relatedOpen,
+  onRelatedToggle,
+  onChange,
+}: {
+  document: ParsedMetadataDocument;
+  records: WritingCreditRecordDraft[];
+  inheritedRecords?: WritingCreditRecordDraft[];
+  releaseDefaultRecords?: WritingCreditRecordDraft[];
+  editMode: boolean;
+  metadataRegistry: MetadataFieldDefinition[];
+  relatedOpen: boolean;
+  onRelatedToggle: (
+    event: React.SyntheticEvent<
+      HTMLDetailsElement
+    >,
+  ) => void;
+  onChange: (
+    records: WritingCreditRecordDraft[],
+  ) => void;
+}) {
+  const basePath = getWritingCreditBasePath(document);
+  const nameField =
+    findRegisteredMetadataField(
+      metadataRegistry,
+      `${basePath}.composers[0].name`,
+    ) ??
+    findRegisteredMetadataField(
+      metadataRegistry,
+      `${basePath}.songwriters[0].name`,
+    );
+  const roleField =
+    findRegisteredMetadataField(
+      metadataRegistry,
+      `${basePath}.songwriters[0].role`,
+    );
+  const sortNameField =
+    findRegisteredMetadataField(
+      metadataRegistry,
+      `${basePath}.songwriters[0].sort_name`,
+    );
+  const isReleaseCreditEditor =
+    document.scope === "release";
+
+  const updateRecord = (
+    recordIndex: number,
+    updates: Partial<
+      Pick<
+        WritingCreditRecordDraft,
+        "name" | "role" | "sortName" | "family"
+      >
+    >,
+  ) => {
+    onChange(
+      records.map((record, index) => {
+        if (index !== recordIndex) {
+          return record;
+        }
+
+        const nextRole =
+          updates.role ?? record.role;
+        const nextFamily =
+          updates.family ??
+          writingCreditFamilyForRole(
+            nextRole,
+            record.family,
+          );
+
+        return {
+          ...record,
+          ...updates,
+          family: nextFamily,
+        };
+      }),
+    );
+  };
+
+  const addRecord = (
+    initial?: Partial<
+      Pick<
+        WritingCreditRecordDraft,
+        "name" | "role" | "sortName" | "family"
+      >
+    >,
+  ) => {
+    if (records.length >= 500) {
+      return;
+    }
+
+    const role = initial?.role ?? "written by";
+    const family =
+      initial?.family ??
+      writingCreditFamilyForRole(role);
+
+    onChange([
+      ...records,
+      {
+        key: [
+          "new-writing",
+          document.scope,
+          Date.now(),
+          records.length,
+        ].join("-"),
+        family,
+        sourceFamily: null,
+        sourceIndex: null,
+        name: initial?.name ?? "",
+        role,
+        sortName: initial?.sortName ?? "",
+      },
+    ]);
+  };
+
+  const removeRecord = (recordIndex: number) => {
+    const record = records[recordIndex];
+
+    if (!record) {
+      return;
+    }
+
+    const hasContent = [
+      record.name,
+      record.role,
+      record.sortName,
+    ].some((value) => value.trim().length > 0);
+
+    if (
+      hasContent &&
+      !window.confirm(
+        `Remove songwriting credit ${
+          record.name.trim() || recordIndex + 1
+        } and the paired role?`,
+      )
+    ) {
+      return;
+    }
+
+    onChange(
+      records.filter((_, index) => index !== recordIndex),
+    );
+  };
+
+  const overrideReleaseFamily = (
+    family: WritingCreditFamily,
+  ) => {
+    const familyDefaults = releaseDefaultRecords.filter(
+      (record) => record.family === family,
+    );
+
+    onChange([
+      ...records.filter((record) => record.family !== family),
+      ...familyDefaults.map((record, index) => ({
+        ...record,
+        key: [
+          "track-writing-override",
+          family,
+          Date.now(),
+          index,
+        ].join("-"),
+        sourceFamily: null,
+        sourceIndex: null,
+      })),
+    ]);
+  };
+
+  const restoreReleaseFamily = (
+    family: WritingCreditFamily,
+  ) => {
+    const matchingCount = records.filter(
+      (record) => record.family === family,
+    ).length;
+
+    if (
+      matchingCount > 0 &&
+      !window.confirm(
+        `Remove ${matchingCount} track-level ${
+          matchingCount === 1 ? "credit" : "credits"
+        } in this writing category and use the release defaults?`,
+      )
+    ) {
+      return;
+    }
+
+    onChange(
+      records.filter((record) => record.family !== family),
+    );
+  };
+
+  const groupedLocalRecords =
+    groupPersonRoleDisplayRecords(
+      sortWritingCreditDisplayRecords(
+        records.map((record) => ({
+          key: record.key,
+          name: record.name,
+          role: record.role,
+          sortName: record.sortName,
+          family: record.family,
+        })),
+      ),
+    );
+  const groupedInheritedRecords =
+    groupPersonRoleDisplayRecords(
+      sortWritingCreditDisplayRecords(
+        inheritedRecords.map((record) => ({
+          key: record.key,
+          name: record.name,
+          role: record.role,
+          sortName: record.sortName,
+          family: record.family,
+        })),
+      ),
+    );
+  const readOnlyGroupedRecords = [
+    ...groupedLocalRecords.map((record, sourceIndex) => ({
+      record,
+      inherited: false,
+      sourceIndex,
+    })),
+    ...groupedInheritedRecords.map((record, sourceIndex) => ({
+      record,
+      inherited: true,
+      sourceIndex:
+        groupedLocalRecords.length + sourceIndex,
+    })),
+  ].sort((left, right) => {
+    const priorityDifference =
+      getWritingCreditDisplayPriority(
+        left.record.roles[0] ?? "",
+      ) -
+      getWritingCreditDisplayPriority(
+        right.record.roles[0] ?? "",
+      );
+
+    return priorityDifference !== 0
+      ? priorityDifference
+      : left.sourceIndex - right.sourceIndex;
+  });
+  const showSortNames = editMode
+    ? records.length > 0
+    : [
+        ...groupedLocalRecords,
+        ...groupedInheritedRecords,
+      ].some((record) => record.sortNames.length > 0);
+  const incompleteCount = records.filter(
+    (record) =>
+      !record.name.trim() || !record.role.trim(),
+  ).length;
+  const releaseFamilies = new Set(
+    releaseDefaultRecords.map((record) => record.family),
+  );
+
+  return (
+    <div className="performer-record-editor writing-credit-record-editor">
+      <div className="performer-record-toolbar">
+        <div>
+          <div className="credit-pair-help-heading">
+            <strong>
+              {isReleaseCreditEditor
+                ? "Release songwriting role and name"
+                : "Songwriting role and name"}
+            </strong>
+            <MetadataFieldPairControls
+              title={
+                isReleaseCreditEditor
+                  ? "Release songwriting role and name"
+                  : "Songwriting role and name"
+              }
+              description={
+                isReleaseCreditEditor
+                  ? "Set release-wide writing defaults. Tracks inherit each songwriter, composer, and lyricist category until that category is overridden locally."
+                  : "Credit combined authorship as Written by or Songwriter. Use Composer or Music by for music-only authorship, and Lyricist, Lyrics by, or Words by for text-only authorship."
+              }
+              nameField={nameField}
+              namePath={`${basePath}.songwriters[].name`}
+              roleField={roleField}
+              rolePath={`${basePath}.songwriters[].role`}
+              nameGuidance="Enter the credited writer's display name exactly as supplied by the official credits."
+              roleGuidance="Use Written by when the source does not distinguish music from words. Use Composer and Lyricist when those responsibilities are known separately."
+              nameExample="Nathan Brenton"
+              roleExample="written by"
+              commonRoleValues={Array.from(
+                writingCreditRoleOptions,
+              )}
+              fieldOrder="role-name"
+            />
+          </div>
+          <p>
+            {isReleaseCreditEditor
+              ? "Tracks inherit release writing credits by category and may override only the categories that differ."
+              : "Songwriter, composer, and lyricist credits identify authorship of the musical work rather than recording or publishing ownership."}
+          </p>
+        </div>
+
+        {editMode && (
+          <button
+            type="button"
+            className="performer-add-button"
+            disabled={records.length >= 500}
+            onClick={() => addRecord()}
+          >
+            <span aria-hidden="true">+</span>
+            <span>Add writing credit</span>
+          </button>
+        )}
+      </div>
+
+      {editMode ? (
+        <>
+          {incompleteCount > 0 && (
+            <p className="performer-validation-note">
+              Complete the name and role for every writing credit before saving.
+            </p>
+          )}
+
+          {records.length === 0 ? (
+            <div className="performer-empty-state">
+              <p>No local songwriting credits have been added.</p>
+              <button
+                type="button"
+                onClick={() => addRecord()}
+              >
+                Add first writing credit
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="performer-record-column-headings">
+                <div><strong>Writing role</strong></div>
+                <div><strong>Name</strong></div>
+                <div><strong>Actions</strong></div>
+              </div>
+              <div className="performer-record-list">
+                {records.map((record, recordIndex) => {
+                  const canRestoreRelease =
+                    !isReleaseCreditEditor &&
+                    releaseFamilies.has(record.family);
+
+                  return (
+                    <div
+                      key={record.key}
+                      className={[
+                        "performer-record-row",
+                        !record.name.trim() || !record.role.trim()
+                          ? "is-incomplete"
+                          : "",
+                      ].filter(Boolean).join(" ")}
+                    >
+                      <label>
+                        <span className="sr-only">
+                          Writing credit {recordIndex + 1} role
+                        </span>
+                        <SelectOrCustomMetadataInput
+                          value={record.role}
+                          options={Array.from(
+                            writingCreditRoleOptions,
+                          )}
+                          selectLabel={`Select writing credit ${recordIndex + 1} role`}
+                          customPlaceholder="Custom writing role"
+                          ariaInvalid={!record.role.trim()}
+                          onChange={(nextRole) =>
+                            updateRecord(recordIndex, {
+                              role: nextRole,
+                            })
+                          }
+                        />
+                      </label>
+
+                      <label>
+                        <span className="sr-only">
+                          Writing credit {recordIndex + 1} name
+                        </span>
+                        <input
+                          type="text"
+                          value={record.name}
+                          aria-invalid={!record.name.trim()}
+                          placeholder="Credited writer"
+                          onChange={(event) =>
+                            updateRecord(recordIndex, {
+                              name: event.target.value,
+                            })
+                          }
+                        />
+                      </label>
+
+                      <div className="technical-credit-record-actions">
+                        {canRestoreRelease && (
+                          <button
+                            type="button"
+                            className="technical-credit-use-release-button"
+                            title="Remove this track category and restore the release writing credits"
+                            onClick={() =>
+                              restoreReleaseFamily(record.family)
+                            }
+                          >
+                            Use release credit
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="performer-remove-button"
+                          aria-label={`Remove writing credit ${recordIndex + 1}`}
+                          title="Remove credited writer and role"
+                          onClick={() => removeRecord(recordIndex)}
+                        >
+                          <span aria-hidden="true">−</span>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {!isReleaseCreditEditor &&
+            inheritedRecords.length > 0 && (
+              <section className="inherited-technical-credit-list">
+                <header>
+                  <div>
+                    <strong>Inherited release defaults</strong>
+                    <p>
+                      Override only the songwriting categories that differ on this track.
+                    </p>
+                  </div>
+                </header>
+
+                {sortWritingCreditDisplayRecords(
+                  inheritedRecords,
+                ).map((record) => (
+                  <div
+                    key={record.key}
+                    className="inherited-technical-credit-row"
+                  >
+                    <span>{record.role}</span>
+                    <span>{record.name}</span>
+                    <button
+                      type="button"
+                      title="Copy every release credit in this writing category into a track-level override"
+                      onClick={() =>
+                        overrideReleaseFamily(record.family)
+                      }
+                    >
+                      Override category
+                    </button>
+                  </div>
+                ))}
+              </section>
+            )}
+        </>
+      ) : (
+        <>
+          {readOnlyGroupedRecords.length === 0 ? (
+            <div className="performer-empty-state">
+              <p>No songwriting or composition credits have been added.</p>
+            </div>
+          ) : (
+            <>
+              <div className="performer-record-column-headings is-read-only">
+                <div><strong>Writing role</strong></div>
+                <div><strong>Name</strong></div>
+              </div>
+              <div className="performer-record-list">
+                {readOnlyGroupedRecords.map(
+                  ({ record, inherited }) => (
+                    <div
+                      key={`${inherited ? "inherited" : "local"}:${record.key}`}
+                      className="performer-record-row is-read-only is-grouped-display"
+                    >
+                      <span>
+                        {record.roles.length > 0
+                          ? record.roles.join(", ")
+                          : "(role not entered)"}
+                      </span>
+                      <span>
+                        {record.name || "(name not entered)"}
+                        {inherited && (
+                          <small className="metadata-provenance-note metadata-inherited-note technical-credit-inherited-note">
+                            Inherited from release
+                          </small>
+                        )}
+                      </span>
+                    </div>
+                  ),
+                )}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {showSortNames &&
+        (records.length > 0 || inheritedRecords.length > 0) && (
+        <details
+          className="metadata-related-tags performer-related-tags"
+          open={relatedOpen}
+          onToggle={onRelatedToggle}
+        >
+          <summary>
+            <span
+              className="metadata-section-triangle"
+              aria-hidden="true"
+            />
+            <span>Related tags</span>
+          </summary>
+
+          <div className="performer-sort-name-list">
+            <header>
+              <strong>Writer sort names</strong>
+              <MetadataFieldControls
+                field={sortNameField}
+                path={`${basePath}.songwriters[].sort_name`}
+                valueType="string"
+              />
+            </header>
+
+            {editMode
+              ? records.map((record, recordIndex) => (
+                  <label key={record.key}>
+                    <span>
+                      {record.name ||
+                        `Writing credit ${recordIndex + 1}`}
+                    </span>
+                    <input
+                      type="text"
+                      value={record.sortName}
+                      placeholder="Last, First"
+                      onChange={(event) =>
+                        updateRecord(recordIndex, {
+                          sortName: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
+                ))
+              : [
+                  ...groupedLocalRecords.map((record) => ({
+                    record,
+                    inherited: false,
+                  })),
+                  ...groupedInheritedRecords.map((record) => ({
+                    record,
+                    inherited: true,
+                  })),
+                ]
+                  .filter(
+                    ({ record }) => record.sortNames.length > 0,
+                  )
+                  .map(({ record, inherited }) => (
+                    <label key={`${inherited ? "inherited" : "local"}:${record.key}`}>
+                      <span>
+                        {record.name || "(name not entered)"}
+                        {inherited ? " · inherited" : ""}
+                      </span>
+                      <span>{record.sortNames.join(", ")}</span>
+                    </label>
+                  ))}
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 
 
 function ArrangementCreditRecordEditor({
@@ -17111,10 +19534,16 @@ function MetadataDocumentTable({
   performerDraft,
   technicalCreditDraft,
   arrangementCreditDraft,
+  writingCreditDraft,
+  sampleRelationshipDraft,
+  sampleClearanceDraft,
   onDraftValueChange,
   onPerformerDraftChange,
   onTechnicalCreditDraftChange,
   onArrangementCreditDraftChange,
+  onWritingCreditDraftChange,
+  onSampleRelationshipDraftChange,
+  onSampleClearanceDraftChange,
   onCopyPerformerCredits,
   metadataRegistry,
   activeMetadataTab,
@@ -17141,6 +19570,15 @@ function MetadataDocumentTable({
   arrangementCreditDraft:
     | PerformerRecordDraft[]
     | undefined;
+  writingCreditDraft:
+    | WritingCreditRecordDraft[]
+    | undefined;
+  sampleRelationshipDraft:
+    | SampleRelationshipRecordDraft[]
+    | undefined;
+  sampleClearanceDraft:
+    | SampleClearanceRecordDraft[]
+    | undefined;
   onDraftValueChange: (
     document: ParsedMetadataDocument,
     metadataPath: string,
@@ -17155,6 +19593,15 @@ function MetadataDocumentTable({
   ) => void;
   onArrangementCreditDraftChange: (
     records: PerformerRecordDraft[],
+  ) => void;
+  onWritingCreditDraftChange: (
+    records: WritingCreditRecordDraft[],
+  ) => void;
+  onSampleRelationshipDraftChange: (
+    records: SampleRelationshipRecordDraft[],
+  ) => void;
+  onSampleClearanceDraftChange: (
+    records: SampleClearanceRecordDraft[],
   ) => void;
   onCopyPerformerCredits: (
     records: PerformerRecordDraft[],
@@ -17867,6 +20314,26 @@ function MetadataDocumentTable({
           "release.toml"
       )
     );
+  const supportsWritingCreditRecords =
+    activeMetadataTab === "credits" &&
+    (
+      (
+        document.scope === "track" &&
+        document.filename === "track-credits.toml"
+      ) ||
+      (
+        document.scope === "release" &&
+        document.filename === "release.toml"
+      )
+    );
+  const supportsSampleRelationshipRecords =
+    activeMetadataTab === "credits" &&
+    document.scope === "track" &&
+    document.filename === "track-credits.toml";
+  const supportsSampleClearanceRecords =
+    activeMetadataTab === "rights" &&
+    document.scope === "track" &&
+    document.filename === "track-credits.toml";
   const technicalCreditRecords =
     technicalCreditDraft ??
     readTechnicalCreditRecords(
@@ -17955,6 +20422,49 @@ function MetadataDocumentTable({
           )
         : [],
     );
+  const writingCreditRecords =
+    writingCreditDraft ??
+    readWritingCreditRecords(document);
+  const releaseWritingCreditRecords =
+    document.scope === "track"
+      ? releaseDocuments.flatMap((releaseDocument) =>
+          releaseDocument.filename === "release.toml"
+            ? readWritingCreditRecords(releaseDocument)
+            : [],
+        )
+      : [];
+  const mergedWritingCredits =
+    document.scope === "track"
+      ? mergeInheritedWritingCredits(
+          releaseWritingCreditRecords,
+          writingCreditRecords,
+        )
+      : {
+          effective: writingCreditRecords,
+          inherited: [] as WritingCreditRecordDraft[],
+        };
+  const effectiveWritingCreditRecords =
+    mergedWritingCredits.effective;
+  const inheritedWritingCreditRecords =
+    mergedWritingCredits.inherited;
+  const groupedWritingCredits =
+    groupPersonRoleDisplayRecords(
+      sortWritingCreditDisplayRecords(
+        effectiveWritingCreditRecords.map((record) => ({
+          key: record.key,
+          name: record.name,
+          role: record.role,
+          sortName: record.sortName,
+          family: record.family,
+        })),
+      ),
+    );
+  const sampleRelationshipRecords =
+    sampleRelationshipDraft ??
+    readSampleRelationshipRecords(document);
+  const sampleClearanceRecords =
+    sampleClearanceDraft ??
+    readSampleClearanceRecords(document);
   const groupedPerformerRecords =
     groupPersonRoleDisplayRecords(
       performerRecords.map((record) => ({
@@ -18306,10 +20816,24 @@ function MetadataDocumentTable({
                   )
                 )
               );
+            const isManagedWritingCredit =
+              supportsWritingCreditRecords &&
+              /^(track|release\.credits)\.(songwriters|composers|lyricists)\[\d+\]\./.test(
+                row.path,
+              );
+            const isManagedSampleRelationship =
+              supportsSampleRelationshipRecords &&
+              /^track\.samples\[\d+\]\./.test(row.path);
+            const isManagedSampleClearance =
+              supportsSampleClearanceRecords &&
+              /^track\.sample_clearances\[\d+\]\./.test(row.path);
 
             return !(
               isManagedTechnicalContributor ||
-              isManagedArrangementContributor
+              isManagedArrangementContributor ||
+              isManagedWritingCredit ||
+              isManagedSampleRelationship ||
+              isManagedSampleClearance
             );
           },
         ),
@@ -18334,6 +20858,97 @@ function MetadataDocumentTable({
           },
         ]
       : visibleStandardSections;
+
+  if (
+    supportsWritingCreditRecords &&
+    !displayStandardSections.some(
+      (section) =>
+        section.group === "Songwriting & Composition",
+    )
+  ) {
+    const writingRank =
+      metadataGroupRank.get(
+        "Songwriting & Composition",
+      ) ?? Number.MAX_SAFE_INTEGER;
+    const insertionIndex =
+      displayStandardSections.findIndex(
+        (section) =>
+          (
+            metadataGroupRank.get(
+              section.group as
+                typeof metadataGroupOrder[number],
+            ) ?? Number.MAX_SAFE_INTEGER
+          ) > writingRank,
+      );
+    const normalizedInsertionIndex =
+      insertionIndex >= 0
+        ? insertionIndex
+        : displayStandardSections.length;
+
+    displayStandardSections = [
+      ...displayStandardSections.slice(
+        0,
+        normalizedInsertionIndex,
+      ),
+      {
+        group: "Songwriting & Composition",
+        rows: [],
+      },
+      ...displayStandardSections.slice(
+        normalizedInsertionIndex,
+      ),
+    ];
+  }
+
+  if (
+    supportsSampleRelationshipRecords &&
+    !displayStandardSections.some(
+      (section) => section.group === "Samples & Interpolations",
+    )
+  ) {
+    const sampleRank =
+      metadataGroupRank.get("Samples & Interpolations") ??
+      Number.MAX_SAFE_INTEGER;
+    const insertionIndex = displayStandardSections.findIndex(
+      (section) =>
+        (metadataGroupRank.get(
+          section.group as typeof metadataGroupOrder[number],
+        ) ?? Number.MAX_SAFE_INTEGER) > sampleRank,
+    );
+    const index = insertionIndex >= 0
+      ? insertionIndex
+      : displayStandardSections.length;
+    displayStandardSections = [
+      ...displayStandardSections.slice(0, index),
+      { group: "Samples & Interpolations", rows: [] },
+      ...displayStandardSections.slice(index),
+    ];
+  }
+
+  if (
+    supportsSampleClearanceRecords &&
+    !displayStandardSections.some(
+      (section) => section.group === "Sample Clearance",
+    )
+  ) {
+    const clearanceRank =
+      metadataGroupRank.get("Sample Clearance") ??
+      Number.MAX_SAFE_INTEGER;
+    const insertionIndex = displayStandardSections.findIndex(
+      (section) =>
+        (metadataGroupRank.get(
+          section.group as typeof metadataGroupOrder[number],
+        ) ?? Number.MAX_SAFE_INTEGER) > clearanceRank,
+    );
+    const index = insertionIndex >= 0
+      ? insertionIndex
+      : displayStandardSections.length;
+    displayStandardSections = [
+      ...displayStandardSections.slice(0, index),
+      { group: "Sample Clearance", rows: [] },
+      ...displayStandardSections.slice(index),
+    ];
+  }
 
   if (
     supportsArrangementCreditRecords &&
@@ -19096,6 +21711,15 @@ function MetadataDocumentTable({
     (arrangementCreditDraft !==
       undefined
       ? 1
+      : 0) +
+    (writingCreditDraft !== undefined
+      ? 1
+      : 0) +
+    (sampleRelationshipDraft !== undefined
+      ? 1
+      : 0) +
+    (sampleClearanceDraft !== undefined
+      ? 1
       : 0);
 
   const isSettingsDocument =
@@ -19123,7 +21747,10 @@ function MetadataDocumentTable({
     ) &&
     !supportsPerformerRecords &&
     !supportsTechnicalCreditRecords &&
-    !supportsArrangementCreditRecords
+    !supportsArrangementCreditRecords &&
+    !supportsWritingCreditRecords &&
+    !supportsSampleRelationshipRecords &&
+    !supportsSampleClearanceRecords
   ) {
     return null;
   }
@@ -19608,6 +22235,36 @@ function MetadataDocumentTable({
                               : "performers"
                           }`
                       : section.group ===
+                          "Songwriting & Composition" &&
+                        supportsWritingCreditRecords
+                        ? editMode
+                          ? `${writingCreditRecords.length} ${
+                              writingCreditRecords.length === 1
+                                ? "credit"
+                                : "credits"
+                            }`
+                          : `${groupedWritingCredits.length} ${
+                              groupedWritingCredits.length === 1
+                                ? "person"
+                                : "people"
+                            }`
+                      : section.group ===
+                          "Samples & Interpolations" &&
+                        supportsSampleRelationshipRecords
+                        ? `${sampleRelationshipRecords.length} ${
+                            sampleRelationshipRecords.length === 1
+                              ? "source"
+                              : "sources"
+                          }`
+                      : section.group ===
+                          "Sample Clearance" &&
+                        supportsSampleClearanceRecords
+                        ? `${sampleClearanceRecords.length} ${
+                            sampleClearanceRecords.length === 1
+                              ? "record"
+                              : "records"
+                          }`
+                      : section.group ===
                           "Arrangement & Orchestration" &&
                         supportsArrangementCreditRecords
                         ? editMode
@@ -19759,6 +22416,76 @@ function MetadataDocumentTable({
                       onTechnicalCreditDraftChange
                     }
                   />
+                )}
+
+                {section.group ===
+                  "Songwriting & Composition" &&
+                  supportsWritingCreditRecords && (
+                  <WritingCreditRecordEditor
+                    document={document}
+                    records={writingCreditRecords}
+                    inheritedRecords={
+                      inheritedWritingCreditRecords
+                    }
+                    releaseDefaultRecords={
+                      releaseWritingCreditRecords
+                    }
+                    editMode={editMode}
+                    metadataRegistry={
+                      documentMetadataRegistry
+                    }
+                    relatedOpen={
+                      metadataSectionOpenState[
+                        "Songwriting & Composition:related"
+                      ] ?? false
+                    }
+                    onRelatedToggle={(event) =>
+                      handleMetadataSectionToggle(
+                        "Songwriting & Composition:related",
+                        event,
+                      )
+                    }
+                    onChange={
+                      onWritingCreditDraftChange
+                    }
+                  />
+                )}
+
+                {section.group ===
+                  "Samples & Interpolations" &&
+                  supportsSampleRelationshipRecords && (
+                  <Suspense
+                    fallback={
+                      <p className="metadata-record-empty-state">
+                        Loading sample relationship editor…
+                      </p>
+                    }
+                  >
+                    <LazySampleRelationshipRecordEditor
+                      records={sampleRelationshipRecords}
+                      editMode={editMode}
+                      onChange={onSampleRelationshipDraftChange}
+                    />
+                  </Suspense>
+                )}
+
+                {section.group ===
+                  "Sample Clearance" &&
+                  supportsSampleClearanceRecords && (
+                  <Suspense
+                    fallback={
+                      <p className="metadata-record-empty-state">
+                        Loading sample clearance editor…
+                      </p>
+                    }
+                  >
+                    <LazySampleClearanceRecordEditor
+                      records={sampleClearanceRecords}
+                      sampleCount={sampleRelationshipRecords.length}
+                      editMode={editMode}
+                      onChange={onSampleClearanceDraftChange}
+                    />
+                  </Suspense>
                 )}
 
                 {section.group ===

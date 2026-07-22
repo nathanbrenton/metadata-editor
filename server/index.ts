@@ -98,6 +98,10 @@ import {
 } from "./performer-copy.js";
 import { saveScalarMetadataChanges } from "./metadata-saver.js";
 import {
+  normalizeSampleClearanceRequest,
+  normalizeSampleRelationshipRequest,
+} from "./sample-record-request.js";
+import {
   getReleaseNumberingTotalsFromChanges,
   synchronizeTrackNumberingTotals,
 } from "./numbering-sync.js";
@@ -3123,6 +3127,27 @@ const server = createServer(
             ? body.arrangementContributorPath
             : "track.contributors";
 
+        const writingCredits =
+          "writingCredits" in body
+            ? body.writingCredits
+            : undefined;
+
+        const writingCreditBasePath =
+          "writingCreditBasePath" in body &&
+          typeof body.writingCreditBasePath === "string"
+            ? body.writingCreditBasePath
+            : "track";
+
+        const sampleRelationships =
+          "sampleRelationships" in body
+            ? body.sampleRelationships
+            : undefined;
+
+        const sampleClearances =
+          "sampleClearances" in body
+            ? body.sampleClearances
+            : undefined;
+
         const technicalContributorPath =
           "technicalContributorPath" in body &&
           typeof body.technicalContributorPath ===
@@ -3158,6 +3183,18 @@ const server = createServer(
             )
           ) ||
           !(
+            writingCredits === undefined ||
+            Array.isArray(writingCredits)
+          ) ||
+          !(
+            sampleRelationships === undefined ||
+            Array.isArray(sampleRelationships)
+          ) ||
+          !(
+            sampleClearances === undefined ||
+            Array.isArray(sampleClearances)
+          ) ||
+          !(
             managedTechnicalContributorSourceIndexes ===
               undefined ||
             (
@@ -3191,7 +3228,11 @@ const server = createServer(
           ![
             "track.contributors",
             "release.credits.contributors",
-          ].includes(arrangementContributorPath)
+          ].includes(arrangementContributorPath) ||
+          ![
+            "track",
+            "release.credits",
+          ].includes(writingCreditBasePath)
         ) {
           sendJson(response, 400, {
             error:
@@ -3369,6 +3410,70 @@ const server = createServer(
                 },
               );
 
+        const normalizedWritingCredits =
+          writingCredits === undefined
+            ? undefined
+            : writingCredits.map(
+                (credit, creditIndex) => {
+                  if (
+                    typeof credit !== "object" ||
+                    credit === null ||
+                    !("family" in credit) ||
+                    ![
+                      "songwriters",
+                      "composers",
+                      "lyricists",
+                    ].includes(String(credit.family)) ||
+                    !("sourceFamily" in credit) ||
+                    !(
+                      credit.sourceFamily === null ||
+                      [
+                        "songwriters",
+                        "composers",
+                        "lyricists",
+                      ].includes(String(credit.sourceFamily))
+                    ) ||
+                    !("sourceIndex" in credit) ||
+                    !(
+                      credit.sourceIndex === null ||
+                      typeof credit.sourceIndex === "number"
+                    ) ||
+                    !("name" in credit) ||
+                    typeof credit.name !== "string" ||
+                    !("role" in credit) ||
+                    typeof credit.role !== "string" ||
+                    !("sortName" in credit) ||
+                    typeof credit.sortName !== "string"
+                  ) {
+                    throw new Error(
+                      `Writing credit ${creditIndex + 1} requires family, sourceFamily, sourceIndex, name, role, and sortName`,
+                    );
+                  }
+
+                  return {
+                    family: credit.family as
+                      | "songwriters"
+                      | "composers"
+                      | "lyricists",
+                    sourceFamily: credit.sourceFamily as
+                      | "songwriters"
+                      | "composers"
+                      | "lyricists"
+                      | null,
+                    sourceIndex: credit.sourceIndex,
+                    name: credit.name,
+                    role: credit.role,
+                    sortName: credit.sortName,
+                  };
+                },
+              );
+
+        const normalizedSampleRelationships =
+          normalizeSampleRelationshipRequest(sampleRelationships);
+
+        const normalizedSampleClearances =
+          normalizeSampleClearanceRequest(sampleClearances);
+
         const normalizedManagedTechnicalContributorSourceIndexes =
           managedTechnicalContributorSourceIndexes ===
             undefined
@@ -3421,6 +3526,12 @@ const server = createServer(
             arrangementContributorPath as
               | "track.contributors"
               | "release.credits.contributors",
+            normalizedWritingCredits,
+            writingCreditBasePath as
+              | "track"
+              | "release.credits",
+            normalizedSampleRelationships,
+            normalizedSampleClearances,
           );
 
         const totals =

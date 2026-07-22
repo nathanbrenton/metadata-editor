@@ -28,7 +28,7 @@ export type WorkflowTroubleshootingItem = {
 };
 
 export const workflowPath =
-  "Ingest → Author → Prepare → Preflight → Publish";
+  "Ingest → Staging → Library → Publish";
 
 export const workflowAvailabilityLabels: Record<
   WorkflowAvailability,
@@ -45,79 +45,66 @@ export const workflowStages: readonly WorkflowStage[] = [
     title: "Ingest",
     availability: "available",
     summary:
-      "Create a private release workspace or incrementally update an existing staged release from newly discovered source files.",
+      "Find source candidates and inspect the audio, artwork, sidecars, inferred identity, and technical evidence without changing source files.",
     steps: [
-      "Place an audio file or release folder in the configured ingest drop, then rescan the candidate when files are added later.",
-      "Inspect inferred dates, titles, artists, and technical metadata; explicitly include each new source.",
-      "Create a new staging release or detect the existing release and preserve its stable track IDs and authored metadata.",
-      "Arrange the complete track sequence, preview additions and reorder adjustments as a delta, then apply the validated staging update atomically.",
-      "Retain archival masters and original source assets without transcoding, moving, or destructive edits.",
+      "Place an audio file or release folder in the configured ingest drop and refresh the source scan.",
+      "Inspect each candidate's file inventory, dates, titles, artists, technical properties, warnings, and possible artwork.",
+      "Choose the candidate that should become a new release or update an existing release.",
+      "Continue to Staging only after the candidate evidence has been reviewed.",
     ],
     currentNote:
-      "Candidate inspection, new staging-release creation, incremental audio-track updates, track reordering, and starter TOML generation are available now. Existing tracks cannot be removed implicitly, and new sidecar updates remain a later workflow.",
+      "Read-only candidate scanning, row-based inspection, ffprobe/MediaInfo evidence, artwork preview, rescanning, and locally saved draft attachment state are available now.",
   },
   {
-    id: "author",
-    title: "Author",
+    id: "staging",
+    title: "Staging",
     availability: "available",
     summary:
-      "Complete release and track metadata while reviewing inheritance and track-specific overrides.",
+      "Build or incrementally update a controlled private release workspace from the selected ingest candidate.",
     steps: [
-      "Add identity, numbering, dates, artists, performers, writers, arrangement, and technical credits.",
-      "Add rights, artwork metadata, production notes, lyrics, language, and source information.",
-      "Use release-level defaults for shared values and override only the tracks that differ.",
-      "Preview tracks from the sidebar or the transport above the metadata tabs while reviewing titles, order, and track-specific values.",
-      "Review missing required files, readiness indicators, and raw TOML when admin tools are enabled.",
+      "Confirm release identity, source inclusion, artwork use, track titles, stable track IDs, and complete track order.",
+      "Detect whether the release ID is new or already staged and switch between create and update language.",
+      "Preview additions, reorder changes, preserved files, blocked changes, destinations, TOML skeletons, and copy receipts.",
+      "Apply the explicit create or update plan through an isolated temporary workspace and verified atomic promotion.",
+      "Preserve existing authored metadata and never infer that an omitted source should delete an existing track.",
     ],
     currentNote:
-      "Metadata editing, release-to-track inheritance, controlled TOML saving, and browser audio preview controls are available now. Preview playback prefers audio-playback files, falls back to one unambiguous audio master, and uses FFmpeg to stream a temporary browser-compatible MP3 preview for non-MP3 sources.",
+      "New staging-release creation, incremental audio-track updates, track reordering, stable-ID preservation, dry-run plans, explicit confirmation, copy verification, and rollback-safe promotion are available now. Intentional removals and general sidecar replacement remain future workflows.",
   },
   {
-    id: "prepare",
-    title: "Prepare",
+    id: "library",
+    title: "Library",
     availability: "partial",
     summary:
-      "Generate and validate the downstream assets required by the audio player and public web output.",
+      "Author canonical release and track metadata, review inheritance, preview audio, and prepare downstream media derivatives.",
     steps: [
-      "Inspect whether each track has a usable audio master, playback MP3, and waveform file.",
-      "Generate playback audio from the lossless master rather than from another derivative.",
-      "Generate waveform peaks from the lossless master using the versioned waveform profile.",
-      "Regenerate only assets reported as missing or stale, then validate the resulting files.",
+      "Add identity, numbering, dates, artists, performers, writers, sample and interpolation sources, arrangement, technical credits, rights, artwork metadata, lyrics, language, and notes.",
+      "Use release-level defaults for shared values and override only the individual tracks that differ.",
+      "Preview tracks from the sidebar or transport while reviewing titles, sequence, and track-specific values.",
+      "Inspect missing, stale, current, or blocked playback and waveform derivatives under Files & Sources.",
+      "Generate playback audio, waveform peaks, analysis, and web artwork from canonical masters when write-enabled media preparation is implemented.",
     ],
     currentNote:
-      "A read-only planning API and waveform-generation module exist. UI controls and filesystem writes are not enabled yet.",
-  },
-  {
-    id: "preflight",
-    title: "Preflight",
-    availability: "planned",
-    summary:
-      "Run one release-wide validation gate before anything is treated as publishable.",
-    steps: [
-      "Validate required metadata, numbering, dates, rights, masters, artwork, and derivatives.",
-      "Block publication when files are missing, ambiguous, invalid, stale, or outside the configured media root.",
-      "Preview the player-facing release package and resolve warnings that require human review.",
-      "Mark the release ready only after the complete preflight passes.",
-    ],
-    currentNote:
-      "Individual validations exist, but a consolidated release preflight and Ready status are planned.",
+      "Metadata editing, release-to-track inheritance, controlled TOML saving, readiness guidance, and broad-format browser audio preview are available. Media-processing status planning and waveform-generation code exist, but derivative-generation UI writes are not enabled yet.",
   },
   {
     id: "publish",
     title: "Publish",
     availability: "planned",
     summary:
-      "Build a sanitized public deployment snapshot without exposing private masters or editor-only data.",
+      "Run consolidated preflight and build a sanitized public deployment snapshot from the private canonical release.",
     steps: [
-      "Re-run preflight and create the public package in a temporary output directory.",
-      "Include playback audio, waveform data, web artwork, and only the metadata needed by the player.",
-      "Exclude archival masters, private notes, source documents, logs, and other internal material.",
-      "Validate the completed package and atomically promote it to the deployment output.",
+      "Validate required metadata, numbering, dates, rights, masters, artwork, playback audio, waveforms, and public catalog entries.",
+      "Block publication when files are missing, ambiguous, invalid, stale, or outside the configured media root.",
+      "Preview the exact player-facing package while excluding archival masters, private notes, source documents, logs, and editor-only data.",
+      "Build in a temporary output directory, verify the completed snapshot, and atomically promote the public deployment.",
+      "Record publish history and support later republish, withdrawal, and rollback without deleting the private canonical release.",
     ],
     currentNote:
-      "Automated publication, withdrawal, rollback, and deployment snapshots are planned. Continue using the documented manual process until they are implemented.",
+      "The Publish tab currently provides a read-only readiness overview. Consolidated preflight, Ready/Published state changes, deployment writes, withdrawal, and rollback are planned and are clearly labeled as unavailable.",
   },
 ] as const;
+
 
 export const workflowLifecycleStatuses: readonly WorkflowDefinition[] = [
   {
@@ -167,6 +154,11 @@ export const workflowDerivativeStatuses: readonly WorkflowDefinition[] = [
 
 export const workflowFaqItems: readonly WorkflowFaqItem[] = [
   {
+    question: "Where is the summary for the current workflow tab?",
+    answer:
+      "The left side of the sticky footer shows context for the active tab. Ingest displays the drop point, candidate and file totals, and probe availability; Staging displays the selected candidate or release-workspace count; Library displays release, track, master, artwork, and metadata totals; Publish displays readiness counts and reminds you that publishing writes are disabled.",
+  },
+  {
     question: "Where should the canonical release live?",
     answer:
       "The editor should retain one private canonical release workspace containing the masters, editable metadata, and source assets. Public deployment output should be generated from that workspace rather than becoming the new source of truth.",
@@ -174,7 +166,7 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
   {
     question: "How do I add a track to a release that was already staged?",
     answer:
-      "Return to the original ingest candidate, add the audio source, rescan, include the new track, and arrange the complete sequence. When the release ID already exists, the builder changes to Update mode, previews a delta, preserves existing authored metadata and stable track IDs, and applies the update through an isolated temporary copy. Existing tracks are never removed merely because they are absent from a new selection.",
+      "Return to Ingest, open the original candidate, add the audio source, rescan, and continue to Staging. Include the new track and arrange the complete sequence. When the release ID already exists, Staging changes to Update mode, previews a delta, preserves existing authored metadata and stable track IDs, and applies the update through an isolated temporary copy. Existing tracks are never removed merely because they are absent from a new selection.",
   },
   {
     question: "Should I move or copy a release when going live today?",
@@ -185,6 +177,16 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
     question: "Why will a track not play in the metadata editor?",
     answer:
       "Preview playback requires exactly one audio-playback file or, when that derivative is absent, exactly one audio master. MP3 sources are served directly with byte-range support. Other recognized audio formats are decoded by FFmpeg and streamed as a temporary MP3 without modifying the source file. Confirm FFmpeg and an MP3 encoder are available when live transcoding fails; a generated audio-playback.mp3 remains the fastest and most reliable long-term preview source.",
+  },
+  {
+    question: "Where do I credit samples and interpolations?",
+    answer:
+      "Use Artists, Performers & Writers → Samples & Interpolations on the individual track. Record the relationship type, source title or artist, source writers, identifiers, usage, and official liner-note wording. The source artist is not automatically added as a performer, and source writers are not automatically added to the current track's songwriting credits.",
+  },
+  {
+    question: "Where do I track sample-clearance administration?",
+    answer:
+      "Use Label, Publishing & Copyright → Sample Clearance on the individual track. Clearance status, master-use and publishing approval, agreement references, territories, expiration dates, and notes are editor-only administrative data and should not be included in player-facing metadata.",
   },
   {
     question: "Why is media preparation separate from saving metadata?",

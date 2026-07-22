@@ -34,6 +34,9 @@ Implemented capabilities:
 - Stream preview audio through a root-confined, byte-range-aware local API
 - Prefer generated `audio-playback` files and fall back to one unambiguous audio master
 - Edit scalar values locally in the browser with dirty-state tracking
+- Edit release- and track-level songwriting, composer, and lyricist credits with guided roles and release inheritance
+- Credit track-level samples, interpolations, musical quotations, and lyrical quotations with structured source data and liner-note wording
+- Track private sample-clearance status, master-use and publishing approval, agreement references, territories, and expiration dates
 
 Scalar edits are currently browser-local only. Persisting edits to existing TOML files is planned but not yet implemented.
 
@@ -72,6 +75,7 @@ The backend binds only to localhost during development. The public audio player 
 - React
 - TypeScript
 - Vite
+- Desktop-first workflow navigation: Ingest → Staging → Library → Publish
 - Document-style release and track overview
 - Parsed TOML key/value tables
 - Read-only raw TOML inspection
@@ -91,10 +95,10 @@ The backend binds only to localhost during development. The public audio player 
 
 ## In-App Workflow Documentation
 
-The hamburger menus include a compact **Release workflow** card, and the footer links to a dedicated **Workflow & Help** page. The page distinguishes currently available, partially available, and planned operations across:
+The four primary application tabs guide releases through the product workflow. The hamburger menus include a compact **Release workflow** summary, the metadata tag reference remains available outside the primary flow, and the footer links to a dedicated **Workflow & Help** page. The sticky footer's left side also presents a compact summary tailored to the active tab; this replaces the former in-page Ingest drop-summary table. The guide distinguishes currently available, partially available, and planned operations across:
 
 ```text
-Ingest → Author → Prepare → Preflight → Publish
+Ingest → Staging → Library → Publish
 ```
 
 The maintained workflow content lives in:
@@ -241,6 +245,12 @@ git diff --check;
 ```
 
 ## Core Workflows
+
+### Samples, Interpolations, and Clearance
+
+Track sample relationships are authored in **Artists, Performers & Writers → Samples & Interpolations** and stored in `track-credits.toml` under `track.samples`. Supported relationship types are sample, interpolation, musical quotation, lyrical quotation, and unknown sample source. Public liner-note wording remains editable because licensed wording may be supplied by a label, publisher, attorney, or clearance agreement. Source artists are not automatically added as performers, and source writers are not automatically copied into the current track's songwriting credits.
+
+Private clearance administration is authored in **Label, Publishing & Copyright → Sample Clearance** and stored under `track.sample_clearances` with `editor_only = true`. Clearance records can track master-use and publishing approval independently, along with agreement references, territories, expiration dates, and internal notes. Sample relationships and clearances are track-specific and do not use blanket release inheritance.
 
 ### Library Scan
 

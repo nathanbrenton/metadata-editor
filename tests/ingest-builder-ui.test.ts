@@ -39,7 +39,7 @@ test(
   () => {
     assert.match(
       appSource,
-      /Build or update staging release/,
+      /Continue to Staging/,
     );
     assert.match(
       builderSource,
@@ -160,6 +160,21 @@ test(
     assert.match(
       styleSource,
       /\.ingest-build-plan-table tr > :first-child,[\s\S]*\.ingest-build-plan-table tr > :last-child\s*\{[^}]*min-width:\s*6\.5rem;[^}]*overflow-wrap:\s*normal;[^}]*white-space:\s*nowrap;[^}]*word-break:\s*normal;/s,
+    );
+  },
+);
+
+
+test(
+  "renders staging destinations relative to the release root shown above the table",
+  () => {
+    assert.match(
+      builderSource,
+      /stagingDestinationPathForDisplay\(\s*item\.destinationRelativePath,\s*preview\.releaseRelativePath,/s,
+    );
+    assert.match(
+      builderSource,
+      /stagingDestinationPathForDisplay\(\s*receipt\.destinationRelativePath,\s*result\.releaseRelativePath,/s,
     );
   },
 );

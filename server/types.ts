@@ -181,6 +181,17 @@ export type TechnicalContributorRecordInput =
 export type ArrangementContributorRecordInput =
   ContributorRecordInput;
 
+export type WritingCreditFamily =
+  | "songwriters"
+  | "composers"
+  | "lyricists";
+
+export type WritingCreditRecordInput =
+  ContributorRecordInput & {
+    family: WritingCreditFamily;
+    sourceFamily: WritingCreditFamily | null;
+  };
+
 export type ScalarMetadataSaveRequest = {
   releaseId: string;
   relativePath: string;
@@ -423,6 +434,9 @@ export type MetadataFieldDefinition = {
       | "Track & Disc Numbering"
       | "Movement & Work"
       | "Performers"
+      | "Songwriting & Composition"
+      | "Samples & Interpolations"
+      | "Sample Clearance"
       | "Production"
       | "Arrangement & Orchestration"
       | "Conducting & Musical Direction"
@@ -458,4 +472,47 @@ export type MetadataFieldDefinition = {
     | "always"
     | "never"
     | "developer";
+};
+
+export type SampleRelationshipType =
+  | "sample"
+  | "interpolation"
+  | "musical quotation"
+  | "lyrical quotation"
+  | "unknown sample source";
+
+export type SampleRelationshipRecordInput = {
+  sourceIndex: number | null;
+  relationshipType: SampleRelationshipType;
+  sourceTitle: string;
+  sourceArtist: string;
+  sourceWriters: string[];
+  sourceRelease: string;
+  sourceYear: number | null;
+  sourceIsrc: string;
+  sourceIswc: string;
+  usageDescription: string;
+  creditText: string;
+  notes: string;
+};
+
+export type SampleClearanceStatus =
+  | "not reviewed"
+  | "identification pending"
+  | "clearance pending"
+  | "cleared"
+  | "restricted"
+  | "rejected"
+  | "not required";
+
+export type SampleClearanceRecordInput = {
+  sourceIndex: number | null;
+  sampleReference: number;
+  status: SampleClearanceStatus;
+  masterUseCleared: boolean;
+  publishingCleared: boolean;
+  agreementReference: string;
+  territories: string[];
+  expirationDate: string;
+  notes: string;
 };

@@ -20,6 +20,8 @@ import type {
   ContributorRecordInput,
   PerformerRecordInput,
   TechnicalContributorRecordInput,
+  WritingCreditFamily,
+  WritingCreditRecordInput,
 } from "./types.js";
 import {
   isArrangementContributorRole,
@@ -968,4 +970,216 @@ export function applyArrangementContributorRecords(
     },
     contributorPath,
   );
+}
+
+const writingCreditFamilies: readonly WritingCreditFamily[] = [
+  "songwriters",
+  "composers",
+  "lyricists",
+];
+
+type WritingCreditBasePath =
+  | "track"
+  | "release.credits";
+
+type ExistingWritingCreditFamily = {
+  pathExists: boolean;
+  records: unknown[];
+};
+
+function readExistingWritingCreditFamily(
+  document: unknown,
+  family: WritingCreditFamily,
+  basePath: WritingCreditBasePath,
+): ExistingWritingCreditFamily {
+  const metadataPath = `${basePath}.${family}`;
+
+  try {
+    const value = readMetadataValueAtPath(
+      document,
+      metadataPath,
+    );
+
+    if (!Array.isArray(value)) {
+      throw new Error(`${metadataPath} must be an array.`);
+    }
+
+    return {
+      pathExists: true,
+      records: value,
+    };
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message.includes("does not exist")
+    ) {
+      return {
+        pathExists: false,
+        records: [],
+      };
+    }
+
+    throw error;
+  }
+}
+
+/*
+ * Writing records are stored in separate songwriter, composer, and lyricist
+ * arrays. Source identity remains attached while a guided role moves between
+ * arrays, preserving identifiers and any unknown sibling keys.
+ */
+export function applyWritingCreditRecords(
+  document: unknown,
+  records: readonly WritingCreditRecordInput[],
+  basePath: WritingCreditBasePath = "track",
+): unknown {
+  if (records.length > 500) {
+    throw new Error(
+      `A ${basePath === "track" ? "track" : "release"} may not contain more than 500 writing-credit records.`,
+    );
+  }
+
+  const existingFamilies = new Map<
+    WritingCreditFamily,
+    ExistingWritingCreditFamily
+  >(
+    writingCreditFamilies.map((family) => [
+      family,
+      readExistingWritingCreditFamily(
+        document,
+        family,
+        basePath,
+      ),
+    ]),
+  );
+  const nextFamilies = new Map<
+    WritingCreditFamily,
+    Record<string, unknown>[]
+  >(
+    writingCreditFamilies.map((family) => [family, []]),
+  );
+  const usedSources = new Set<string>();
+
+  records.forEach((record, recordIndex) => {
+    validatePerformerText(
+      `Writing credit ${recordIndex + 1} name`,
+      record.name,
+    );
+    validatePerformerText(
+      `Writing credit ${recordIndex + 1} role`,
+      record.role,
+    );
+    validatePerformerText(
+      `Writing credit ${recordIndex + 1} sort name`,
+      record.sortName,
+    );
+
+    if (!writingCreditFamilies.includes(record.family)) {
+      throw new Error(
+        `Writing credit ${recordIndex + 1} has an unsupported family.`,
+      );
+    }
+
+    if (!record.name.trim() || !record.role.trim()) {
+      throw new Error(
+        `Writing credit ${recordIndex + 1} requires both a name and role.`,
+      );
+    }
+
+    if (
+      (record.sourceIndex === null) !==
+      (record.sourceFamily === null)
+    ) {
+      throw new Error(
+        `Writing credit ${recordIndex + 1} must provide sourceFamily and sourceIndex together.`,
+      );
+    }
+
+    let existingRecord: Record<string, unknown> = {};
+
+    if (
+      record.sourceFamily !== null &&
+      record.sourceIndex !== null
+    ) {
+      const sourceFamily = existingFamilies.get(
+        record.sourceFamily,
+      );
+
+      if (
+        !sourceFamily ||
+        !Number.isSafeInteger(record.sourceIndex) ||
+        record.sourceIndex < 0 ||
+        record.sourceIndex >= sourceFamily.records.length
+      ) {
+        throw new Error(
+          `Writing credit source index is out of bounds: ${record.sourceFamily}[${record.sourceIndex}]`,
+        );
+      }
+
+      const sourceKey =
+        `${record.sourceFamily}:${record.sourceIndex}`;
+
+      if (usedSources.has(sourceKey)) {
+        throw new Error(
+          `Duplicate writing credit source: ${sourceKey}`,
+        );
+      }
+      usedSources.add(sourceKey);
+
+      const sourceRecord =
+        sourceFamily.records[record.sourceIndex];
+
+      if (!isMetadataRecord(sourceRecord)) {
+        throw new Error(
+          `Existing writing credit ${record.sourceIndex + 1} in ${basePath}.${record.sourceFamily} is not a record.`,
+        );
+      }
+
+      existingRecord = sourceRecord;
+    }
+
+    const nextRecord: Record<string, unknown> = {
+      ...existingRecord,
+      name: record.name,
+      role: record.role,
+    };
+
+    if (
+      record.sortName ||
+      Object.prototype.hasOwnProperty.call(
+        existingRecord,
+        "sort_name",
+      )
+    ) {
+      nextRecord.sort_name = record.sortName;
+    }
+
+    nextFamilies.get(record.family)?.push(nextRecord);
+  });
+
+  let updatedDocument = document;
+
+  for (const family of writingCreditFamilies) {
+    const existingFamily = existingFamilies.get(family);
+    const nextRecords = nextFamilies.get(family) ?? [];
+    const metadataPath = `${basePath}.${family}`;
+
+    if (!existingFamily?.pathExists && nextRecords.length === 0) {
+      continue;
+    }
+
+    updatedDocument = existingFamily?.pathExists
+      ? replaceMetadataValueAtPath(
+          updatedDocument,
+          metadataPath,
+          nextRecords,
+        )
+      : createMetadataValueAtPath(
+          updatedDocument,
+          metadataPath,
+          nextRecords,
+        );
+  }
+
+  return updatedDocument;
 }
