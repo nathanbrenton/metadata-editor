@@ -8,6 +8,24 @@ export default defineConfig({
     react(),
   ],
 
+  build: {
+    rolldownOptions: {
+      output: {
+        // Keep framework and parser dependencies out of the application chunk.
+        // This preserves the existing lazy feature chunks while giving the
+        // browser a stable, cacheable vendor bundle.
+        codeSplitting: {
+          groups: [
+            {
+              name: "vendor",
+              test: /node_modules[\\/]/,
+            },
+          ],
+        },
+      },
+    },
+  },
+
   server: {
     // The administrative frontend must not listen on external interfaces.
     host: "127.0.0.1",

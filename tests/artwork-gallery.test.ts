@@ -91,7 +91,7 @@ test("tracks without local artwork inherit release front artwork only", () => {
   );
 });
 
-test("uses the first release asset as a conservative front fallback", () => {
+test("uses the highest-ranked release asset as a conservative front fallback", () => {
   const first = asset("releases/demo/artwork/artwork-master.png");
   const second = asset("releases/demo/artwork/promotional/press.png");
 
@@ -124,5 +124,22 @@ test("marks browser-friendly artwork formats without assuming TIFF or PDF suppor
   assert.equal(
     isBrowserPreviewableArtwork(asset("release/booklet.pdf", ".pdf")),
     false,
+  );
+});
+
+
+test("prefers archival TIFF artwork over an otherwise equivalent PNG", () => {
+  const png = asset(
+    "releases/demo/artwork/front/artwork-master.png",
+    ".png",
+  );
+  const tif = asset(
+    "releases/demo/artwork/front/artwork-master.tif",
+    ".tif",
+  );
+
+  assert.equal(
+    selectPreferredReleaseArtwork([png, tif])?.relativePath,
+    tif.relativePath,
   );
 });

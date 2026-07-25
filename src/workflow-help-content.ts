@@ -62,30 +62,31 @@ export const workflowStages: readonly WorkflowStage[] = [
     summary:
       "Build or incrementally update a controlled private release workspace from the selected ingest candidate.",
     steps: [
-      "Confirm release identity, source inclusion, artwork use, track titles, stable track IDs, and complete track order.",
+      "Confirm release identity, source inclusion, artwork use, track titles, source dates, stable track IDs, and complete track order by entering track numbers directly. Track title tools can populate included sources from one filename field or each file's embedded TITLE tag; source-date tools can apply one date to all included, non-missing sources.",
       "Detect whether the release ID is new or already staged and switch between create and update language.",
       "Preview additions, reorder changes, preserved files, blocked changes, destinations, TOML skeletons, and copy receipts.",
       "Apply the explicit create or update plan through an isolated temporary workspace and verified atomic promotion.",
       "Preserve existing authored metadata and never infer that an omitted source should delete an existing track.",
     ],
     currentNote:
-      "New staging-release creation, incremental audio-track updates, track reordering, stable-ID preservation, dry-run plans, explicit confirmation, copy verification, and rollback-safe promotion are available now. Intentional removals and general sidecar replacement remain future workflows.",
+      "New staging-release creation, incremental audio-track updates, track-number ordering, bulk title selection, bulk source-date application, stable-ID preservation, dry-run plans, explicit confirmation, copy verification, and rollback-safe promotion are available now. The track table shows source paths relative to the selected candidate and flags source dates later than the release date as non-blocking advisories. Intentional removals and general sidecar replacement remain future workflows.",
   },
   {
     id: "library",
     title: "Library",
     availability: "partial",
     summary:
-      "Author canonical release and track metadata, review inheritance, preview audio, and prepare downstream media derivatives.",
+      "Author canonical release and track metadata, review inheritance, preview audio, and prepare downstream media derivatives. Library release rows surface the authored title and release artist before the date and track count.",
     steps: [
       "Add identity, numbering, dates, artists, performers, writers, sample and interpolation sources, arrangement, technical credits, rights, artwork metadata, lyrics, language, and notes.",
       "Use release-level defaults for shared values and override only the individual tracks that differ.",
+      "When saved track numbers change, save the metadata first, then load and confirm the server's exact artist_number_title dry-run plan; guarded synchronization updates track IDs and reference TOMLs without overwriting an existing target.",
       "Preview tracks from the sidebar or transport while reviewing titles, sequence, and track-specific values.",
       "Inspect missing, stale, current, or blocked playback and waveform derivatives under Files & Sources.",
       "Generate playback audio, waveform peaks, analysis, and web artwork from canonical masters when write-enabled media preparation is implemented.",
     ],
     currentNote:
-      "Metadata editing, release-to-track inheritance, controlled TOML saving, readiness guidance, and broad-format browser audio preview are available. Media-processing status planning and waveform-generation code exist, but derivative-generation UI writes are not enabled yet.",
+      "Metadata editing, release-to-track inheritance, controlled TOML saving, track-number-driven sidebar ordering, guarded track-directory synchronization, readiness guidance, and broad-format browser audio preview are available. Directory swaps use temporary names, an operation manifest, collision checks, and rollback protection. Media-processing status planning and waveform-generation code exist, but derivative-generation UI writes are not enabled yet.",
   },
   {
     id: "publish",
@@ -154,9 +155,44 @@ export const workflowDerivativeStatuses: readonly WorkflowDefinition[] = [
 
 export const workflowFaqItems: readonly WorkflowFaqItem[] = [
   {
+    question: "How is the staging release directory ID generated?",
+    answer:
+      "Staging generates the release directory ID from Release Date and Release Title using YYYY-MM-DD_release-name. It continues to follow date and title changes while the generated value is in use. Entering another ID creates an individual override; Use generated ID restores automatic synchronization.",
+  },
+  {
+    question: "Why is a source date warning shown in Staging?",
+    answer:
+      "A source date later than the release date may be intentional, but it can also indicate a mistaken date or a source from a later editing session. Staging highlights the affected rows for review without blocking the build or update plan.",
+  },
+  {
+    question: "How do I populate Staging track titles from filenames or tags?",
+    answer:
+      "In Staging → Tracks, the Use checkboxes define the current source selection. In Track title tools, choose Filename field or Embedded TITLE tag. Filename mode lets you choose the separator and either a numbered field or the last field after the extension is removed. The toolbar reports how many selected sources contain the chosen value; unavailable rows remain unchanged, and every populated title remains manually editable before the staging plan is applied.",
+  },
+  {
+    question: "How do I apply one source date to several Staging tracks?",
+    answer:
+      "In Staging → Tracks, the Use checkboxes define the current source selection. Enter a date in Source date tools above the table and choose Apply to selected. Missing sources are skipped and the resulting draft change remains reviewable before the staging plan is applied.",
+  },
+  {
     question: "Where is the summary for the current workflow tab?",
     answer:
       "The left side of the sticky footer shows context for the active tab. Ingest displays the drop point, candidate and file totals, and probe availability; Staging displays the selected candidate or release-workspace count; Library displays release, track, master, artwork, and metadata totals; Publish displays readiness counts and reminds you that publishing writes are disabled.",
+  },
+  {
+    question: "Why are Developer / Admin Tools disabled after a reload?",
+    answer:
+      "Admin mode is intentionally temporary. Every page load starts with Developer / Admin Tools disabled, and enabling it affects only the current application session. The setting is not written to browser storage.",
+  },
+  {
+    question: "How does the scanner choose between multiple artwork masters?",
+    answer:
+      "The scanner keeps the ambiguity visible but suggests one deterministic candidate. Explicit front-cover and master naming is considered first, followed by the format order TIFF/TIF, PNG, WebP, AVIF, JPEG, and GIF. TIFF is preferred as the archival master when otherwise equivalent candidates are present. The non-selected files remain untouched and should be reviewed rather than deleted automatically.",
+  },
+  {
+    question: "What happens to track directory names when I renumber a release?",
+    answer:
+      "For track directories using artist_number_title, saving numbering metadata does not move folders. Library then loads the server's exact dry-run plan, shows every rename or blocked item, and requires the displayed confirmation phrase before applying it. The apply request includes the reviewed plan fingerprint, so any intervening release change forces a fresh review. The server writes an operation manifest, blocks duplicate numbers and existing targets, uses temporary names for swaps, updates track.id and track_reference.track_id in the track TOMLs, and rolls completed steps back if a later step fails. Custom directory IDs that do not use the numbered convention are never guessed or renamed automatically.",
   },
   {
     question: "Where should the canonical release live?",
@@ -206,6 +242,11 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
 ] as const;
 
 export const workflowTroubleshootingItems: readonly WorkflowTroubleshootingItem[] = [
+  {
+    title: "Multiple artwork masters are detected",
+    description:
+      "Review the amber Scanner warnings panel. The scanner suggests the highest-ranked candidate using filename role and format priority, but it leaves every source file untouched so you can confirm whether another file is the intended master.",
+  },
   {
     title: "A track preview will not play",
     description:

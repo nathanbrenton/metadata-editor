@@ -150,9 +150,9 @@ test(
           await scanMediaLibrary(mediaRoot);
 
         assert.deepEqual(result.warnings, [
-          "releases/2026-08-02_ambiguous-release: multiple release artwork masters detected",
+          "releases/2026-08-02_ambiguous-release: multiple release artwork masters detected; suggested artwork-master.png (preferred lossless PNG master)",
           "releases/2026-08-02_ambiguous-release/tracks/artist_01_multiple-masters: multiple audio masters detected",
-          "releases/2026-08-02_ambiguous-release/tracks/artist_01_multiple-masters: multiple track artwork masters detected",
+          "releases/2026-08-02_ambiguous-release/tracks/artist_01_multiple-masters: multiple track artwork masters detected; suggested artwork-master.webp (preferred WebP master)",
           "releases/2026-08-02_ambiguous-release/tracks/artist_02_missing-master: no audio master detected",
         ]);
       },

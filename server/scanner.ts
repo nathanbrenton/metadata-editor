@@ -1,13 +1,21 @@
 import {
   lstat,
+  readFile,
   readdir,
+  realpath,
 } from "node:fs/promises";
 import path from "node:path";
+import { parse } from "smol-toml";
 
 import {
   assertPathWithinRoot,
   toLibraryRelativePath,
 } from "./media-root.js";
+import {
+  describeArtworkPreference,
+  selectPreferredArtworkCandidate,
+} from "../shared/artwork-preference.js";
+
 import type {
   DiscoveredAsset,
   LibraryScanResult,
@@ -62,6 +70,105 @@ const artworkMasterExtensions = new Set([
   ".tiff",
   ".webp",
 ]);
+
+function isRecord(
+  value: unknown,
+): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+  );
+}
+
+function readNonBlankString(
+  value: unknown,
+): string | undefined {
+  return typeof value === "string" &&
+    value.trim().length > 0
+    ? value
+    : undefined;
+}
+
+async function readReleaseLibraryIdentity(
+  mediaRoot: string,
+  releasePath: string,
+  metadataFiles: MetadataFileStatus[],
+): Promise<
+  Pick<
+    ReleaseScanResult,
+    "releaseTitle" | "primaryArtistName"
+  >
+> {
+  const releaseDocument = metadataFiles.find(
+    (file) => file.filename === "release.toml",
+  );
+
+  if (!releaseDocument?.exists) {
+    return {};
+  }
+
+  try {
+    const candidatePath = assertPathWithinRoot(
+      mediaRoot,
+      path.join(releasePath, "release.toml"),
+    );
+    const stats = await lstat(candidatePath);
+
+    if (
+      !stats.isFile() ||
+      stats.isSymbolicLink()
+    ) {
+      return {};
+    }
+
+    const canonicalMediaRoot =
+      await realpath(mediaRoot);
+    const canonicalFilePath =
+      await realpath(candidatePath);
+
+    assertPathWithinRoot(
+      canonicalMediaRoot,
+      canonicalFilePath,
+    );
+
+    const parsed = parse(
+      await readFile(canonicalFilePath, "utf8"),
+    );
+    const releaseTable =
+      isRecord(parsed) &&
+      isRecord(parsed.release)
+        ? parsed.release
+        : null;
+
+    if (!releaseTable) {
+      return {};
+    }
+
+    const primaryArtist = isRecord(
+      releaseTable.primary_artist,
+    )
+      ? releaseTable.primary_artist
+      : null;
+    const releaseTitle = readNonBlankString(
+      releaseTable.title,
+    );
+    const primaryArtistName =
+      readNonBlankString(primaryArtist?.name);
+
+    return {
+      ...(releaseTitle
+        ? { releaseTitle }
+        : {}),
+      ...(primaryArtistName
+        ? { primaryArtistName }
+        : {}),
+    };
+  } catch {
+    // The full metadata-detail reader reports malformed TOML on open.
+    return {};
+  }
+}
 
 async function isRegularFile(
   candidatePath: string,
@@ -277,17 +384,27 @@ async function scanRelease(
     ),
   );
 
+  const metadataFiles =
+    await scanExpectedMetadataFiles(
+      mediaRoot,
+      releasePath,
+      releaseMetadataFiles,
+    );
+  const releaseIdentity =
+    await readReleaseLibraryIdentity(
+      mediaRoot,
+      releasePath,
+      metadataFiles,
+    );
+
   return {
     id: path.basename(releasePath),
     relativePath: toLibraryRelativePath(
       mediaRoot,
       releasePath,
     ),
-    metadataFiles: await scanExpectedMetadataFiles(
-      mediaRoot,
-      releasePath,
-      releaseMetadataFiles,
-    ),
+    ...releaseIdentity,
+    metadataFiles,
     artworkMasters: releaseFiles
       .filter((filePath) =>
         matchesMasterAsset(
@@ -329,8 +446,14 @@ function buildScannerWarnings(
     }
 
     if (release.artworkMasters.length > 1) {
+      const preferred = selectPreferredArtworkCandidate(
+        release.artworkMasters,
+      );
+
       warnings.push(
-        `${release.relativePath}: multiple release artwork masters detected`,
+        preferred
+          ? `${release.relativePath}: multiple release artwork masters detected; suggested ${preferred.filename} (${describeArtworkPreference(preferred)})`
+          : `${release.relativePath}: multiple release artwork masters detected`,
       );
     }
 
@@ -354,8 +477,14 @@ function buildScannerWarnings(
       }
 
       if (track.artworkMasters.length > 1) {
+        const preferred = selectPreferredArtworkCandidate(
+          track.artworkMasters,
+        );
+
         warnings.push(
-          `${track.relativePath}: multiple track artwork masters detected`,
+          preferred
+            ? `${track.relativePath}: multiple track artwork masters detected; suggested ${preferred.filename} (${describeArtworkPreference(preferred)})`
+            : `${track.relativePath}: multiple track artwork masters detected`,
         );
       }
     }

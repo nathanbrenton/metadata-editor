@@ -208,6 +208,14 @@ import {
   buildTrackNavigationOrder,
 } from "./track-navigation-order.js";
 
+import {
+  buildTrackDirectoryIdForNumber,
+} from "../shared/track-directory-naming.js";
+
+import {
+  resolveReleaseDisplayTitle,
+} from "./release-display-title.js";
+
 // Defer secondary workflows until they are opened so the initial editor
 // bundle remains smaller and faster to parse.
 const LazyIngestReleaseBuilder = lazy(async () => {
@@ -227,6 +235,16 @@ const LazyWorkflowHelpView = lazy(async () => {
 
   return {
     default: module.WorkflowHelpView,
+  };
+});
+
+const LazyScannerWarningPanel = lazy(async () => {
+  const module = await import(
+    "./ScannerWarningPanel.js"
+  );
+
+  return {
+    default: module.ScannerWarningPanel,
   };
 });
 
@@ -274,6 +292,8 @@ type TrackScanResult = {
 type ReleaseScanResult = {
   id: string;
   relativePath: string;
+  releaseTitle?: string;
+  primaryArtistName?: string;
   metadataFiles: MetadataFileStatus[];
   artworkMasters: DiscoveredAsset[];
   tracks: TrackScanResult[];
@@ -854,18 +874,9 @@ export function App() {
     useState(false);
   const applicationMenuRef =
     useRef<HTMLElement>(null);
+  // Admin mode is intentionally session-only and starts disabled on reload.
   const [showAdminTools, setShowAdminTools] =
-    useState(() => {
-      try {
-        return (
-          window.localStorage.getItem(
-            "metadata-editor.show-admin-tools-v2",
-          ) === "true"
-        );
-      } catch {
-        return false;
-      }
-    });
+    useState(false);
 
   const openReleaseDetail = useCallback(
     async (releaseId: string) => {
@@ -1069,17 +1080,6 @@ export function App() {
     refreshIngest,
   ]);
 
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(
-        "metadata-editor.show-admin-tools-v2",
-        String(showAdminTools),
-      );
-    } catch {
-      // Local storage is optional; the session state still works.
-    }
-  }, [showAdminTools]);
 
   useEffect(() => {
     if (!menuOpen) {
@@ -1828,19 +1828,11 @@ export function App() {
               {scan && summary && (
                 <>
                   {scan.warnings.length > 0 && (
-                    <section className="warning-panel">
-                      <h2>Scanner warnings</h2>
-
-                      <ul>
-                        {scan.warnings.map(
-                          (warning) => (
-                            <li key={warning}>
-                              {warning}
-                            </li>
-                          ),
-                        )}
-                      </ul>
-                    </section>
+                    <Suspense fallback={null}>
+                      <LazyScannerWarningPanel
+                        warnings={scan.warnings}
+                      />
+                    </Suspense>
                   )}
 
                   <section className="release-list">
@@ -5251,6 +5243,13 @@ function ReleaseCard({
     selectPreferredReleaseArtwork(
       release.artworkMasters,
     );
+  const releaseDisplayTitle =
+    resolveReleaseDisplayTitle(
+      release.releaseTitle,
+      formatReleaseTitle(release.id),
+    );
+  const releaseArtistName =
+    release.primaryArtistName?.trim() ?? "";
 
   const audioMasters =
     release.tracks.flatMap(
@@ -5275,9 +5274,7 @@ function ReleaseCard({
           type="button"
           className="release-primary-action"
           onClick={onOpenMetadata}
-          aria-label={`Open metadata for ${formatReleaseTitle(
-            release.id,
-          )}`}
+          aria-label={`Open metadata for ${releaseDisplayTitle}`}
         >
           <span
             className="release-artwork-tile"
@@ -5303,10 +5300,18 @@ function ReleaseCard({
 
           <span className="release-summary">
             <strong className="release-title">
-              {formatReleaseTitle(
-                release.id,
-              )}
+              {releaseDisplayTitle}
             </strong>
+
+            <span
+              className={`release-artist${
+                releaseArtistName
+                  ? ""
+                  : " missing"
+              }`}
+            >
+              {releaseArtistName || "Artist not set"}
+            </span>
 
             <span className="release-subtitle">
               {releaseDateLabel}
@@ -5711,6 +5716,45 @@ type ScalarMetadataSaveReceipt = {
   savedAt: string;
   synchronizedTrackFiles?: number;
   skippedTrackFiles?: number;
+};
+
+type TrackDirectoryRenameReceipt = {
+  releaseId: string;
+  operationId: string | null;
+  manifestRelativePath: string | null;
+  renamed: Array<{
+    previousTrackId: string;
+    trackId: string;
+    previousRelativePath: string;
+    relativePath: string;
+  }>;
+  renamedCount: number;
+  completedAt: string;
+};
+
+type TrackDirectoryRenamePlanItem = {
+  trackId: string;
+  sourceRelativePath: string;
+  targetId: string;
+  targetRelativePath: string;
+  trackNumber: number | null;
+  discNumber: number;
+  action: "rename" | "unchanged" | "blocked";
+  reason: string;
+  metadataRelativePaths: string[];
+};
+
+type TrackDirectoryRenamePlan = {
+  releaseId: string;
+  confirmation: "RENAME_TRACK_DIRECTORIES";
+  generatedAt: string;
+  items: TrackDirectoryRenamePlanItem[];
+  summary: {
+    renameCount: number;
+    unchangedCount: number;
+    blockedCount: number;
+  };
+  fingerprint: string;
 };
 
 type PerformerCopyTargetPlan = {
@@ -10424,6 +10468,20 @@ function ReleaseMetadataDetailView({
   const [savingAll, setSavingAll] =
     useState(false);
   const [
+    synchronizingTrackDirectories,
+    setSynchronizingTrackDirectories,
+  ] = useState(false);
+  const [
+    trackDirectoryRenameReview,
+    setTrackDirectoryRenameReview,
+  ] = useState<TrackDirectoryRenamePlan | null>(
+    null,
+  );
+  const [
+    trackDirectoryRenameConfirmationInput,
+    setTrackDirectoryRenameConfirmationInput,
+  ] = useState("");
+  const [
     addingFieldsPath,
     setAddingFieldsPath,
   ] = useState<string | null>(null);
@@ -10518,6 +10576,11 @@ function ReleaseMetadataDetailView({
     useState<string | null>(null);
   const [audioPreviewVolume, setAudioPreviewVolume] =
     useState(0.8);
+
+  useEffect(() => {
+    setTrackDirectoryRenameReview(null);
+    setTrackDirectoryRenameConfirmationInput("");
+  }, [detail.releaseId]);
 
   useEffect(() => {
     setAudioPreviewTrackId(null);
@@ -11312,6 +11375,195 @@ function ReleaseMetadataDetailView({
     });
   };
 
+  const applyTrackDirectoryRenames = async (
+    plan: TrackDirectoryRenamePlan,
+    confirmation: string,
+  ): Promise<TrackDirectoryRenameReceipt> => {
+    setSynchronizingTrackDirectories(true);
+
+    try {
+      const response = await fetch(
+        "/api/library/apply-track-directory-renames",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: detail.releaseId,
+            confirmation,
+            planFingerprint: plan.fingerprint,
+          }),
+        },
+      );
+      const result = (await response.json()) as
+        | TrackDirectoryRenameReceipt
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error ??
+                `Directory synchronization failed: HTTP ${response.status}`
+            : `Directory synchronization failed: HTTP ${response.status}`,
+        );
+      }
+
+      const receipt =
+        result as TrackDirectoryRenameReceipt;
+      const activeRename = receipt.renamed.find(
+        (item) =>
+          item.previousTrackId ===
+          activeDocumentGroup,
+      );
+      const previewRename = receipt.renamed.find(
+        (item) =>
+          item.previousTrackId ===
+          audioPreviewTrackId,
+      );
+
+      if (activeRename) {
+        setActiveDocumentGroup(
+          activeRename.trackId,
+        );
+      }
+
+      if (previewRename) {
+        const audio = audioPreviewRef.current;
+        audio?.pause();
+        if (audio) {
+          audio.removeAttribute("src");
+          audio.load();
+        }
+        setAudioPreviewTrackId(
+          previewRename.trackId,
+        );
+        setAudioPreviewPlaying(false);
+        setAudioPreviewLoading(false);
+      }
+
+      return receipt;
+    } finally {
+      setSynchronizingTrackDirectories(false);
+    }
+  };
+
+  const synchronizePendingTrackDirectories = async () => {
+    if (dirtyCount > 0) {
+      setSaveError(
+        "Save or discard browser metadata changes before reviewing directory names.",
+      );
+      return;
+    }
+
+    setSaveError(null);
+    setSynchronizingTrackDirectories(true);
+
+    try {
+      const query = new URLSearchParams({
+        release: detail.releaseId,
+      });
+      const response = await fetch(
+        `/api/library/track-directory-rename-plan?${query.toString()}`,
+      );
+      const result = (await response.json()) as
+        | TrackDirectoryRenamePlan
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error ??
+                `Directory plan failed: HTTP ${response.status}`
+            : `Directory plan failed: HTTP ${response.status}`,
+        );
+      }
+
+      const plan = result as TrackDirectoryRenamePlan;
+
+      if (
+        plan.summary.renameCount === 0 &&
+        plan.summary.blockedCount === 0
+      ) {
+        onNotify(
+          "Track directory names are already synchronized",
+          "success",
+        );
+        return;
+      }
+
+      setTrackDirectoryRenameConfirmationInput("");
+      setTrackDirectoryRenameReview(plan);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown track directory planning error";
+      setSaveError(message);
+      onNotify(
+        "Track directory dry-run plan failed",
+        "error",
+      );
+    } finally {
+      setSynchronizingTrackDirectories(false);
+    }
+  };
+
+  const confirmTrackDirectoryRenames = async () => {
+    const plan = trackDirectoryRenameReview;
+
+    if (!plan) {
+      return;
+    }
+
+    if (
+      trackDirectoryRenameConfirmationInput !==
+      plan.confirmation
+    ) {
+      return;
+    }
+
+    setSaveError(null);
+
+    try {
+      const receipt =
+        await applyTrackDirectoryRenames(
+          plan,
+          trackDirectoryRenameConfirmationInput,
+        );
+      setTrackDirectoryRenameReview(null);
+      setTrackDirectoryRenameConfirmationInput("");
+      await onRefresh();
+
+      onNotify(
+        receipt.renamedCount > 0
+          ? `${receipt.renamedCount} track ${
+              receipt.renamedCount === 1
+                ? "directory"
+                : "directories"
+            } renamed and verified`
+          : "Track directory names are already synchronized",
+        "success",
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unknown track directory synchronization error";
+      setSaveError(message);
+
+      if (/plan changed/i.test(message)) {
+        setTrackDirectoryRenameReview(null);
+        setTrackDirectoryRenameConfirmationInput("");
+      }
+
+      onNotify(
+        "Track directory synchronization failed",
+        "error",
+      );
+    }
+  };
+
   const saveDocumentDraft = async (
     document: ParsedMetadataDocument,
   ) => {
@@ -11353,6 +11605,22 @@ function ReleaseMetadataDetailView({
     ) {
       setSaveError(
         "This document has no metadata changes to save.",
+      );
+      return;
+    }
+
+    const changesTrackNumber = changes.some(
+      (change) =>
+        change.path ===
+        "track.numbering.track_number",
+    );
+
+    if (
+      changesTrackNumber &&
+      trackNumberDraftDocuments.length > 1
+    ) {
+      setSaveError(
+        "Multiple track numbers are changing. Use Save edits so directory swaps are synchronized as one guarded operation.",
       );
       return;
     }
@@ -11548,13 +11816,22 @@ function ReleaseMetadataDetailView({
             ScalarMetadataSaveReceipt
         ).synchronizedTrackFiles ?? 0;
 
-      onNotify(
+      const saveDetails = [
         synchronizedTrackFiles > 0
-          ? `Metadata saved and verified · ${synchronizedTrackFiles} track ${
+          ? `${synchronizedTrackFiles} track ${
               synchronizedTrackFiles === 1
                 ? "file"
                 : "files"
             } synchronized`
+          : null,
+        changesTrackNumber
+          ? "directory synchronization pending"
+          : null,
+      ].filter(Boolean);
+
+      onNotify(
+        saveDetails.length > 0
+          ? `Metadata saved and verified · ${saveDetails.join(" · ")}`
           : "Metadata saved and verified",
         "success",
       );
@@ -11577,7 +11854,9 @@ function ReleaseMetadataDetailView({
       }
       setSaveError(message);
       onNotify(
-        "Metadata save failed",
+        writeVerified
+          ? "Metadata saved; refresh failed"
+          : "Metadata save failed",
         "error",
       );
     } finally {
@@ -11628,6 +11907,18 @@ function ReleaseMetadataDetailView({
           return Number(leftIsRelease) -
             Number(rightIsRelease);
         });
+    const hasTrackNumberChanges =
+      changedDocuments.some((document) =>
+        getDocumentSaveChanges(
+          document,
+          draft,
+          releaseDocuments,
+        ).changes.some(
+          (change) =>
+            change.path ===
+            "track.numbering.track_number",
+        ),
+      );
 
     if (changedDocuments.length === 0) {
       return;
@@ -11857,13 +12148,22 @@ function ReleaseMetadataDetailView({
           ? "metadata file"
           : "metadata files";
 
-      onNotify(
+      const saveDetails = [
         synchronizedTrackFiles > 0
-          ? `${savedCount} ${fileLabel} saved and verified · ${synchronizedTrackFiles} track ${
+          ? `${synchronizedTrackFiles} track ${
               synchronizedTrackFiles === 1
                 ? "file"
                 : "files"
             } synchronized`
+          : null,
+        hasTrackNumberChanges
+          ? "directory synchronization pending"
+          : null,
+      ].filter(Boolean);
+
+      onNotify(
+        saveDetails.length > 0
+          ? `${savedCount} ${fileLabel} saved and verified · ${saveDetails.join(" · ")}`
           : `${savedCount} ${fileLabel} saved and verified`,
         "success",
       );
@@ -12473,6 +12773,70 @@ function ReleaseMetadataDetailView({
       (entry) => [entry.trackId, entry],
     ),
   );
+  const pendingTrackDirectoryRenames =
+    trackNavigation.entries.flatMap((entry) => {
+      if (entry.trackNumber === null) {
+        return [];
+      }
+
+      const targetId =
+        buildTrackDirectoryIdForNumber(
+          entry.trackId,
+          entry.trackNumber,
+        );
+
+      return targetId && targetId !== entry.trackId
+        ? [{
+            previousTrackId: entry.trackId,
+            trackId: targetId,
+            trackNumber: entry.trackNumber,
+          }]
+        : [];
+    });
+  const trackDirectoryTargetGroups = new Map<
+    string,
+    Array<{ previousTrackId: string; trackId: string }>
+  >();
+
+  for (const entry of trackNavigation.entries) {
+    const targetId =
+      entry.trackNumber === null
+        ? entry.trackId
+        : buildTrackDirectoryIdForNumber(
+            entry.trackId,
+            entry.trackNumber,
+          ) ?? entry.trackId;
+    const targetKey = targetId.toLocaleLowerCase(
+      "en-US",
+    );
+    const group =
+      trackDirectoryTargetGroups.get(targetKey) ?? [];
+    group.push({
+      previousTrackId: entry.trackId,
+      trackId: targetId,
+    });
+    trackDirectoryTargetGroups.set(
+      targetKey,
+      group,
+    );
+  }
+
+  const trackDirectoryTargetConflicts = Array.from(
+    trackDirectoryTargetGroups.values(),
+  ).filter((group) => group.length > 1);
+  const trackNumberDraftDocuments =
+    detail.documents.filter(
+      (document) =>
+        document.scope === "track" &&
+        getDocumentDraftChanges(
+          document,
+          draft,
+        ).some(
+          (change) =>
+            change.path ===
+            "track.numbering.track_number",
+        ),
+    );
   const orderedScannedTracks = trackIds
     .map((trackId) =>
       release?.tracks.find(
@@ -12742,6 +13106,24 @@ function ReleaseMetadataDetailView({
     detail.documents.length === 0;
   const inferredReleaseTitle =
     formatReleaseTitle(detail.releaseId);
+  const releaseTitleDocument =
+    releaseDocuments.find(
+      (document) =>
+        document.filename === "release.toml",
+    );
+  const authoredReleaseTitle =
+    releaseTitleDocument
+      ? readDocumentDraftString(
+          releaseTitleDocument,
+          "release.title",
+          draft,
+        )
+      : "";
+  const releaseDisplayTitle =
+    resolveReleaseDisplayTitle(
+      authoredReleaseTitle,
+      inferredReleaseTitle,
+    );
 
   const inferredTracks = trackIds
     .map(inferTrackSummary)
@@ -13306,11 +13688,7 @@ function ReleaseMetadataDetailView({
           </span>
 
           <div>
-            <h1>
-              {formatReleaseTitle(
-                detail.releaseId,
-              )}
-            </h1>
+            <h1>{releaseDisplayTitle}</h1>
 
             <p className="metadata-detail-date">
               {releaseDateLabel}
@@ -13775,6 +14153,202 @@ function ReleaseMetadataDetailView({
         </section>
       )}
 
+      {pendingTrackDirectoryRenames.length > 0 && (
+        <section
+          className="track-directory-rename-notice"
+          aria-label="Planned track directory renames"
+        >
+          <div className="track-directory-rename-heading">
+            <div>
+              <strong>
+                Track directory names follow saved track numbers
+              </strong>
+              <span>
+                {dirtyCount > 0
+                  ? "Save edits first. Directory changes require a separate reviewed synchronization."
+                  : "The saved numbering and directory sequence differ. Review the server dry-run plan before changing folders."}
+              </span>
+            </div>
+            <button
+              type="button"
+              disabled={
+                dirtyCount > 0 ||
+                synchronizingTrackDirectories
+              }
+              onClick={() =>
+                void synchronizePendingTrackDirectories()
+              }
+            >
+              {synchronizingTrackDirectories
+                ? "Loading dry-run plan…"
+                : "Review directory rename plan"}
+            </button>
+          </div>
+
+          <div className="track-directory-rename-table-wrap">
+            <table className="track-directory-rename-table">
+              <thead>
+                <tr>
+                  <th>Current directory</th>
+                  <th>Planned directory</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingTrackDirectoryRenames.map(
+                  (item) => (
+                    <tr key={item.previousTrackId}>
+                      <td>
+                        <code>{item.previousTrackId}</code>
+                      </td>
+                      <td>
+                        <code>{item.trackId}</code>
+                      </td>
+                    </tr>
+                  ),
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {trackDirectoryTargetConflicts.length > 0 && (
+            <div
+              className="track-directory-target-conflicts"
+              role="alert"
+            >
+              <strong>Directory target collision</strong>
+              <ul>
+                {trackDirectoryTargetConflicts.map(
+                  (group) => (
+                    <li key={group[0]?.trackId}>
+                      <code>{group[0]?.trackId}</code> would be used by {group.map(
+                        (item) => item.previousTrackId,
+                      ).join(", ")}
+                    </li>
+                  ),
+                )}
+              </ul>
+            </div>
+          )}
+
+          <p>
+            Saving metadata does not rename folders. Existing targets are never overwritten. Confirmed swaps use temporary names, an operation manifest, TOML backups, and rollback protection.
+          </p>
+        </section>
+      )}
+
+      {trackDirectoryRenameReview && (
+        <MetadataFieldModal
+          title="Review track directory synchronization"
+          onClose={() => {
+            if (synchronizingTrackDirectories) return;
+            setTrackDirectoryRenameReview(null);
+            setTrackDirectoryRenameConfirmationInput("");
+          }}
+        >
+          <section className="track-directory-rename-review metadata-field-full-width">
+            <div className="track-directory-rename-review-summary">
+              <div>
+                <strong>Server dry-run plan</strong>
+                <span>
+                  {trackDirectoryRenameReview.summary.renameCount} rename{trackDirectoryRenameReview.summary.renameCount === 1 ? "" : "s"}
+                  {" · "}
+                  {trackDirectoryRenameReview.summary.blockedCount} blocked
+                </span>
+              </div>
+              <code title={trackDirectoryRenameReview.fingerprint}>
+                Plan {trackDirectoryRenameReview.fingerprint.slice(0, 12)}…
+              </code>
+            </div>
+
+            <p>
+              This exact plan will be revalidated immediately before any directory is moved. If the release changes, the server rejects the stale plan and requires another review.
+            </p>
+
+            <div className="track-directory-rename-review-table-wrap">
+              <table className="track-directory-rename-review-table">
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Current directory</th>
+                    <th>Target directory</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trackDirectoryRenameReview.items
+                    .filter((item) => item.action !== "unchanged")
+                    .map((item) => (
+                      <tr
+                        key={item.trackId}
+                        className={item.action === "blocked" ? "blocked" : undefined}
+                      >
+                        <td>
+                          <span className={`badge ${item.action === "blocked" ? "blocked" : "preview"}`}>
+                            {item.action}
+                          </span>
+                        </td>
+                        <td><code>{item.trackId}</code></td>
+                        <td><code>{item.targetId}</code></td>
+                        <td>{item.reason}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+
+            {trackDirectoryRenameReview.summary.blockedCount > 0 ? (
+              <p className="message error" role="alert">
+                This plan is blocked. Close the review, resolve the listed conflicts, and load a new dry-run plan.
+              </p>
+            ) : (
+              <label className="track-directory-rename-confirmation">
+                <span>
+                  Type <code>{trackDirectoryRenameReview.confirmation}</code> to confirm this filesystem operation.
+                </span>
+                <input
+                  type="text"
+                  value={trackDirectoryRenameConfirmationInput}
+                  autoComplete="off"
+                  spellCheck={false}
+                  disabled={synchronizingTrackDirectories}
+                  onChange={(event) =>
+                    setTrackDirectoryRenameConfirmationInput(event.target.value)
+                  }
+                />
+              </label>
+            )}
+
+            <div className="track-directory-rename-review-actions">
+              <button
+                type="button"
+                disabled={synchronizingTrackDirectories}
+                onClick={() => {
+                  setTrackDirectoryRenameReview(null);
+                  setTrackDirectoryRenameConfirmationInput("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-action"
+                disabled={
+                  synchronizingTrackDirectories ||
+                  trackDirectoryRenameReview.summary.blockedCount > 0 ||
+                  trackDirectoryRenameConfirmationInput !==
+                    trackDirectoryRenameReview.confirmation
+                }
+                onClick={() => void confirmTrackDirectoryRenames()}
+              >
+                {synchronizingTrackDirectories
+                  ? "Applying guarded rename…"
+                  : "Apply reviewed directory renames"}
+              </button>
+            </div>
+          </section>
+        </MetadataFieldModal>
+      )}
+
       {isMetadataEmpty && (
         <section className="new-release-onboarding">
           <div className="new-release-onboarding-heading">
@@ -14156,11 +14730,7 @@ function ReleaseMetadataDetailView({
         >
           <span className="document-nav-label">
             <strong>Release</strong>
-            <small>
-              {formatReleaseTitle(
-                detail.releaseId,
-              )}
-            </small>
+            <small>{releaseDisplayTitle}</small>
           </span>
 
           <small

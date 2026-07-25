@@ -2,6 +2,10 @@ import {
   formatTrackDisplayTitle,
 } from "../shared/track-title.js";
 import {
+  selectPreferredArtworkCandidate,
+} from "../shared/artwork-preference.js";
+
+import {
   generateArtistSortName,
 } from "../shared/artist-sort-name.js";
 
@@ -209,7 +213,9 @@ export function buildStarterMetadataPlan(
     });
 
   const artworkMaster =
-    release.artworkMasters[0];
+    selectPreferredArtworkCandidate(
+      release.artworkMasters,
+    );
 
   const releaseDocument: TomlDocument = {
     schema: {
@@ -295,7 +301,9 @@ export function buildStarterMetadataPlan(
     const audioMaster =
       track.scan.audioMasters[0];
     const artwork =
-      track.scan.artworkMasters[0];
+      selectPreferredArtworkCandidate(
+        track.scan.artworkMasters,
+      );
 
     const trackDocument: TomlDocument = {
       schema: {

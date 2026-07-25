@@ -22,6 +22,8 @@ export type TrackScanResult = {
 export type ReleaseScanResult = {
   id: string;
   relativePath: string;
+  releaseTitle?: string;
+  primaryArtistName?: string;
   metadataFiles: MetadataFileStatus[];
   artworkMasters: DiscoveredAsset[];
   tracks: TrackScanResult[];

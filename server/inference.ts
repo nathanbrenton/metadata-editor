@@ -1,4 +1,9 @@
 import {
+  describeArtworkPreference,
+  selectPreferredArtworkCandidate,
+} from "../shared/artwork-preference.js";
+
+import {
   inferTrackTitleMetadata,
 } from "../shared/track-title.js";
 
@@ -58,16 +63,18 @@ function inferReleasePreview(
     }
   }
 
-  if (release.artworkMasters.length === 1) {
-    const artworkMaster =
-      release.artworkMasters[0];
+  const artworkMaster = selectPreferredArtworkCandidate(
+    release.artworkMasters,
+  );
 
-    if (artworkMaster) {
-      preview.artworkMasterPath = {
-        value: artworkMaster.relativePath,
-        source: "single detected release artwork master",
-      };
-    }
+  if (artworkMaster) {
+    preview.artworkMasterPath = {
+      value: artworkMaster.relativePath,
+      source:
+        release.artworkMasters.length > 1
+          ? "preferred detected release artwork master"
+          : "single detected release artwork master",
+    };
   }
 
   return preview;
@@ -154,16 +161,18 @@ function inferTrackPreview(
     }
   }
 
-  if (track.artworkMasters.length === 1) {
-    const artworkMaster =
-      track.artworkMasters[0];
+  const artworkMaster = selectPreferredArtworkCandidate(
+    track.artworkMasters,
+  );
 
-    if (artworkMaster) {
-      preview.artworkMasterPath = {
-        value: artworkMaster.relativePath,
-        source: "single detected track artwork master",
-      };
-    }
+  if (artworkMaster) {
+    preview.artworkMasterPath = {
+      value: artworkMaster.relativePath,
+      source:
+        track.artworkMasters.length > 1
+          ? "preferred detected track artwork master"
+          : "single detected track artwork master",
+    };
   }
 
   return preview;
@@ -175,8 +184,14 @@ export function buildMetadataPreview(
   const warnings: string[] = [];
 
   if (release.artworkMasters.length > 1) {
+    const preferred = selectPreferredArtworkCandidate(
+      release.artworkMasters,
+    );
+
     warnings.push(
-      "Release artwork path was not inferred because multiple artwork masters were detected.",
+      preferred
+        ? `Release artwork uses ${preferred.filename} as the suggested master (${describeArtworkPreference(preferred)}). Review the other detected candidates.`
+        : "Multiple release artwork masters were detected and require review.",
     );
   }
 
@@ -194,8 +209,14 @@ export function buildMetadataPreview(
     }
 
     if (track.artworkMasters.length > 1) {
+      const preferred = selectPreferredArtworkCandidate(
+        track.artworkMasters,
+      );
+
       warnings.push(
-        `${track.id}: artwork path was not inferred because multiple artwork masters were detected.`,
+        preferred
+          ? `${track.id}: artwork uses ${preferred.filename} as the suggested master (${describeArtworkPreference(preferred)}). Review the other detected candidates.`
+          : `${track.id}: multiple artwork masters were detected and require review.`,
       );
     }
   }

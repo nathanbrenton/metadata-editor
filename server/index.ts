@@ -98,6 +98,10 @@ import {
 } from "./performer-copy.js";
 import { saveScalarMetadataChanges } from "./metadata-saver.js";
 import {
+  buildTrackDirectoryRenamePlan,
+  executeTrackDirectoryRenamePlan,
+} from "./track-directory-sync.js";
+import {
   normalizeSampleClearanceRequest,
   normalizeSampleRelationshipRequest,
 } from "./sample-record-request.js";
@@ -3034,6 +3038,136 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown metadata field removal error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/library/track-directory-rename-plan"
+    ) {
+      try {
+        const releaseId =
+          requestUrl.searchParams.get("release");
+
+        if (!releaseId) {
+          sendJson(response, 400, {
+            error: "release is required",
+          });
+          return;
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        const release = await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        sendJson(
+          response,
+          200,
+          await buildTrackDirectoryRenamePlan(
+            mediaRoot,
+            release,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown track directory planning error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/apply-track-directory-renames"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : null;
+        const confirmation =
+          "confirmation" in body &&
+          typeof body.confirmation === "string"
+            ? body.confirmation
+            : null;
+        const planFingerprint =
+          "planFingerprint" in body &&
+          typeof body.planFingerprint === "string"
+            ? body.planFingerprint
+            : null;
+
+        if (
+          !releaseId ||
+          !confirmation ||
+          !planFingerprint
+        ) {
+          sendJson(response, 400, {
+            error:
+              "releaseId, confirmation, and planFingerprint are required",
+          });
+          return;
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        const release = await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        sendJson(
+          response,
+          200,
+          await executeTrackDirectoryRenamePlan(
+            mediaRoot,
+            release,
+            confirmation,
+            planFingerprint,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown track directory synchronization error",
         });
       }
 

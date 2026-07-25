@@ -308,6 +308,25 @@ code {
   white-space: nowrap;
 }
 
+.release-artist,
+.release-subtitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.release-artist {
+  color: #cbd2d8;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.release-artist.missing {
+  color: #7f8993;
+  font-style: italic;
+  font-weight: 500;
+}
+
 .release-subtitle {
   color: #aeb7c0;
   font-size: 0.82rem;
@@ -7043,7 +7062,27 @@ input[aria-invalid="true"] {
 }
 
 .ingest-release-id-field {
+  display: grid;
   grid-column: 1 / -1;
+  gap: 0.35rem;
+}
+
+.ingest-release-id-guidance {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.ingest-release-id-guidance small {
+  min-width: 0;
+  margin-top: 0;
+}
+
+.ingest-release-id-guidance button {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.65rem;
+  font-size: 0.72rem;
 }
 
 .ingest-release-id-field small,
@@ -7055,8 +7094,141 @@ input[aria-invalid="true"] {
   line-height: 1.35;
 }
 
+.ingest-track-table-workflow {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.ingest-track-title-tools,
+.ingest-source-date-tools {
+  display: grid;
+  align-items: end;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid #39434c;
+  border-radius: 0.55rem;
+  background: #171c20;
+}
+
+.ingest-track-title-tools {
+  grid-template-columns:
+    minmax(18rem, 1fr)
+    minmax(10rem, auto)
+    minmax(8rem, auto)
+    minmax(9rem, auto)
+    auto;
+}
+
+.ingest-source-date-tools {
+  grid-template-columns: minmax(18rem, 1fr) auto auto;
+}
+
+.ingest-track-title-tools-summary,
+.ingest-source-date-tools-summary {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.ingest-track-title-tools-summary strong,
+.ingest-source-date-tools-summary strong {
+  color: #e8edf1;
+  font-size: 0.82rem;
+}
+
+.ingest-track-title-tools-summary span,
+.ingest-source-date-tools-summary span {
+  color: #98a4ae;
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.ingest-track-title-tools label,
+.ingest-source-date-tools label {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.ingest-track-title-tools label > span,
+.ingest-source-date-tools label > span {
+  color: #aeb7bf;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ingest-source-date-tools input {
+  min-width: 9rem;
+}
+
+.ingest-track-title-tools select {
+  min-width: 8rem;
+}
+
+.ingest-track-title-apply-button {
+  grid-column: -2 / -1;
+  min-width: 10.5rem;
+  padding: 0.52rem 0.7rem;
+  white-space: nowrap;
+}
+
+.ingest-source-date-apply-button {
+  min-width: 10.5rem;
+  padding: 0.52rem 0.7rem;
+  white-space: nowrap;
+}
+
 .ingest-builder-track-table {
-  min-width: 92rem;
+  width: 100%;
+  min-width: 72rem;
+  table-layout: fixed;
+}
+
+.ingest-track-use-column,
+.ingest-track-use-cell {
+  width: 3rem;
+  text-align: center;
+}
+
+.ingest-track-source-column,
+.ingest-track-source-cell {
+  width: 19rem;
+}
+
+.ingest-track-state-column,
+.ingest-track-state-cell {
+  width: 7rem;
+}
+
+.ingest-track-number-column,
+.ingest-track-number-cell {
+  width: 4rem;
+  text-align: center;
+}
+
+.ingest-track-title-column,
+.ingest-track-title-cell {
+  width: 17rem;
+}
+
+.ingest-track-version-column,
+.ingest-track-version-cell {
+  width: 9rem;
+}
+
+.ingest-track-artist-column,
+.ingest-track-artist-cell {
+  width: 9rem;
+}
+
+.ingest-track-date-column,
+.ingest-source-date-cell {
+  width: 10rem;
+}
+
+.ingest-track-source-cell code {
+  overflow-wrap: anywhere;
 }
 
 .ingest-builder-asset-table {
@@ -7073,12 +7245,62 @@ input[aria-invalid="true"] {
   width: auto;
 }
 
-.ingest-builder-track-table input[type="number"] {
-  min-width: 4.5rem;
+.ingest-track-number-cell input {
+  width: 3.25rem;
+  min-width: 3.25rem;
+  max-width: 3.25rem;
+  margin-inline: auto;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .ingest-builder-track-table input[type="date"] {
-  min-width: 9rem;
+  min-width: 8.75rem;
+}
+
+.ingest-source-date-cell {
+  vertical-align: top;
+}
+
+.ingest-inline-warning {
+  display: block;
+  margin-top: 0.3rem;
+  color: #d2b27c;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.ingest-source-date-warning-row > td,
+.ingest-source-date-warning-row > th {
+  background: #211d17;
+}
+
+.ingest-source-date-warning-row > :first-child {
+  box-shadow: inset 3px 0 0 #9a6b2f;
+}
+
+.ingest-source-date-advisory {
+  margin-bottom: 0;
+  border-color: #6a5534;
+  background: #241f18;
+}
+
+.ingest-source-date-advisory header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ingest-source-date-advisory h4,
+.ingest-source-date-advisory p {
+  margin: 0;
+}
+
+.ingest-source-date-advisory p {
+  margin-top: 0.25rem;
+  color: #b8aa96;
 }
 
 .ingest-builder-track-table code,
@@ -7922,20 +8144,6 @@ input[aria-invalid="true"] {
   color: #e0eee3;
 }
 
-.ingest-track-order-controls {
-  display: inline-flex;
-  gap: 0.3rem;
-  white-space: nowrap;
-}
-
-.ingest-track-order-controls button {
-  width: 2rem;
-  min-width: 2rem;
-  height: 2rem;
-  padding: 0;
-  font-weight: 800;
-}
-
 .ingest-build-summary-destination {
   grid-column: span 2;
 }
@@ -8476,6 +8684,196 @@ input[aria-invalid="true"] {
   margin-top: 0.2rem;
 }
 
+.track-directory-rename-notice {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  border: 1px solid #4d6275;
+  border-left: 0.25rem solid #7395b4;
+  border-radius: 0.35rem;
+  padding: 0.8rem 0.9rem;
+  background: #1b232b;
+  color: #b7c5d1;
+  font-size: 0.78rem;
+}
+
+.track-directory-rename-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.track-directory-rename-heading > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.track-directory-rename-heading strong {
+  color: #dceaf5;
+}
+
+.track-directory-rename-heading span,
+.track-directory-rename-notice p {
+  color: #91a2b1;
+}
+
+.track-directory-rename-notice p {
+  margin: 0;
+}
+
+.track-directory-target-conflicts {
+  border: 1px solid #785d35;
+  border-radius: 0.25rem;
+  padding: 0.55rem 0.65rem;
+  background: #2a241c;
+  color: #d8c5a6;
+}
+
+.track-directory-target-conflicts strong {
+  color: #f0d3a4;
+}
+
+.track-directory-target-conflicts ul {
+  margin: 0.35rem 0 0;
+  padding-left: 1.15rem;
+}
+
+.track-directory-rename-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #344452;
+  border-radius: 0.25rem;
+}
+
+.track-directory-rename-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.track-directory-rename-table th,
+.track-directory-rename-table td {
+  width: 50%;
+  border-bottom: 1px solid #344452;
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.track-directory-rename-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.track-directory-rename-table code {
+  overflow-wrap: anywhere;
+}
+
+.track-directory-rename-review {
+  display: grid;
+  gap: 1rem;
+}
+
+.track-directory-rename-review > p {
+  margin: 0;
+  color: #b9c4cd;
+  line-height: 1.5;
+}
+
+.track-directory-rename-review-summary {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid #415465;
+  border-left: 0.25rem solid #7395b4;
+  border-radius: 0.35rem;
+  padding: 0.75rem 0.85rem;
+  background: #1b232b;
+}
+
+.track-directory-rename-review-summary > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.track-directory-rename-review-summary strong {
+  color: #e2edf5;
+}
+
+.track-directory-rename-review-summary span,
+.track-directory-rename-review-summary > code {
+  color: #9babb8;
+  font-size: 0.76rem;
+}
+
+.track-directory-rename-review-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #3b4650;
+  border-radius: 0.35rem;
+}
+
+.track-directory-rename-review-table {
+  width: 100%;
+  min-width: 56rem;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.78rem;
+}
+
+.track-directory-rename-review-table th,
+.track-directory-rename-review-table td {
+  border-bottom: 1px solid #343f48;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.track-directory-rename-review-table th:nth-child(1) {
+  width: 6.5rem;
+}
+
+.track-directory-rename-review-table th:nth-child(2),
+.track-directory-rename-review-table th:nth-child(3) {
+  width: 16rem;
+}
+
+.track-directory-rename-review-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.track-directory-rename-review-table tr.blocked td {
+  background: #2d1e1e;
+}
+
+.track-directory-rename-review-table code {
+  overflow-wrap: anywhere;
+}
+
+.track-directory-rename-confirmation {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px solid #59636d;
+  border-radius: 0.35rem;
+  padding: 0.8rem;
+  background: #202429;
+}
+
+.track-directory-rename-confirmation span {
+  color: #cbd3da;
+  font-size: 0.8rem;
+}
+
+.track-directory-rename-confirmation input {
+  width: min(32rem, 100%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.track-directory-rename-review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+}
+
 /* Keep dense desktop track navigation readable as status badges accumulate. */
 @media (min-width: 48.001rem) {
   .release-metadata-workspace {
@@ -8587,4 +8985,76 @@ input[aria-invalid="true"] {
   .metadata-track-preview-button {
     min-height: 3.8rem;
   }
+}
+
+@media (max-width: 48rem) {
+  .ingest-release-id-guidance {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ingest-release-id-guidance button {
+    width: 100%;
+  }
+}
+
+/* Scanner warnings are reviewable, non-blocking conditions, so use amber
+   emphasis while reserving red for errors that prevent an operation. */
+.scanner-warning-panel {
+  border-color: #8a6124;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(216, 154, 61, 0.12),
+      rgba(26, 26, 26, 0.96) 22rem
+    );
+  box-shadow: inset 0.25rem 0 0 #d89a3d;
+}
+
+.scanner-warning-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.scanner-warning-heading h2 {
+  margin: 0;
+  color: #f2c77e;
+}
+
+.scanner-warning-icon {
+  color: #e4a64c;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.scanner-warning-count {
+  min-width: 1.6rem;
+  padding: 0.12rem 0.45rem;
+  border: 1px solid #9c6b27;
+  border-radius: 999px;
+  background: rgba(156, 107, 39, 0.2);
+  color: #f3cb88;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.scanner-warning-guidance {
+  margin: 0.45rem 0 0;
+  color: #cbb58f;
+  font-size: 0.84rem;
+}
+
+.scanner-warning-list {
+  margin-bottom: 0;
+}
+
+.scanner-warning-list li {
+  padding-left: 0.15rem;
+  color: #f0dfc3;
+}
+
+.scanner-warning-list li::marker {
+  color: #d89a3d;
 }

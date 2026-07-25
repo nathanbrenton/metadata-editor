@@ -32,7 +32,7 @@ test("routes private sample clearance to Label, Publishing & Copyright", () => {
     appSource,
     /activeMetadataTab === "rights"[\s\S]*supportsSampleClearanceRecords/,
   );
-  assert.match(appSource, /Editor-only administrative data/);
+  assert.match(sampleEditorSource, /Editor-only administrative data/);
 });
 
 test("does not create release-level blanket sample inheritance", () => {

@@ -146,3 +146,63 @@ test("documents the active-tab summary in the sticky footer", () => {
   assert.match(combinedText, /Ingest displays the drop point/i);
   assert.match(combinedText, /Publish displays readiness counts/i);
 });
+
+
+test("documents reviewed track-directory synchronization", () => {
+  const library = workflowStages.find(
+    ({ id }) => id === "library",
+  );
+  const text = [
+    ...(library?.steps ?? []),
+    library?.currentNote,
+    ...workflowFaqItems.map(
+      ({ question, answer }) =>
+        `${question} ${answer}`,
+    ),
+  ].join(" ");
+
+  assert.match(text, /saving numbering metadata does not move folders/i);
+  assert.match(text, /server's exact dry-run plan/i);
+  assert.match(text, /confirmation phrase/i);
+  assert.match(text, /plan fingerprint/i);
+});
+
+
+test("documents temporary admin mode and Library release identity rows", () => {
+  const library = workflowStages.find(
+    ({ id }) => id === "library",
+  );
+  const combinedText = [
+    library?.summary,
+    ...workflowFaqItems.map(
+      ({ question, answer }) =>
+        `${question} ${answer}`,
+    ),
+  ].join(" ");
+
+  assert.match(combinedText, /authored title and release artist/i);
+  assert.match(combinedText, /every page load starts/i);
+  assert.match(combinedText, /not written to browser storage/i);
+});
+
+test("documents bulk source-date tools in Staging", () => {
+  const staging = workflowStages.find(
+    ({ id }) => id === "staging",
+  );
+  const combinedText = [
+    staging?.currentNote,
+    ...(staging?.steps ?? []),
+    ...workflowFaqItems.map(
+      ({ question, answer }) =>
+        `${question} ${answer}`,
+    ),
+  ].join(" ");
+
+  assert.match(combinedText, /source-date tools/i);
+  assert.match(
+    combinedText,
+    /Use checkboxes define the current source selection/i,
+  );
+  assert.doesNotMatch(combinedText, /Copy to selected/);
+  assert.match(combinedText, /Missing sources are skipped/i);
+});

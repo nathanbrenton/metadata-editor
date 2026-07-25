@@ -76,7 +76,7 @@ test(
 );
 
 test(
-  "does not choose ambiguous master assets",
+  "suggests a deterministic artwork master while retaining ambiguity warnings",
   () => {
     const release: ReleaseScanResult = {
       id: "unstructured-release",
@@ -117,8 +117,12 @@ test(
       undefined,
     );
     assert.equal(
-      preview.release.artworkMasterPath,
-      undefined,
+      preview.release.artworkMasterPath?.value,
+      "releases/unstructured-release/artwork-master.png",
+    );
+    assert.equal(
+      preview.release.artworkMasterPath?.source,
+      "preferred detected release artwork master",
     );
     assert.equal(
       preview.tracks[0]?.artistName,

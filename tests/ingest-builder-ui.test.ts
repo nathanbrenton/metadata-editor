@@ -125,15 +125,19 @@ test(
 );
 
 test(
-  "supports desktop track reordering and clearly labeled staging deltas",
+  "uses track numbers for ordering and clearly labels staging deltas",
   () => {
     assert.match(
       builderSource,
+      /maxLength=\{3\}/,
+    );
+    assert.doesNotMatch(
+      builderSource,
       /Move track earlier/,
     );
-    assert.match(
+    assert.doesNotMatch(
       builderSource,
-      /Move track later/,
+      /Destination filename/,
     );
     assert.match(
       builderSource,

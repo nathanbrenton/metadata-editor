@@ -6,9 +6,11 @@ import {
 import {
   INGEST_BUILD_CONFIRMATION_PHRASE,
   INGEST_UPDATE_CONFIRMATION_PHRASE,
+  buildReleaseDirectoryId,
   createArtworkAssignmentId,
   defaultReleaseArtworkAssignment,
   ingestArtworkRoleOptions,
+  shouldSynchronizeReleaseDirectoryId,
   type IngestArtworkAssignmentDraft,
   type IngestBuildAssetDraft,
   type IngestBuildDraft,
@@ -29,6 +31,19 @@ import type {
 import {
   stagingDestinationPathForDisplay,
 } from "./ingest-build-display.js";
+import {
+  formatIngestSourceDisplayPath,
+  sourceDateIsAfterReleaseDate,
+  sourcePathsForBulkDate,
+} from "./ingest-track-table.js";
+import {
+  buildTrackTitlePlan,
+  filenameTitleFields,
+  humanizeFilenameTitleField,
+  type IngestFilenameTitleField,
+  type IngestFilenameTitleSeparator,
+  type IngestTrackTitleUpdate,
+} from "./ingest-track-title-source.js";
 import {
   useIngestDraft,
 } from "./useIngestDraft.js";
@@ -620,6 +635,7 @@ export function IngestReleaseBuilder({
     draft,
     setDraft,
     sourceStatuses,
+    inspection: currentInspection,
     attachmentOptions,
     saveState,
     lastSavedAt,
@@ -632,6 +648,10 @@ export function IngestReleaseBuilder({
     markReviewed,
     clearStoredDraft,
   } = useIngestDraft(inspection);
+  const trackSourceFiles =
+    currentInspection.files.filter(
+      (file) => file.mediaKind === "audio",
+    );
   const [mode, setMode] =
     useState<BuilderMode>("guided");
   const [guidedStep, setGuidedStep] =
@@ -784,23 +804,93 @@ export function IngestReleaseBuilder({
     >,
     value: string,
   ) => {
-    updateDraft((current) => ({
-      ...current,
-      [key]: value,
-      tracks:
-        key === "releaseArtist"
-          ? current.tracks.map((track) => ({
-              ...track,
-              artist:
-                !track.artist ||
-                track.artist ===
-                  current.releaseArtist
-                  ? value
-                  : track.artist,
-            }))
-          : current.tracks,
-    }));
+    updateDraft((current) => {
+      const nextReleaseTitle =
+        key === "releaseTitle"
+          ? value
+          : current.releaseTitle;
+      const nextReleaseDate =
+        key === "releaseDate"
+          ? value
+          : current.releaseDate;
+      const synchronizeReleaseId =
+        (key === "releaseTitle" ||
+          key === "releaseDate") &&
+        shouldSynchronizeReleaseDirectoryId(
+          current,
+        );
+
+      return {
+        ...current,
+        [key]: value,
+        releaseId:
+          key === "releaseId"
+            ? value
+            : synchronizeReleaseId
+              ? buildReleaseDirectoryId(
+                  nextReleaseDate,
+                  nextReleaseTitle,
+                )
+              : current.releaseId,
+        tracks:
+          key === "releaseArtist"
+            ? current.tracks.map((track) => ({
+                ...track,
+                artist:
+                  !track.artist ||
+                  track.artist ===
+                    current.releaseArtist
+                    ? value
+                    : track.artist,
+              }))
+            : current.tracks,
+      };
+    });
   };
+
+  /*
+   * Migrate the deterministic date-plus-artist value produced by older
+   * drafts. Arbitrary custom IDs remain untouched and can always be restored
+   * to the current generated suggestion from the Release step.
+   */
+  useEffect(() => {
+    const generatedId = buildReleaseDirectoryId(
+      draft.releaseDate,
+      draft.releaseTitle,
+    );
+    const legacyArtistId =
+      buildReleaseDirectoryId(
+        draft.releaseDate,
+        draft.releaseArtist,
+      );
+
+    if (
+      generatedId === legacyArtistId ||
+      draft.releaseId.trim() !==
+        legacyArtistId
+    ) {
+      return;
+    }
+
+    updateDraft((current) => {
+      if (
+        current.releaseId.trim() !==
+        legacyArtistId
+      ) {
+        return current;
+      }
+
+      return {
+        ...current,
+        releaseId: generatedId,
+      };
+    });
+  }, [
+    draft.releaseArtist,
+    draft.releaseDate,
+    draft.releaseId,
+    draft.releaseTitle,
+  ]);
 
   const updateTrack = (
     sourceRelativePath: string,
@@ -821,59 +911,70 @@ export function IngestReleaseBuilder({
     }));
   };
 
-  const moveTrack = (
-    sourceRelativePath: string,
-    direction: "up" | "down",
+  const applyTrackSourceDate = (
+    sourceRelativePaths: string[],
+    sourceDate: string,
   ) => {
-    updateDraft((current) => {
-      const ordered = current.tracks
-        .filter((track) => track.include)
-        .slice()
-        .sort(
-          (left, right) =>
-            left.trackNumber - right.trackNumber ||
-            left.sourceRelativePath.localeCompare(
-              right.sourceRelativePath,
-            ),
-        );
-      const currentIndex = ordered.findIndex(
+    if (
+      sourceRelativePaths.length === 0 ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(
+        sourceDate,
+      )
+    ) {
+      return;
+    }
+
+    const selectedPaths = new Set(
+      sourceRelativePaths,
+    );
+
+    updateDraft((current) => ({
+      ...current,
+      tracks: current.tracks.map(
         (track) =>
-          track.sourceRelativePath === sourceRelativePath,
-      );
-      const targetIndex =
-        direction === "up"
-          ? currentIndex - 1
-          : currentIndex + 1;
+          selectedPaths.has(
+            track.sourceRelativePath,
+          )
+            ? {
+                ...track,
+                date: sourceDate,
+              }
+            : track,
+      ),
+    }));
+  };
 
-      if (
-        currentIndex < 0 ||
-        targetIndex < 0 ||
-        targetIndex >= ordered.length
-      ) {
-        return current;
-      }
+  const applyTrackTitles = (
+    updates: IngestTrackTitleUpdate[],
+  ) => {
+    if (updates.length === 0) {
+      return;
+    }
 
-      [ordered[currentIndex], ordered[targetIndex]] = [
-        ordered[targetIndex],
-        ordered[currentIndex],
-      ];
-      const numberByPath = new Map(
-        ordered.map((track, index) => [
-          track.sourceRelativePath,
-          index + 1,
-        ]),
-      );
+    const titlesByPath = new Map(
+      updates.map((update) => [
+        update.sourceRelativePath,
+        update.title,
+      ]),
+    );
 
-      return {
-        ...current,
-        tracks: current.tracks.map((track) => ({
-          ...track,
-          trackNumber:
-            numberByPath.get(track.sourceRelativePath) ??
-            track.trackNumber,
-        })),
-      };
-    });
+    updateDraft((current) => ({
+      ...current,
+      tracks: current.tracks.map(
+        (track) => {
+          const title = titlesByPath.get(
+            track.sourceRelativePath,
+          );
+
+          return title === undefined
+            ? track
+            : {
+                ...track,
+                title,
+              };
+        },
+      ),
+    }));
   };
 
   const updateAsset = (
@@ -1367,7 +1468,9 @@ export function IngestReleaseBuilder({
           onStepChange={setGuidedStep}
           onReleaseChange={updateRelease}
           onTrackChange={updateTrack}
-          onMoveTrack={moveTrack}
+          trackSourceFiles={trackSourceFiles}
+          onApplyTrackTitles={applyTrackTitles}
+          onApplySourceDate={applyTrackSourceDate}
           onAssetChange={updateAsset}
           sourceStatuses={sourceStatuses}
           attachmentFiles={attachmentOptions.files}
@@ -1404,7 +1507,9 @@ export function IngestReleaseBuilder({
           operation={stagingOperation}
           onReleaseChange={updateRelease}
           onTrackChange={updateTrack}
-          onMoveTrack={moveTrack}
+          trackSourceFiles={trackSourceFiles}
+          onApplyTrackTitles={applyTrackTitles}
+          onApplySourceDate={applyTrackSourceDate}
           onAssetChange={updateAsset}
           sourceStatuses={sourceStatuses}
           attachmentFiles={attachmentOptions.files}
@@ -1447,7 +1552,9 @@ function GuidedIngestBuilder({
   onStepChange,
   onReleaseChange,
   onTrackChange,
-  onMoveTrack,
+  trackSourceFiles,
+  onApplyTrackTitles,
+  onApplySourceDate,
   onAssetChange,
   sourceStatuses,
   attachmentFiles,
@@ -1487,9 +1594,13 @@ function GuidedIngestBuilder({
     sourceRelativePath: string,
     patch: Partial<IngestBuildTrackDraft>,
   ) => void;
-  onMoveTrack: (
-    sourceRelativePath: string,
-    direction: "up" | "down",
+  trackSourceFiles: IngestFileInspection[];
+  onApplyTrackTitles: (
+    updates: IngestTrackTitleUpdate[],
+  ) => void;
+  onApplySourceDate: (
+    sourceRelativePaths: string[],
+    sourceDate: string,
   ) => void;
   onAssetChange: (
     sourceRelativePath: string,
@@ -1605,9 +1716,12 @@ function GuidedIngestBuilder({
           </header>
           <TrackDraftTable
             tracks={draft.tracks}
+            trackSourceFiles={trackSourceFiles}
+            releaseDate={draft.releaseDate}
             sourceStatuses={sourceStatuses}
             onChange={onTrackChange}
-            onMove={onMoveTrack}
+            onApplyTrackTitles={onApplyTrackTitles}
+            onApplySourceDate={onApplySourceDate}
             onSourceReviewed={onSourceReviewed}
             focusedSourcePath={focusedSourcePath}
           />
@@ -1724,7 +1838,9 @@ function QuickIngestBuilder({
   operation,
   onReleaseChange,
   onTrackChange,
-  onMoveTrack,
+  trackSourceFiles,
+  onApplyTrackTitles,
+  onApplySourceDate,
   onAssetChange,
   sourceStatuses,
   attachmentFiles,
@@ -1762,9 +1878,13 @@ function QuickIngestBuilder({
     sourceRelativePath: string,
     patch: Partial<IngestBuildTrackDraft>,
   ) => void;
-  onMoveTrack: (
-    sourceRelativePath: string,
-    direction: "up" | "down",
+  trackSourceFiles: IngestFileInspection[];
+  onApplyTrackTitles: (
+    updates: IngestTrackTitleUpdate[],
+  ) => void;
+  onApplySourceDate: (
+    sourceRelativePaths: string[],
+    sourceDate: string,
   ) => void;
   onAssetChange: (
     sourceRelativePath: string,
@@ -1821,9 +1941,12 @@ function QuickIngestBuilder({
         </header>
         <TrackDraftTable
           tracks={draft.tracks}
+          trackSourceFiles={trackSourceFiles}
+          releaseDate={draft.releaseDate}
           sourceStatuses={sourceStatuses}
           onChange={onTrackChange}
-          onMove={onMoveTrack}
+          onApplyTrackTitles={onApplyTrackTitles}
+          onApplySourceDate={onApplySourceDate}
           onSourceReviewed={onSourceReviewed}
           focusedSourcePath={focusedSourcePath}
         />
@@ -1894,6 +2017,14 @@ function ReleaseFields({
   ) => void;
   compact?: boolean;
 }) {
+  const generatedReleaseId =
+    buildReleaseDirectoryId(
+      draft.releaseDate,
+      draft.releaseTitle,
+    );
+  const usesGeneratedReleaseId =
+    draft.releaseId === generatedReleaseId;
+
   return (
     <div
       className={[
@@ -1976,28 +2107,55 @@ function ReleaseFields({
         </small>
       </label>
 
-      <label className="ingest-release-id-field">
-        <span>Release directory ID</span>
-        <input
-          type="text"
-          value={draft.releaseId}
-          spellCheck={false}
-          onChange={(event) =>
-            onChange(
-              "releaseId",
-              event.target.value,
-            )
-          }
-        />
+      <div className="ingest-release-id-field">
+        <label>
+          <span>Release directory ID</span>
+          <input
+            type="text"
+            value={draft.releaseId}
+            spellCheck={false}
+            onChange={(event) =>
+              onChange(
+                "releaseId",
+                event.target.value,
+              )
+            }
+          />
+        </label>
+
+        <div className="ingest-release-id-guidance">
+          <small>
+            Generated from Release Date and
+            Release Title as {" "}
+            <code>{generatedReleaseId}</code>.
+            {usesGeneratedReleaseId
+              ? " Date or title changes update this ID automatically."
+              : " Custom override active; date and title changes will preserve it."}
+          </small>
+
+          {!usesGeneratedReleaseId && (
+            <button
+              type="button"
+              onClick={() =>
+                onChange(
+                  "releaseId",
+                  generatedReleaseId,
+                )
+              }
+            >
+              Use generated ID
+            </button>
+          )}
+        </div>
+
         <small>
           Lowercase letters, numbers, hyphens,
-          and underscores. Destination:
-          {" "}
+          and underscores. Destination: {" "}
           <code>
             releases/{draft.releaseId || "…"}
           </code>
         </small>
-      </label>
+      </div>
     </div>
   );
 }
@@ -2069,21 +2227,29 @@ function SourceReviewCell({
 
 function TrackDraftTable({
   tracks,
+  trackSourceFiles,
+  releaseDate,
   sourceStatuses,
   onChange,
-  onMove,
+  onApplyTrackTitles,
+  onApplySourceDate,
   onSourceReviewed,
   focusedSourcePath,
 }: {
   tracks: IngestBuildTrackDraft[];
+  trackSourceFiles: IngestFileInspection[];
+  releaseDate: string;
   sourceStatuses: IngestDraftSourceStatus[];
   onChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildTrackDraft>,
   ) => void;
-  onMove: (
-    sourceRelativePath: string,
-    direction: "up" | "down",
+  onApplyTrackTitles: (
+    updates: IngestTrackTitleUpdate[],
+  ) => void;
+  onApplySourceDate: (
+    sourceRelativePaths: string[],
+    sourceDate: string,
   ) => void;
   onSourceReviewed: (
     sourceRelativePath: string,
@@ -2091,6 +2257,19 @@ function TrackDraftTable({
   ) => void;
   focusedSourcePath: string | null;
 }) {
+  const [trackTitleSource, setTrackTitleSource] =
+    useState<"filename-field" | "embedded-title">(
+      "filename-field",
+    );
+  const [filenameTitleSeparator, setFilenameTitleSeparator] =
+    useState<IngestFilenameTitleSeparator>(
+      "underscore",
+    );
+  const [filenameTitleFieldValue, setFilenameTitleFieldValue] =
+    useState("last");
+  const [bulkSourceDate, setBulkSourceDate] =
+    useState("");
+
   if (tracks.length === 0) {
     return (
       <p className="metadata-empty-value">
@@ -2100,17 +2279,6 @@ function TrackDraftTable({
     );
   }
 
-  const orderedIncludedPaths = tracks
-    .filter((track) => track.include)
-    .slice()
-    .sort(
-      (left, right) =>
-        left.trackNumber - right.trackNumber ||
-        left.sourceRelativePath.localeCompare(
-          right.sourceRelativePath,
-        ),
-    )
-    .map((track) => track.sourceRelativePath);
   const displayTracks = tracks
     .slice()
     .sort((left, right) => {
@@ -2126,37 +2294,362 @@ function TrackDraftTable({
       );
     });
 
+  const tracksAfterReleaseDate = displayTracks.filter(
+    (track) =>
+      track.include &&
+      sourceDateIsAfterReleaseDate(
+        track.date,
+        releaseDate,
+      ),
+  );
+  const missingSourcePaths = new Set(
+    sourceStatuses
+      .filter((status) => status.state === "missing")
+      .map((status) => status.sourceRelativePath),
+  );
+  const selectedTitlePaths = new Set(
+    tracks
+      .filter(
+        (track) =>
+          track.include &&
+          !missingSourcePaths.has(
+            track.sourceRelativePath,
+          ),
+      )
+      .map((track) => track.sourceRelativePath),
+  );
+  const selectedTitleFiles = trackSourceFiles.filter(
+    (file) => selectedTitlePaths.has(file.relativePath),
+  );
+  const maxFilenameFieldCount = selectedTitleFiles.reduce(
+    (maximum, file) =>
+      Math.max(
+        maximum,
+        filenameTitleFields(
+          file.filename,
+          filenameTitleSeparator,
+        ).length,
+      ),
+    0,
+  );
+  const requestedFilenameTitleField =
+    Number(filenameTitleFieldValue);
+  const filenameTitleField: IngestFilenameTitleField =
+    filenameTitleFieldValue === "last" ||
+    !Number.isInteger(requestedFilenameTitleField) ||
+    requestedFilenameTitleField < 1 ||
+    requestedFilenameTitleField > maxFilenameFieldCount
+      ? "last"
+      : requestedFilenameTitleField;
+  const effectiveFilenameTitleFieldValue =
+    filenameTitleField === "last"
+      ? "last"
+      : String(filenameTitleField);
+  const trackTitlePlan = buildTrackTitlePlan(
+    tracks,
+    trackSourceFiles,
+    missingSourcePaths,
+    trackTitleSource === "embedded-title"
+      ? {
+          kind: "embedded-title",
+        }
+      : {
+          kind: "filename-field",
+          separator: filenameTitleSeparator,
+          field: filenameTitleField,
+        },
+  );
+  const filenameFieldSample = (
+    field: IngestFilenameTitleField,
+  ): string => {
+    const sample = selectedTitleFiles
+      .map((file) => {
+        const fields = filenameTitleFields(
+          file.filename,
+          filenameTitleSeparator,
+        );
+
+        return field === "last"
+          ? fields.at(-1)
+          : fields[field - 1];
+      })
+      .find(Boolean);
+
+    return sample
+      ? ` — ${humanizeFilenameTitleField(sample)}`
+      : "";
+  };
+  const bulkDateSourcePaths = sourcePathsForBulkDate(
+    tracks,
+    missingSourcePaths,
+  );
+  const bulkDateSourceCount =
+    bulkDateSourcePaths.length;
+  const applySourceDateToSelected = (
+    sourceDate: string,
+  ) => {
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(
+        sourceDate,
+      ) ||
+      bulkDateSourceCount === 0
+    ) {
+      return;
+    }
+
+    setBulkSourceDate(sourceDate);
+    onApplySourceDate(
+      bulkDateSourcePaths,
+      sourceDate,
+    );
+  };
+
   return (
-    <div className="ingest-table-scroll">
-      <table className="ingest-table ingest-builder-track-table">
-        <thead>
-          <tr>
-            <th scope="col">Use</th>
-            <th scope="col">Source</th>
-            <th scope="col">Source state</th>
-            <th scope="col">#</th>
-            <th scope="col">Order</th>
-            <th scope="col">Track title</th>
-            <th scope="col">Version / take</th>
-            <th scope="col">Artist</th>
-            <th scope="col">Source date</th>
-            <th scope="col">
-              Destination filename
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {displayTracks.map((track) => {
+    <div className="ingest-track-table-workflow">
+      <section
+        className="ingest-track-title-tools"
+        aria-label="Bulk track title tools"
+      >
+        <div className="ingest-track-title-tools-summary">
+          <strong>Track title tools</strong>
+          <span>
+            {trackTitlePlan.updates.length} of {trackTitlePlan.selectedCount}
+            {trackTitlePlan.selectedCount === 1
+              ? " selected source has"
+              : " selected sources have"}
+            {" "}
+            the chosen title value. Missing or unavailable values remain
+            unchanged.
+          </span>
+        </div>
+        <label>
+          <span>Title source</span>
+          <select
+            value={trackTitleSource}
+            onChange={(event) =>
+              setTrackTitleSource(
+                event.target.value as
+                  | "filename-field"
+                  | "embedded-title",
+              )
+            }
+          >
+            <option value="filename-field">
+              Filename field
+            </option>
+            <option value="embedded-title">
+              Embedded TITLE tag
+            </option>
+          </select>
+        </label>
+        {trackTitleSource === "filename-field" && (
+          <>
+            <label>
+              <span>Separator</span>
+              <select
+                value={filenameTitleSeparator}
+                onChange={(event) => {
+                  setFilenameTitleSeparator(
+                    event.target.value as
+                      IngestFilenameTitleSeparator,
+                  );
+                  setFilenameTitleFieldValue(
+                    "last",
+                  );
+                }}
+              >
+                <option value="underscore">
+                  Underscore (_)
+                </option>
+                <option value="hyphen">
+                  Hyphen (-)
+                </option>
+                <option value="space">
+                  Space
+                </option>
+              </select>
+            </label>
+            <label>
+              <span>Field</span>
+              <select
+                value={effectiveFilenameTitleFieldValue}
+                onChange={(event) =>
+                  setFilenameTitleFieldValue(
+                    event.target.value,
+                  )
+                }
+              >
+                <option value="last">
+                  Last field{filenameFieldSample("last")}
+                </option>
+                {Array.from(
+                  { length: maxFilenameFieldCount },
+                  (_, index) => index + 1,
+                ).map((field) => (
+                  <option
+                    key={field}
+                    value={String(field)}
+                  >
+                    Field {field}{filenameFieldSample(field)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
+        )}
+        <button
+          type="button"
+          className="secondary ingest-track-title-apply-button"
+          disabled={trackTitlePlan.updates.length === 0}
+          onClick={() =>
+            onApplyTrackTitles(
+              trackTitlePlan.updates,
+            )
+          }
+        >
+          Apply to {trackTitlePlan.updates.length} available
+        </button>
+      </section>
+
+      <section
+        className="ingest-source-date-tools"
+        aria-label="Bulk source date tools"
+      >
+        <div className="ingest-source-date-tools-summary">
+          <strong>Source date tools</strong>
+          <span>
+            Applies to {bulkDateSourceCount} selected
+            {bulkDateSourceCount === 1 ? " source" : " sources"}
+            {" "}
+            with Use checked. Missing sources are skipped.
+          </span>
+        </div>
+        <label>
+          <span>Source date</span>
+          <input
+            type="date"
+            value={bulkSourceDate}
+            onChange={(event) =>
+              setBulkSourceDate(
+                event.target.value,
+              )
+            }
+          />
+        </label>
+        <button
+          type="button"
+          className="secondary ingest-source-date-apply-button"
+          disabled={
+            !bulkSourceDate ||
+            bulkDateSourceCount === 0
+          }
+          onClick={() =>
+            applySourceDateToSelected(
+              bulkSourceDate,
+            )
+          }
+        >
+          Apply to {bulkDateSourceCount} selected
+        </button>
+      </section>
+
+      {tracksAfterReleaseDate.length > 0 && (
+        <section className="warning-panel ingest-source-date-advisory">
+          <header>
+            <div>
+              <h4>Source dates after the release date</h4>
+              <p>
+                Review these dates for accuracy. This advisory does not block
+                previewing or applying the staging plan.
+              </p>
+            </div>
+            <span className="badge warning">
+              {tracksAfterReleaseDate.length} date
+              {tracksAfterReleaseDate.length === 1 ? "" : "s"}
+            </span>
+          </header>
+          <ul className="ingest-warning-list">
+            {tracksAfterReleaseDate.map((track) => (
+              <li key={track.sourceRelativePath}>
+                Track {track.trackNumber}: {track.title || "Untitled"}
+                {" — "}
+                {track.date}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <div className="ingest-table-scroll">
+        <table className="ingest-table ingest-builder-track-table">
+          <thead>
+            <tr>
+              <th
+                scope="col"
+                className="ingest-track-use-column"
+              >
+                Use
+              </th>
+              <th
+                scope="col"
+                className="ingest-track-source-column"
+              >
+                Source
+              </th>
+              <th
+                scope="col"
+                className="ingest-track-state-column"
+              >
+                Source state
+              </th>
+              <th
+                scope="col"
+                className="ingest-track-number-column"
+              >
+                #
+              </th>
+              <th
+                scope="col"
+                className="ingest-track-title-column"
+              >
+                Track title
+              </th>
+              <th
+                scope="col"
+                className="ingest-track-version-column"
+              >
+                Version / take
+              </th>
+              <th
+                scope="col"
+                className="ingest-track-artist-column"
+              >
+                Artist
+              </th>
+              <th
+                scope="col"
+                className="ingest-track-date-column"
+              >
+                Source date
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayTracks.map((track, displayIndex) => {
             const status = sourceStatusForPath(
               sourceStatuses,
               track.sourceRelativePath,
             );
             const sourceMissing =
               status?.state === "missing";
-            const orderIndex =
-              orderedIncludedPaths.indexOf(
-                track.sourceRelativePath,
+            const sourceDateAfterRelease =
+              track.include &&
+              sourceDateIsAfterReleaseDate(
+                track.date,
+                releaseDate,
               );
+            const sourceDateWarningId =
+              `source-date-warning-${displayIndex}`;
 
             return (
               <tr
@@ -2169,6 +2662,9 @@ function TrackDraftTable({
                   sourceMissing
                     ? "ingest-source-missing-row"
                     : "",
+                  sourceDateAfterRelease
+                    ? "ingest-source-date-warning-row"
+                    : "",
                   focusedSourcePath ===
                   track.sourceRelativePath
                     ? "ingest-source-focused-row"
@@ -2177,7 +2673,7 @@ function TrackDraftTable({
                   .filter(Boolean)
                   .join(" ") || undefined}
               >
-                <td>
+                <td className="ingest-track-use-cell">
                   <input
                     type="checkbox"
                     aria-label={`Include ${track.sourceRelativePath}`}
@@ -2195,13 +2691,16 @@ function TrackDraftTable({
                 </td>
                 <th
                   scope="row"
-                  className="ingest-sticky-column"
+                  className="ingest-sticky-column ingest-track-source-cell"
+                  title={track.sourceRelativePath}
                 >
                   <code>
-                    {track.sourceRelativePath}
+                    {formatIngestSourceDisplayPath(
+                      track.sourceRelativePath,
+                    )}
                   </code>
                 </th>
-                <td>
+                <td className="ingest-track-state-cell">
                   <SourceReviewCell
                     status={status}
                     onReviewed={(reviewed) =>
@@ -2212,72 +2711,35 @@ function TrackDraftTable({
                     }
                   />
                 </td>
-                <td>
+                <td className="ingest-track-number-cell">
                   <input
-                    type="number"
-                    min={1}
-                    value={track.trackNumber}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]{1,3}"
+                    maxLength={3}
+                    value={track.trackNumber || ""}
                     disabled={
                       !track.include ||
                       sourceMissing
                     }
                     aria-label={`Track number for ${track.sourceRelativePath}`}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const digits = event.target.value
+                        .replace(/\D/g, "")
+                        .slice(0, 3);
+
                       onChange(
                         track.sourceRelativePath,
                         {
-                          trackNumber:
-                            Number(
-                              event.target.value,
-                            ),
+                          trackNumber: digits
+                            ? Number(digits)
+                            : 0,
                         },
-                      )
-                    }
+                      );
+                    }}
                   />
                 </td>
-                <td>
-                  <div className="ingest-track-order-controls">
-                    <button
-                      type="button"
-                      aria-label={`Move ${track.sourceRelativePath} earlier`}
-                      title="Move track earlier"
-                      disabled={
-                        !track.include ||
-                        sourceMissing ||
-                        orderIndex <= 0
-                      }
-                      onClick={() =>
-                        onMove(
-                          track.sourceRelativePath,
-                          "up",
-                        )
-                      }
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Move ${track.sourceRelativePath} later`}
-                      title="Move track later"
-                      disabled={
-                        !track.include ||
-                        sourceMissing ||
-                        orderIndex < 0 ||
-                        orderIndex >=
-                          orderedIncludedPaths.length - 1
-                      }
-                      onClick={() =>
-                        onMove(
-                          track.sourceRelativePath,
-                          "down",
-                        )
-                      }
-                    >
-                      ↓
-                    </button>
-                  </div>
-                </td>
-                <td>
+                <td className="ingest-track-title-cell">
                   <input
                     type="text"
                     value={track.title}
@@ -2297,7 +2759,7 @@ function TrackDraftTable({
                     }
                   />
                 </td>
-                <td>
+                <td className="ingest-track-version-cell">
                   <input
                     type="text"
                     value={track.version}
@@ -2317,7 +2779,7 @@ function TrackDraftTable({
                     }
                   />
                 </td>
-                <td>
+                <td className="ingest-track-artist-cell">
                   <input
                     type="text"
                     value={track.artist}
@@ -2337,7 +2799,7 @@ function TrackDraftTable({
                     }
                   />
                 </td>
-                <td>
+                <td className="ingest-source-date-cell">
                   <input
                     type="date"
                     value={track.date}
@@ -2346,6 +2808,11 @@ function TrackDraftTable({
                       sourceMissing
                     }
                     aria-label={`Source date for ${track.sourceRelativePath}`}
+                    aria-describedby={
+                      sourceDateAfterRelease
+                        ? sourceDateWarningId
+                        : undefined
+                    }
                     onChange={(event) =>
                       onChange(
                         track.sourceRelativePath,
@@ -2356,21 +2823,21 @@ function TrackDraftTable({
                       )
                     }
                   />
-                </td>
-                <td>
-                  <code>
-                    {track.destinationFilename}
-                  </code>
-                  <small>
-                    Standardized master name;
-                    original extension retained.
-                  </small>
+                  {sourceDateAfterRelease && (
+                    <small
+                      id={sourceDateWarningId}
+                      className="ingest-inline-warning"
+                    >
+                      After release date
+                    </small>
+                  )}
                 </td>
               </tr>
             );
-          })}
-        </tbody>
-      </table>
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  buildReleaseDirectoryId,
   createDefaultIngestBuildDraft,
+  shouldSynchronizeReleaseDirectoryId,
   slugifyIngestValue,
 } from "../shared/ingest-builder.js";
 import type {
@@ -168,6 +170,62 @@ test(
         "CrazyEights / Guitar & Drums",
       ),
       "crazy-eights-guitar-drums",
+    );
+  },
+);
+
+
+test(
+  "builds release directory IDs from the date and release title",
+  () => {
+    assert.equal(
+      buildReleaseDirectoryId(
+        "2016-07-26",
+        "Cleaning House",
+      ),
+      "2016-07-26_cleaning-house",
+    );
+    assert.equal(
+      buildReleaseDirectoryId(
+        "",
+        "Cleaning House",
+      ),
+      "cleaning-house",
+    );
+  },
+);
+
+test(
+  "distinguishes generated and overridden release directory IDs",
+  () => {
+    const base = {
+      releaseDate: "2016-07-26",
+      releaseTitle: "Cleaning House",
+      releaseArtist: "Crazy Eights",
+    };
+
+    assert.equal(
+      shouldSynchronizeReleaseDirectoryId({
+        ...base,
+        releaseId:
+          "2016-07-26_cleaning-house",
+      }),
+      true,
+    );
+    assert.equal(
+      shouldSynchronizeReleaseDirectoryId({
+        ...base,
+        releaseId:
+          "2016-07-26_crazy-eights",
+      }),
+      true,
+    );
+    assert.equal(
+      shouldSynchronizeReleaseDirectoryId({
+        ...base,
+        releaseId: "custom-catalog-id",
+      }),
+      false,
     );
   },
 );

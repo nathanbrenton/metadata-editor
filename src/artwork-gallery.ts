@@ -1,3 +1,7 @@
+import {
+  selectPreferredArtworkCandidate,
+} from "../shared/artwork-preference.js";
+
 export type ArtworkAssetLike = {
   filename: string;
   relativePath: string;
@@ -233,10 +237,14 @@ export function selectPreferredReleaseArtwork(
 ): ArtworkAssetLike | null {
   const uniqueAssets = deduplicateArtworkAssets(assets);
 
-  return (
-    uniqueAssets.find((asset) => inferArtworkRole(asset) === "front") ??
-    uniqueAssets[0] ??
-    null
+  const frontArtwork = uniqueAssets.filter(
+    (asset) => inferArtworkRole(asset) === "front",
+  );
+
+  return selectPreferredArtworkCandidate(
+    frontArtwork.length > 0
+      ? frontArtwork
+      : uniqueAssets,
   );
 }
 

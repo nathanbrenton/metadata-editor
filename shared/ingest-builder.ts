@@ -270,6 +270,56 @@ export function slugifyIngestValue(
     .replace(/-+/g, "-");
 }
 
+/*
+ * Release directories follow the canonical YYYY-MM-DD_release-name
+ * convention. The title slug remains usable when a date has not yet been
+ * established so the draft can still be reviewed without inventing a date.
+ */
+export function buildReleaseDirectoryId(
+  releaseDate: string,
+  releaseTitle: string,
+): string {
+  const releaseSlug =
+    slugifyIngestValue(releaseTitle) ||
+    "untitled-release";
+  const normalizedDate = releaseDate.trim();
+
+  return normalizedDate
+    ? `${normalizedDate}_${releaseSlug}`
+    : releaseSlug;
+}
+
+/*
+ * Old saved drafts may contain the earlier date-plus-artist suggestion.
+ * Treat that deterministic legacy value as generated, while preserving any
+ * unrelated directory ID as an intentional user override.
+ */
+export function shouldSynchronizeReleaseDirectoryId(
+  draft: Pick<
+    IngestBuildDraft,
+    | "releaseId"
+    | "releaseDate"
+    | "releaseTitle"
+    | "releaseArtist"
+  >,
+): boolean {
+  const currentId = draft.releaseId.trim();
+  const generatedId = buildReleaseDirectoryId(
+    draft.releaseDate,
+    draft.releaseTitle,
+  );
+  const legacyArtistId = buildReleaseDirectoryId(
+    draft.releaseDate,
+    draft.releaseArtist,
+  );
+
+  return (
+    currentId === "" ||
+    currentId === generatedId ||
+    currentId === legacyArtistId
+  );
+}
+
 function uniquifyPath(
   proposed: string,
   used: Set<string>,
@@ -448,12 +498,10 @@ export function createDefaultIngestBuildDraft(
     inspection,
     audioFiles,
   );
-  const releaseSlug =
-    slugifyIngestValue(releaseTitle) ||
-    "untitled-release";
-  const releaseId = releaseDate
-    ? `${releaseDate}_${releaseSlug}`
-    : releaseSlug;
+  const releaseId = buildReleaseDirectoryId(
+    releaseDate,
+    releaseTitle,
+  );
 
   const tracks = audioFiles.map(
     (file, index): IngestBuildTrackDraft => {

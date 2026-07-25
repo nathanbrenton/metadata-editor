@@ -139,7 +139,15 @@ test(
               releasePath,
               "release.toml",
             ),
-            '[release]\nid = "complete-release"\n',
+            [
+              "[release]",
+              'id = "complete-release"',
+              'title = "Indoor Lightning EP"',
+              "",
+              "[release.primary_artist]",
+              'name = "Nathan Brenton"',
+              "",
+            ].join("\n"),
           ),
           writeFile(
             path.join(
@@ -183,6 +191,14 @@ test(
               "release.toml",
           )?.exists,
           true,
+        );
+        assert.equal(
+          release.releaseTitle,
+          "Indoor Lightning EP",
+        );
+        assert.equal(
+          release.primaryArtistName,
+          "Nathan Brenton",
         );
         assert.deepEqual(
           release.artworkMasters.map(

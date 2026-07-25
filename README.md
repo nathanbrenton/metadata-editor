@@ -76,10 +76,14 @@ The backend binds only to localhost during development. The public audio player 
 - TypeScript
 - Vite
 - Desktop-first workflow navigation: Ingest → Staging → Library → Publish
+- Library release rows show the authored release title and primary artist above the date and track count
+- Developer / Admin Tools start disabled on every page load and remain session-only when enabled
+- The Staging track table shows source paths relative to the selected candidate, uses direct three-digit track-number entry for ordering, can populate selected titles from a chosen filename field or each file's embedded TITLE tag, supports applying one source date across all included non-missing sources, and reports source dates after the release date as non-blocking advisories.
 - Document-style release and track overview
 - Parsed TOML key/value tables
 - Read-only raw TOML inspection
 - Browser-local scalar draft editing
+- Track-number-driven Library navigation and guarded artist_number_title directory synchronization
 - Read-only playback-MP3 and waveform processing plans
 - In-memory multiband waveform generation for PCM WAV sources
 
@@ -91,6 +95,7 @@ The backend binds only to localhost during development. The public audio player 
 - Confined media-root scanner
 - TOML parsing and generation with `smol-toml`
 - Atomic create-only writer
+- Two-phase track-directory renaming with case-insensitive collision guards, operation manifests, metadata-reference updates, and rollback
 - SHA-256 post-write verification
 
 ## In-App Workflow Documentation
@@ -108,6 +113,16 @@ src/workflow-help-content.ts
 ```
 
 Whenever the pipeline, lifecycle statuses, derivative-generation behavior, preflight rules, publishing model, or related UI changes, update that module, the rendered guide, and `tests/workflow-help.test.ts` in the same patch. Do not present planned write operations as available before their safety controls are implemented.
+
+## Track Directory Number Synchronization
+
+Library track ordering is driven by the saved disc and track numbers. For track directories using the established:
+
+```text
+artist_01_track-title
+```
+
+convention, changing the saved track number also plans a directory rename that preserves the artist and title segments. Metadata saves do not move directories. After numbering is saved, Library loads the server's exact dry-run plan, displays every rename or blocked item, and requires the confirmation phrase before applying the reviewed plan. The apply request includes the plan fingerprint, so a release change invalidates the review before any directory is moved. The filesystem API never replaces an existing target directory, compares names case-insensitively for typical macOS filesystems, writes an operation manifest before changing names, renames through unique temporary directories, updates `track.id` and `track_reference.track_id` in existing track TOMLs, and rolls completed changes back when a later step fails. Custom directory IDs outside the numbered convention remain unchanged and require manual review.
 
 ## Media Root
 
@@ -519,3 +534,18 @@ The audio player must not expose administrative editing controls, internal metad
 ## License
 
 No license has been selected yet.
+
+### Artwork master preference
+
+When multiple `artwork-master.*` files are present for the same release or
+track, the scanner keeps the condition visible as a non-blocking warning and
+suggests a deterministic preferred candidate. Explicit front/master naming is
+ranked first, followed by this format order:
+
+```text
+.tif / .tiff → .png → .webp → .avif → .jpg / .jpeg → .gif
+```
+
+The selected suggestion is used consistently by metadata inference, gallery
+fallbacks, and starter TOML generation. Other candidates remain untouched and
+must never be deleted automatically.
