@@ -32,6 +32,7 @@ import {
   parseSingleByteRange,
   selectAudioPreviewMp3Encoder,
   selectTrackAudioPreview,
+  type AudioPreviewSourceKind,
 } from "./audio-preview.js";
 import { buildMetadataExportPlan } from "./export-plan.js";
 import {
@@ -65,6 +66,9 @@ import {
 import {
   readIngestArtworkPreview,
 } from "./ingest-artwork.js";
+import {
+  resolveIngestAudioPreviewSource,
+} from "./ingest-audio.js";
 import {
   deleteStoredIngestDraft,
   parseStoredIngestDraft,
@@ -370,7 +374,7 @@ function getAudioPreviewFfmpegCapabilities() {
 
 function setAudioPreviewResponseHeaders(
   response: ServerResponse,
-  sourceKind: "playback" | "master",
+  sourceKind: AudioPreviewSourceKind,
   deliveryMode: "direct" | "transcoded",
 ): void {
   response.setHeader(
@@ -395,7 +399,7 @@ async function sendTranscodedAudioPreview(
   request: IncomingMessage,
   response: ServerResponse,
   sourcePath: string,
-  sourceKind: "playback" | "master",
+  sourceKind: AudioPreviewSourceKind,
 ): Promise<void> {
   const capabilities =
     await getAudioPreviewFfmpegCapabilities();
@@ -528,54 +532,14 @@ async function sendTranscodedAudioPreview(
   });
 }
 
-async function sendLibraryAudioPreview(
+async function sendAudioFilePreview(
   request: IncomingMessage,
   response: ServerResponse,
-  releaseId: string,
-  trackId: string,
+  sourcePath: string,
+  extension: string,
+  sourceKind: AudioPreviewSourceKind,
 ): Promise<void> {
-  const mediaRoot = await resolveMediaRoot();
-  const release = await scanReleaseById(
-    mediaRoot,
-    releaseId,
-  );
-
-  if (!release) {
-    throw new Error(
-      `Release not found: ${releaseId}`,
-    );
-  }
-
-  const track = release.tracks.find(
-    (candidate) => candidate.id === trackId,
-  );
-
-  if (!track) {
-    throw new Error(
-      `Track not found: ${trackId}`,
-    );
-  }
-
-  const selection =
-    selectTrackAudioPreview(track);
-  const deliveryMode =
-    getAudioPreviewDeliveryMode(
-      selection.asset.extension,
-    );
-
-  const candidatePath = assertPathWithinRoot(
-    mediaRoot,
-    path.join(
-      mediaRoot,
-      selection.asset.relativePath,
-    ),
-  );
-  const canonicalPath = await realpath(
-    candidatePath,
-  );
-  assertPathWithinRoot(mediaRoot, canonicalPath);
-
-  const fileStats = await stat(canonicalPath);
+  const fileStats = await stat(sourcePath);
 
   if (!fileStats.isFile()) {
     throw new Error(
@@ -589,20 +553,21 @@ async function sendLibraryAudioPreview(
     );
   }
 
+  const deliveryMode =
+    getAudioPreviewDeliveryMode(extension);
+
   if (deliveryMode === "transcoded") {
     await sendTranscodedAudioPreview(
       request,
       response,
-      canonicalPath,
-      selection.sourceKind,
+      sourcePath,
+      sourceKind,
     );
     return;
   }
 
   const contentType =
-    getAudioPreviewContentType(
-      selection.asset.extension,
-    );
+    getAudioPreviewContentType(extension);
 
   if (!contentType) {
     response.statusCode = 415;
@@ -641,7 +606,7 @@ async function sendLibraryAudioPreview(
   response.setHeader("Accept-Ranges", "bytes");
   setAudioPreviewResponseHeaders(
     response,
-    selection.sourceKind,
+    sourceKind,
     "direct",
   );
 
@@ -658,7 +623,7 @@ async function sendLibraryAudioPreview(
   }
 
   const stream = createReadStream(
-    canonicalPath,
+    sourcePath,
     { start, end },
   );
 
@@ -670,6 +635,78 @@ async function sendLibraryAudioPreview(
     response.destroy();
   });
   stream.pipe(response);
+}
+
+async function sendIngestAudioPreview(
+  request: IncomingMessage,
+  response: ServerResponse,
+  relativePath: string,
+): Promise<void> {
+  const ingestRoot = await resolveIngestRoot();
+  const source =
+    await resolveIngestAudioPreviewSource(
+      ingestRoot,
+      relativePath,
+    );
+
+  await sendAudioFilePreview(
+    request,
+    response,
+    source.canonicalPath,
+    source.extension,
+    "ingest",
+  );
+}
+
+async function sendLibraryAudioPreview(
+  request: IncomingMessage,
+  response: ServerResponse,
+  releaseId: string,
+  trackId: string,
+): Promise<void> {
+  const mediaRoot = await resolveMediaRoot();
+  const release = await scanReleaseById(
+    mediaRoot,
+    releaseId,
+  );
+
+  if (!release) {
+    throw new Error(
+      `Release not found: ${releaseId}`,
+    );
+  }
+
+  const track = release.tracks.find(
+    (candidate) => candidate.id === trackId,
+  );
+
+  if (!track) {
+    throw new Error(
+      `Track not found: ${trackId}`,
+    );
+  }
+
+  const selection =
+    selectTrackAudioPreview(track);
+  const candidatePath = assertPathWithinRoot(
+    mediaRoot,
+    path.join(
+      mediaRoot,
+      selection.asset.relativePath,
+    ),
+  );
+  const canonicalPath = await realpath(
+    candidatePath,
+  );
+  assertPathWithinRoot(mediaRoot, canonicalPath);
+
+  await sendAudioFilePreview(
+    request,
+    response,
+    canonicalPath,
+    selection.asset.extension,
+    selection.sourceKind,
+  );
 }
 
 function assertIngestSourcesReviewed(
@@ -986,6 +1023,40 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Ingest artwork preview not found",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      (request.method === "GET" ||
+        request.method === "HEAD") &&
+      requestUrl.pathname ===
+        "/api/ingest/audio-preview"
+    ) {
+      const relativePath =
+        requestUrl.searchParams.get("path");
+
+      if (!relativePath) {
+        sendJson(response, 400, {
+          error: "Missing ingest audio path",
+        });
+        return;
+      }
+
+      try {
+        await sendIngestAudioPreview(
+          request,
+          response,
+          relativePath,
+        );
+      } catch (error) {
+        sendJson(response, 404, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Ingest audio preview not found",
         });
       }
 

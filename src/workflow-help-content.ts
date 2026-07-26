@@ -62,14 +62,14 @@ export const workflowStages: readonly WorkflowStage[] = [
     summary:
       "Build or incrementally update a controlled private release workspace from the selected ingest candidate.",
     steps: [
-      "Confirm release identity, source inclusion, artwork use, track titles, source dates, stable track IDs, and complete track order by entering track numbers directly. Track title tools can populate included sources from one filename field or each file's embedded TITLE tag; source-date tools can apply one date to all included, non-missing sources.",
+      "Confirm release identity, source inclusion, artwork use, track titles, source dates, stable track IDs, and complete track order by entering track numbers directly. Track title tools can populate included sources from one filename field or each file's embedded TITLE tag; source-date tools can apply one date to all included, non-missing sources. Use the play/pause buttons in Tracks or Review to audition the inspected source without modifying it.",
       "Detect whether the release ID is new or already staged and switch between create and update language.",
-      "Preview additions, reorder changes, preserved files, blocked changes, destinations, TOML skeletons, and copy receipts.",
+      "Preview additions, reorder changes, preserved files, blocked changes, destinations, TOML skeletons, and copy receipts. The Review table uses compact file-kind icons and a green check or red × for row readiness.",
       "Apply the explicit create or update plan through an isolated temporary workspace and verified atomic promotion.",
       "Preserve existing authored metadata and never infer that an omitted source should delete an existing track.",
     ],
     currentNote:
-      "New staging-release creation, incremental audio-track updates, track-number ordering, bulk title selection, bulk source-date application, stable-ID preservation, dry-run plans, explicit confirmation, copy verification, and rollback-safe promotion are available now. The track table shows source paths relative to the selected candidate and flags source dates later than the release date as non-blocking advisories. Intentional removals and general sidecar replacement remain future workflows.",
+      "New staging-release creation, incremental audio-track updates, track-number ordering, bulk title selection, bulk source-date application, read-only source-audio preview, stable-ID preservation, dry-run plans, explicit confirmation, copy verification, and rollback-safe promotion are available now. The track table shows source paths relative to the selected candidate and flags source dates later than the release date as non-blocking advisories. Intentional removals and general sidecar replacement remain future workflows.",
   },
   {
     id: "library",
@@ -79,9 +79,9 @@ export const workflowStages: readonly WorkflowStage[] = [
       "Author canonical release and track metadata, review inheritance, preview audio, and prepare downstream media derivatives. Library release rows surface the authored title and release artist before the date and track count.",
     steps: [
       "Add identity, numbering, dates, artists, performers, writers, sample and interpolation sources, arrangement, technical credits, rights, artwork metadata, lyrics, language, and notes.",
-      "Use release-level defaults for shared values and override only the individual tracks that differ.",
+      "Use release-level defaults for shared values and override only the individual tracks that differ. The performer-credit copy dialog uses a dense destination table and can select an inclusive destination range in displayed disc/track order, then replace, add to, or remove from the current destination selection before its duplicate-aware dry-run.",
       "When saved track numbers change, save the metadata first, then load and confirm the server's exact artist_number_title dry-run plan; guarded synchronization updates track IDs and reference TOMLs without overwriting an existing target.",
-      "Preview tracks from the sidebar or transport while reviewing titles, sequence, and track-specific values.",
+      "Preview tracks from the sidebar or transport while reviewing titles, sequence, and track-specific values. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits follow the page's native vertical scroll. Scrolling over metadata therefore reveals the release header and tabs above or the footer below without a nested wheel handoff. Outside editable fields, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Only the sidebar scrolls for keyboard navigation, and it moves only when the destination crosses a visible edge, preventing whole-page jumps and unnecessary re-centering.",
       "Inspect missing, stale, current, or blocked playback and waveform derivatives under Files & Sources.",
       "Generate playback audio, waveform peaks, analysis, and web artwork from canonical masters when write-enabled media preparation is implemented.",
     ],
@@ -173,6 +173,16 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
     question: "How do I apply one source date to several Staging tracks?",
     answer:
       "In Staging → Tracks, the Use checkboxes define the current source selection. Enter a date in Source date tools above the table and choose Apply to selected. Missing sources are skipped and the resulting draft change remains reviewable before the staging plan is applied.",
+  },
+  {
+    question: "How do I copy performer credits to a track range?",
+    answer:
+      "Open Copy performer credits from the saved release or track performer editor. Under Destination tracks, use the dense Disc / Track / Title table or choose an inclusive Start track and End track using the displayed order. Replace selection selects only that range; Add to selection keeps prior targets; Remove from selection subtracts the range. The source track remains excluded, existing target credits are preserved, exact duplicates are skipped, and no TOML is written until the reviewed copy plan is applied.",
+  },
+  {
+    question: "Can I preview source audio before applying a Staging plan?",
+    answer:
+      "Yes. Staging → Tracks provides one play/pause button for every available inspected audio source. The same shared preview control is available beside audio rows in Review, including changed-source decisions and the generated build plan. MP3 files are served directly; other recognized formats are live-transcoded through FFmpeg to a temporary MP3 stream. Previewing is read-only and never writes a derivative or changes the ingest source.",
   },
   {
     question: "Where is the summary for the current workflow tab?",

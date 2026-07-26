@@ -25,6 +25,13 @@ const serverSource = readFileSync(
   ),
   "utf8",
 );
+const apiServerSource = readFileSync(
+  new URL(
+    "../server/index.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 const styleSource = readFileSync(
   new URL(
@@ -159,11 +166,53 @@ test(
 );
 
 test(
-  "keeps build-plan action and status labels on one line",
+  "keeps the build-plan action readable while kind and status use compact icons",
   () => {
     assert.match(
       styleSource,
-      /\.ingest-build-plan-table tr > :first-child,[\s\S]*\.ingest-build-plan-table tr > :last-child\s*\{[^}]*min-width:\s*6\.5rem;[^}]*overflow-wrap:\s*normal;[^}]*white-space:\s*nowrap;[^}]*word-break:\s*normal;/s,
+      /\.ingest-build-plan-table tr > :first-child\s*\{[^}]*min-width:\s*6\.5rem;[^}]*white-space:\s*nowrap;/s,
+    );
+    assert.match(
+      builderSource,
+      /<PlanKindIcon[\s\S]*kind=\{item\.kind\}[\s\S]*mediaKind=\{item\.mediaKind\}/,
+    );
+    assert.match(
+      builderSource,
+      /ingest-plan-status-icon[\s\S]*item\.action === "blocked" \? "×" : "✓"/,
+    );
+    assert.match(
+      styleSource,
+      /\.ingest-plan-status-icon\.ready[\s\S]*\.ingest-plan-status-icon\.blocked/,
+    );
+  },
+);
+
+test(
+  "previews inspected source audio from Tracks and Review without writing derivatives",
+  () => {
+    assert.match(
+      builderSource,
+      /function IngestAudioPreviewButton/,
+    );
+    assert.match(
+      builderSource,
+      /className="ingest-track-preview-column"/,
+    );
+    assert.match(
+      builderSource,
+      /item\.mediaKind === "audio"[\s\S]*<IngestAudioPreviewButton/,
+    );
+    assert.match(
+      apiServerSource,
+      /\/api\/ingest\/audio-preview/,
+    );
+    assert.match(
+      apiServerSource,
+      /sendAudioFilePreview\([\s\S]*"ingest"/,
+    );
+    assert.doesNotMatch(
+      apiServerSource,
+      /writeFile\([^)]*audio-preview/,
     );
   },
 );

@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -45,6 +46,9 @@ import {
   type IngestTrackTitleUpdate,
 } from "./ingest-track-title-source.js";
 import {
+  buildIngestAudioPreviewUrl,
+} from "./ingest-audio-preview.js";
+import {
   useIngestDraft,
 } from "./useIngestDraft.js";
 
@@ -57,6 +61,13 @@ type GuidedStep =
   | 2
   | 3
   | 4;
+
+type IngestAudioPreviewControls = {
+  sourceRelativePath: string | null;
+  playing: boolean;
+  loading: boolean;
+  toggle: (sourceRelativePath: string) => void;
+};
 
 /*
  * Keep this ingestion vocabulary aligned with recognized release
@@ -200,6 +211,116 @@ function ArtworkPreview({
         loading="lazy"
       />
     </a>
+  );
+}
+
+function IngestAudioPreviewButton({
+  sourceRelativePath,
+  controls,
+  disabled = false,
+}: {
+  sourceRelativePath: string;
+  controls: IngestAudioPreviewControls;
+  disabled?: boolean;
+}) {
+  const selected =
+    controls.sourceRelativePath ===
+    sourceRelativePath;
+  const playing = selected && controls.playing;
+  const loading = selected && controls.loading;
+  const label = playing
+    ? `Pause ${sourceRelativePath}`
+    : `Play ${sourceRelativePath}`;
+
+  return (
+    <button
+      type="button"
+      className="ingest-audio-preview-button"
+      aria-label={label}
+      title={
+        disabled
+          ? "This ingest source is unavailable."
+          : playing
+            ? "Pause source preview"
+            : "Play source preview"
+      }
+      disabled={disabled}
+      onClick={() =>
+        controls.toggle(sourceRelativePath)
+      }
+    >
+      <span aria-hidden="true">
+        {loading
+          ? "…"
+          : playing
+            ? "❚❚"
+            : "▶"}
+      </span>
+    </button>
+  );
+}
+
+function PlanKindIcon({
+  kind,
+  mediaKind,
+}: {
+  kind: IngestBuildPreview["items"][number]["kind"];
+  mediaKind?: IngestBuildPreview["items"][number]["mediaKind"];
+}) {
+  const iconKind =
+    kind === "directory"
+      ? "directory"
+      : kind === "toml"
+        ? "toml"
+        : kind === "receipt"
+          ? "receipt"
+          : mediaKind === "audio"
+            ? "audio"
+            : mediaKind === "image"
+              ? "image"
+              : "file";
+  const label =
+    iconKind === "directory"
+      ? "Directory"
+      : iconKind === "toml"
+        ? "TOML document"
+        : iconKind === "audio"
+          ? "Audio file"
+          : iconKind === "image"
+            ? "Image file"
+            : iconKind === "receipt"
+              ? "Receipt document"
+              : "File";
+
+  return (
+    <span
+      className={`ingest-plan-kind-icon ${iconKind}`}
+      role="img"
+      aria-label={label}
+      title={label}
+    >
+      {iconKind === "directory" ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 5.5h6l2 2H21v11H3z" />
+        </svg>
+      ) : iconKind === "audio" ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M10 5v10.2a3.5 3.5 0 1 1-2-3.16V7l11-2v8.2a3.5 3.5 0 1 1-2-3.16V3.5z" />
+        </svg>
+      ) : iconKind === "image" ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 4h16v16H4zm2 2v10l3.5-3.5 2.5 2.5 2.5-3 3.5 4V6zm2.5 1.5a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" />
+        </svg>
+      ) : iconKind === "receipt" ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 3h14v18l-2-1.2-2 1.2-2-1.2-2 1.2-2-1.2L5 21zm3 4v2h8V7zm0 4v2h8v-2zm0 4v2h5v-2z" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 3h8l4 4v14H6zm8 2.5V8h2.5zM8 11v2h8v-2zm0 4v2h8v-2z" />
+        </svg>
+      )}
+    </span>
   );
 }
 
@@ -678,6 +799,16 @@ export function IngestReleaseBuilder({
     useState<IngestStagingTargetStatus | null>(null);
   const [targetStatusLoading, setTargetStatusLoading] =
     useState(false);
+  const audioPreviewRef =
+    useRef<HTMLAudioElement | null>(null);
+  const [audioPreviewSourcePath, setAudioPreviewSourcePath] =
+    useState<string | null>(null);
+  const [audioPreviewPlaying, setAudioPreviewPlaying] =
+    useState(false);
+  const [audioPreviewLoading, setAudioPreviewLoading] =
+    useState(false);
+  const [audioPreviewError, setAudioPreviewError] =
+    useState<string | null>(null);
   const blockingSources =
     buildBlockingSourceStatuses(
       draft,
@@ -687,6 +818,110 @@ export function IngestReleaseBuilder({
     preview?.operation ??
     targetStatus?.operation ??
     "create";
+
+  useEffect(() => {
+    const audio = new Audio();
+    audio.preload = "metadata";
+
+    const handlePlay = () => {
+      setAudioPreviewPlaying(true);
+      setAudioPreviewLoading(false);
+    };
+    const handlePause = () => {
+      setAudioPreviewPlaying(false);
+      setAudioPreviewLoading(false);
+    };
+    const handleWaiting = () => {
+      setAudioPreviewLoading(true);
+    };
+    const handleCanPlay = () => {
+      setAudioPreviewLoading(false);
+    };
+    const handleError = () => {
+      setAudioPreviewPlaying(false);
+      setAudioPreviewLoading(false);
+      setAudioPreviewError(
+        "The selected ingest source could not be decoded or transcoded for preview. Confirm FFmpeg and an MP3 encoder are available for non-MP3 sources.",
+      );
+    };
+
+    audio.addEventListener("play", handlePlay);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("ended", handlePause);
+    audio.addEventListener("waiting", handleWaiting);
+    audio.addEventListener("canplay", handleCanPlay);
+    audio.addEventListener("error", handleError);
+    audioPreviewRef.current = audio;
+
+    return () => {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      audio.removeEventListener("play", handlePlay);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("ended", handlePause);
+      audio.removeEventListener("waiting", handleWaiting);
+      audio.removeEventListener("canplay", handleCanPlay);
+      audio.removeEventListener("error", handleError);
+      audioPreviewRef.current = null;
+    };
+  }, []);
+
+  const toggleIngestAudioPreview = (
+    sourceRelativePath: string,
+  ) => {
+    const audio = audioPreviewRef.current;
+    const source = currentInspection.files.find(
+      (file) =>
+        file.relativePath === sourceRelativePath &&
+        file.mediaKind === "audio",
+    );
+
+    if (!audio || !source) {
+      setAudioPreviewError(
+        "This source is not available as an inspected audio file.",
+      );
+      return;
+    }
+
+    setAudioPreviewError(null);
+
+    if (
+      audioPreviewSourcePath === sourceRelativePath &&
+      !audio.paused
+    ) {
+      audio.pause();
+      return;
+    }
+
+    if (audioPreviewSourcePath !== sourceRelativePath) {
+      audio.pause();
+      audio.src = buildIngestAudioPreviewUrl(
+        sourceRelativePath,
+        source.modifiedAt,
+      );
+      audio.load();
+      setAudioPreviewSourcePath(sourceRelativePath);
+      setAudioPreviewLoading(true);
+    }
+
+    void audio.play().catch((previewError: unknown) => {
+      setAudioPreviewPlaying(false);
+      setAudioPreviewLoading(false);
+      setAudioPreviewError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Audio preview could not start.",
+      );
+    });
+  };
+
+  const audioPreviewControls: IngestAudioPreviewControls = {
+    sourceRelativePath: audioPreviewSourcePath,
+    playing: audioPreviewPlaying,
+    loading: audioPreviewLoading,
+    toggle: toggleIngestAudioPreview,
+  };
 
   useEffect(() => {
     const releaseId = draft.releaseId.trim();
@@ -1443,6 +1678,12 @@ export function IngestReleaseBuilder({
         </p>
       )}
 
+      {audioPreviewError && (
+        <p className="message error">
+          Audio preview: {audioPreviewError}
+        </p>
+      )}
+
       {workflowError && (
         <p className="message error">
           {workflowError}
@@ -1471,6 +1712,7 @@ export function IngestReleaseBuilder({
           trackSourceFiles={trackSourceFiles}
           onApplyTrackTitles={applyTrackTitles}
           onApplySourceDate={applyTrackSourceDate}
+          audioPreviewControls={audioPreviewControls}
           onAssetChange={updateAsset}
           sourceStatuses={sourceStatuses}
           attachmentFiles={attachmentOptions.files}
@@ -1510,6 +1752,7 @@ export function IngestReleaseBuilder({
           trackSourceFiles={trackSourceFiles}
           onApplyTrackTitles={applyTrackTitles}
           onApplySourceDate={applyTrackSourceDate}
+          audioPreviewControls={audioPreviewControls}
           onAssetChange={updateAsset}
           sourceStatuses={sourceStatuses}
           attachmentFiles={attachmentOptions.files}
@@ -1555,6 +1798,7 @@ function GuidedIngestBuilder({
   trackSourceFiles,
   onApplyTrackTitles,
   onApplySourceDate,
+  audioPreviewControls,
   onAssetChange,
   sourceStatuses,
   attachmentFiles,
@@ -1602,6 +1846,7 @@ function GuidedIngestBuilder({
     sourceRelativePaths: string[],
     sourceDate: string,
   ) => void;
+  audioPreviewControls: IngestAudioPreviewControls;
   onAssetChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildAssetDraft>,
@@ -1722,6 +1967,7 @@ function GuidedIngestBuilder({
             onChange={onTrackChange}
             onApplyTrackTitles={onApplyTrackTitles}
             onApplySourceDate={onApplySourceDate}
+            audioPreviewControls={audioPreviewControls}
             onSourceReviewed={onSourceReviewed}
             focusedSourcePath={focusedSourcePath}
           />
@@ -1789,6 +2035,7 @@ function GuidedIngestBuilder({
               onConfirmedChange
             }
             onCreate={onCreate}
+            audioPreviewControls={audioPreviewControls}
           />
         </section>
       )}
@@ -1841,6 +2088,7 @@ function QuickIngestBuilder({
   trackSourceFiles,
   onApplyTrackTitles,
   onApplySourceDate,
+  audioPreviewControls,
   onAssetChange,
   sourceStatuses,
   attachmentFiles,
@@ -1886,6 +2134,7 @@ function QuickIngestBuilder({
     sourceRelativePaths: string[],
     sourceDate: string,
   ) => void;
+  audioPreviewControls: IngestAudioPreviewControls;
   onAssetChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildAssetDraft>,
@@ -1947,6 +2196,7 @@ function QuickIngestBuilder({
           onChange={onTrackChange}
           onApplyTrackTitles={onApplyTrackTitles}
           onApplySourceDate={onApplySourceDate}
+          audioPreviewControls={audioPreviewControls}
           onSourceReviewed={onSourceReviewed}
           focusedSourcePath={focusedSourcePath}
         />
@@ -1992,6 +2242,7 @@ function QuickIngestBuilder({
             onConfirmedChange
           }
           onCreate={onCreate}
+          audioPreviewControls={audioPreviewControls}
         />
       </section>
     </div>
@@ -2233,6 +2484,7 @@ function TrackDraftTable({
   onChange,
   onApplyTrackTitles,
   onApplySourceDate,
+  audioPreviewControls,
   onSourceReviewed,
   focusedSourcePath,
 }: {
@@ -2251,6 +2503,7 @@ function TrackDraftTable({
     sourceRelativePaths: string[],
     sourceDate: string,
   ) => void;
+  audioPreviewControls: IngestAudioPreviewControls;
   onSourceReviewed: (
     sourceRelativePath: string,
     reviewed: boolean,
@@ -2598,6 +2851,12 @@ function TrackDraftTable({
               </th>
               <th
                 scope="col"
+                className="ingest-track-preview-column"
+              >
+                Preview
+              </th>
+              <th
+                scope="col"
                 className="ingest-track-state-column"
               >
                 Source state
@@ -2700,6 +2959,13 @@ function TrackDraftTable({
                     )}
                   </code>
                 </th>
+                <td className="ingest-track-preview-cell">
+                  <IngestAudioPreviewButton
+                    sourceRelativePath={track.sourceRelativePath}
+                    controls={audioPreviewControls}
+                    disabled={sourceMissing}
+                  />
+                </td>
                 <td className="ingest-track-state-cell">
                   <SourceReviewCell
                     status={status}
@@ -3183,6 +3449,7 @@ function BuildReview({
   onPreview,
   onConfirmedChange,
   onCreate,
+  audioPreviewControls,
 }: {
   draft: IngestBuildDraft;
   operation: IngestBuildOperation;
@@ -3207,6 +3474,7 @@ function BuildReview({
     value: boolean,
   ) => void;
   onCreate: () => void;
+  audioPreviewControls: IngestAudioPreviewControls;
 }) {
   const trackPaths = new Set(
     draft.tracks.map((track) =>
@@ -3367,6 +3635,12 @@ function BuildReview({
                             key={`${status.sourceRelativePath}:${status.modifiedAt ?? ""}`}
                             sourceRelativePath={status.sourceRelativePath}
                             modifiedAt={status.modifiedAt}
+                          />
+                        ) : status.mediaKind === "audio" ? (
+                          <IngestAudioPreviewButton
+                            sourceRelativePath={status.sourceRelativePath}
+                            controls={audioPreviewControls}
+                            disabled={status.state === "missing"}
                           />
                         ) : (
                           <span className="ingest-artwork-preview-unavailable">
@@ -3533,7 +3807,12 @@ function BuildReview({
                   <th scope="col">Source</th>
                   <th scope="col">Relative destination</th>
                   <th scope="col">Adjustment / reason</th>
-                  <th scope="col">Kind</th>
+                  <th
+                    scope="col"
+                    className="ingest-plan-kind-column"
+                  >
+                    Kind
+                  </th>
                   <th scope="col">Roles</th>
                   <th
                     scope="col"
@@ -3541,7 +3820,12 @@ function BuildReview({
                   >
                     Size
                   </th>
-                  <th scope="col">Status</th>
+                  <th
+                    scope="col"
+                    className="ingest-plan-status-column"
+                  >
+                    Status
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -3557,14 +3841,23 @@ function BuildReview({
                           {item.action}
                         </span>
                       </td>
-                      <td>
-                        {item.sourceRelativePath ? (
-                          <code>
-                            {item.sourceRelativePath}
-                          </code>
-                        ) : (
-                          "—"
-                        )}
+                      <td className="ingest-build-plan-source-cell">
+                        <div>
+                          {item.sourceRelativePath &&
+                            item.mediaKind === "audio" && (
+                              <IngestAudioPreviewButton
+                                sourceRelativePath={item.sourceRelativePath}
+                                controls={audioPreviewControls}
+                              />
+                            )}
+                          {item.sourceRelativePath ? (
+                            <code>
+                              {item.sourceRelativePath}
+                            </code>
+                          ) : (
+                            "—"
+                          )}
+                        </div>
                       </td>
                       <th
                         scope="row"
@@ -3582,7 +3875,12 @@ function BuildReview({
                       <td title={item.reason}>
                         {item.adjustment ?? item.reason}
                       </td>
-                      <td>{item.kind}</td>
+                      <td className="ingest-plan-kind-cell">
+                        <PlanKindIcon
+                          kind={item.kind}
+                          mediaKind={item.mediaKind}
+                        />
+                      </td>
                       <td>
                         {item.logicalRoles?.join(
                           ", ",
@@ -3595,12 +3893,20 @@ function BuildReview({
                             )
                           : "—"}
                       </td>
-                      <td>
+                      <td className="ingest-plan-status-cell">
                         <span
-                          className={`badge ${item.action === "blocked" ? "error" : ""}`}
+                          className={`ingest-plan-status-icon ${item.action === "blocked" ? "blocked" : "ready"}`}
+                          role="img"
+                          aria-label={
+                            item.action === "blocked"
+                              ? "Blocked"
+                              : "Ready"
+                          }
                           title={item.reason}
                         >
-                          {item.action === "blocked" ? "Blocked" : "Ready"}
+                          <span aria-hidden="true">
+                            {item.action === "blocked" ? "×" : "✓"}
+                          </span>
                         </span>
                       </td>
                     </tr>

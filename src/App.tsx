@@ -90,6 +90,12 @@ import {
 } from "./performer-display-order.js";
 
 import {
+  applyTrackRangeSelection,
+  getInclusiveTrackRange,
+  type PerformerCopyTrackRangeMode,
+} from "./performer-copy-track-selection.js";
+
+import {
   sortPerformerRoleDisplayValues,
 } from "./performer-role-display-order.js";
 
@@ -215,6 +221,11 @@ import {
 import {
   resolveReleaseDisplayTitle,
 } from "./release-display-title.js";
+
+import {
+  getAdjacentMetadataSidebarId,
+  getMetadataSidebarScrollTop,
+} from "./metadata-sidebar-navigation.js";
 
 // Defer secondary workflows until they are opened so the initial editor
 // bundle remains smaller and faster to parse.
@@ -1520,11 +1531,15 @@ export function App() {
           onBack={() =>
             setSelectedReleaseDetail(null)
           }
-          onRefresh={() =>
-            openReleaseDetail(
-              selectedReleaseDetail.releaseId,
-            )
-          }
+          onRefresh={async () => {
+            const releaseId =
+              selectedReleaseDetail.releaseId;
+
+            await Promise.all([
+              refreshLibrary(),
+              openReleaseDetail(releaseId),
+            ]);
+          }}
           onOpenWorkflowHelp={openWorkflowHelp}
           onNavigateWorkflow={navigateWorkflowView}
           onOpenTagSearch={openTagSearch}
@@ -5812,6 +5827,9 @@ type PerformerCopySource = {
 type PerformerCopyTrackOption = {
   trackId: string;
   label: string;
+  discNumber: number;
+  trackNumber: number;
+  title: string;
 };
 
 function createMetadataActivityEntry({
@@ -7998,6 +8016,11 @@ function MetadataFieldModal({
 }) {
   const closeButtonRef =
     useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     const previousOverflow =
@@ -8011,7 +8034,7 @@ function MetadataFieldModal({
       event: KeyboardEvent,
     ) => {
       if (event.key === "Escape") {
-        onClose();
+        onCloseRef.current();
       }
     };
 
@@ -8028,7 +8051,7 @@ function MetadataFieldModal({
         handleKeyDown,
       );
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div
@@ -8256,6 +8279,14 @@ function PerformerCreditCopyModal({
     );
   const [selectedDestinationTrackIds, setSelectedDestinationTrackIds] =
     useState<string[]>([]);
+  const [rangeStartTrackId, setRangeStartTrackId] =
+    useState<string>(() => trackOptions[0]?.trackId ?? "");
+  const [rangeEndTrackId, setRangeEndTrackId] =
+    useState<string>(() =>
+      trackOptions[trackOptions.length - 1]?.trackId ?? "",
+    );
+  const [rangeMode, setRangeMode] =
+    useState<PerformerCopyTrackRangeMode>("replace");
   const [plan, setPlan] =
     useState<PerformerCopyResponse | null>(
       null,
@@ -8328,6 +8359,31 @@ function PerformerCreditCopyModal({
       Array.from(new Set(trackIds)),
     );
     resetPlan();
+  };
+
+  const rangeTrackIds = useMemo(
+    () =>
+      getInclusiveTrackRange(
+        trackOptions,
+        rangeStartTrackId,
+        rangeEndTrackId,
+      ),
+    [
+      rangeEndTrackId,
+      rangeStartTrackId,
+      trackOptions,
+    ],
+  );
+
+  const applyDestinationRange = () => {
+    updateDestinationSelection(
+      applyTrackRangeSelection(
+        trackOptions,
+        selectedDestinationTrackIds,
+        rangeTrackIds,
+        rangeMode,
+      ),
+    );
   };
 
   const requestCopy = async (
@@ -8576,34 +8632,150 @@ function PerformerCreditCopyModal({
           </div>
         </header>
 
-        <div className="performer-copy-destination-grid">
-          {trackOptions.map((option) => (
-            <label key={option.trackId}>
-              <input
-                type="checkbox"
-                checked={
+        <div className="performer-copy-range-tools">
+          <div className="performer-copy-range-copy">
+            <strong>Inclusive track range</strong>
+            <small>
+              Uses the disc and track order shown below. Start and end may be chosen in either direction.
+            </small>
+          </div>
+
+          <label>
+            <span>Start track</span>
+            <select
+              value={rangeStartTrackId}
+              disabled={trackOptions.length === 0}
+              onChange={(event) =>
+                setRangeStartTrackId(event.target.value)
+              }
+            >
+              {trackOptions.map((option) => (
+                <option
+                  key={option.trackId}
+                  value={option.trackId}
+                >
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>End track</span>
+            <select
+              value={rangeEndTrackId}
+              disabled={trackOptions.length === 0}
+              onChange={(event) =>
+                setRangeEndTrackId(event.target.value)
+              }
+            >
+              {trackOptions.map((option) => (
+                <option
+                  key={option.trackId}
+                  value={option.trackId}
+                >
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Range action</span>
+            <select
+              value={rangeMode}
+              onChange={(event) =>
+                setRangeMode(
+                  event.target.value as PerformerCopyTrackRangeMode,
+                )
+              }
+            >
+              <option value="replace">Replace selection</option>
+              <option value="add">Add to selection</option>
+              <option value="remove">Remove from selection</option>
+            </select>
+          </label>
+
+          <button
+            type="button"
+            disabled={rangeTrackIds.length === 0}
+            onClick={applyDestinationRange}
+          >
+            Apply {rangeTrackIds.length}-track range
+          </button>
+        </div>
+
+        <p
+          className="performer-copy-destination-summary"
+          role="status"
+          aria-live="polite"
+        >
+          <strong>{selectedDestinationTrackIds.length}</strong> of {trackOptions.length} available destination tracks selected.
+        </p>
+
+        <div className="performer-copy-destination-table-wrap">
+          <table className="performer-copy-destination-table">
+            <thead>
+              <tr>
+                <th
+                  scope="col"
+                  className="performer-copy-destination-select-column"
+                  aria-label="Select destination"
+                >
+                  Use
+                </th>
+                <th scope="col">Disc</th>
+                <th scope="col">Track</th>
+                <th scope="col">Title</th>
+              </tr>
+            </thead>
+            <tbody>
+              {trackOptions.map((option) => {
+                const selected =
                   selectedDestinationTrackIds.includes(
                     option.trackId,
-                  )
-                }
-                onChange={(event) =>
-                  updateDestinationSelection(
-                    event.target.checked
-                      ? [
-                          ...selectedDestinationTrackIds,
-                          option.trackId,
-                        ]
-                      : selectedDestinationTrackIds.filter(
-                          (trackId) =>
-                            trackId !==
-                            option.trackId,
-                        ),
-                  )
-                }
-              />
-              <span>{option.label}</span>
-            </label>
-          ))}
+                  );
+                const inputId =
+                  `performer-copy-destination-${option.trackId}`;
+
+                return (
+                  <tr
+                    key={option.trackId}
+                    className={selected ? "selected" : undefined}
+                  >
+                    <td>
+                      <input
+                        id={inputId}
+                        type="checkbox"
+                        checked={selected}
+                        aria-label={`Select ${option.label}`}
+                        onChange={(event) =>
+                          updateDestinationSelection(
+                            event.target.checked
+                              ? [
+                                  ...selectedDestinationTrackIds,
+                                  option.trackId,
+                                ]
+                              : selectedDestinationTrackIds.filter(
+                                  (trackId) =>
+                                    trackId !== option.trackId,
+                                ),
+                          )
+                        }
+                      />
+                    </td>
+                    <td>{option.discNumber}</td>
+                    <td>{option.trackNumber}</td>
+                    <td>
+                      <label htmlFor={inputId}>
+                        {option.title}
+                      </label>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       </section>
 
@@ -12768,6 +12940,129 @@ function ReleaseMetadataDetailView({
     trackNavigation.entries.map(
       (entry) => entry.trackId,
     );
+
+  useEffect(() => {
+    const handleMetadataSidebarKeyDown = (
+      event: KeyboardEvent,
+    ) => {
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.shiftKey ||
+        (event.key !== "ArrowUp" &&
+          event.key !== "ArrowDown")
+      ) {
+        return;
+      }
+
+      if (
+        document.querySelector(
+          '[aria-modal="true"], dialog[open]',
+        )
+      ) {
+        return;
+      }
+
+      const target = event.target;
+      const targetElement =
+        target instanceof Element
+          ? target
+          : null;
+
+      if (
+        targetElement?.closest(
+          'input, textarea, select, [contenteditable="true"], [role="textbox"], [role="combobox"], [role="slider"]',
+        )
+      ) {
+        return;
+      }
+
+      const interactiveTarget =
+        targetElement?.closest(
+          'button, a, summary, [role="button"], [role="tab"]',
+        );
+      const eventStartedInSidebar = Boolean(
+        targetElement?.closest(
+          '[data-metadata-sidebar-navigation="true"]',
+        ),
+      );
+
+      if (interactiveTarget && !eventStartedInSidebar) {
+        return;
+      }
+
+      const nextId = getAdjacentMetadataSidebarId(
+        ["release", ...trackIds],
+        activeDocumentGroup,
+        event.key === "ArrowDown"
+          ? "next"
+          : "previous",
+      );
+
+      if (!nextId) {
+        return;
+      }
+
+      event.preventDefault();
+      setActiveDocumentGroup(nextId);
+
+      window.requestAnimationFrame(() => {
+        const destination = Array.from(
+          document.querySelectorAll<HTMLElement>(
+            "[data-metadata-navigation-id]",
+          ),
+        ).find(
+          (element) =>
+            element.dataset.metadataNavigationId ===
+            nextId,
+        );
+
+        const sidebar = destination?.closest<HTMLElement>(
+          '[data-metadata-sidebar-navigation="true"]',
+        );
+
+        if (destination && sidebar) {
+          const nextScrollTop =
+            getMetadataSidebarScrollTop({
+              scrollTop: sidebar.scrollTop,
+              clientHeight: sidebar.clientHeight,
+              scrollHeight: sidebar.scrollHeight,
+              itemTop: destination.offsetTop,
+              itemHeight: destination.offsetHeight,
+              edgePadding: 8,
+            });
+
+          if (nextScrollTop !== sidebar.scrollTop) {
+            sidebar.scrollTo({
+              top: nextScrollTop,
+              behavior: "auto",
+            });
+          }
+        }
+
+        if (eventStartedInSidebar) {
+          destination?.focus({
+            preventScroll: true,
+          });
+        }
+      });
+    };
+
+    window.addEventListener(
+      "keydown",
+      handleMetadataSidebarKeyDown,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "keydown",
+        handleMetadataSidebarKeyDown,
+      );
+    };
+  }, [activeDocumentGroup, trackIds]);
+
   const trackNavigationById = new Map(
     trackNavigation.entries.map(
       (entry) => [entry.trackId, entry],
@@ -13201,13 +13496,20 @@ function ReleaseMetadataDetailView({
           ? `Disc ${navigationEntry.effectiveDiscNumber} · `
           : "";
 
+      const title = readTrackDisplayTitle(
+        trackId,
+        trackDocuments,
+        inferredTitle,
+      );
+      const discNumber =
+        navigationEntry?.effectiveDiscNumber ?? 1;
+
       return {
         trackId,
-        label: `${discPrefix}Track ${trackNumber} — ${readTrackDisplayTitle(
-          trackId,
-          trackDocuments,
-          inferredTitle,
-        )}`,
+        label: `${discPrefix}Track ${trackNumber} — ${title}`,
+        discNumber,
+        trackNumber,
+        title,
       };
     });
 
@@ -14713,9 +15015,12 @@ function ReleaseMetadataDetailView({
         <nav
           className="metadata-document-tabs"
           aria-label="Metadata document groups"
+          aria-keyshortcuts="ArrowUp ArrowDown"
+          data-metadata-sidebar-navigation="true"
         >
         <button
           type="button"
+          data-metadata-navigation-id="release"
           className={
             activeDocumentGroup === "release"
               ? "active"
@@ -14821,6 +15126,7 @@ function ReleaseMetadataDetailView({
             >
               <button
                 type="button"
+                data-metadata-navigation-id={trackId}
                 className="metadata-document-select track-document-select"
                 aria-pressed={
                   activeDocumentGroup ===

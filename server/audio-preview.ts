@@ -6,7 +6,8 @@ import type {
 
 export type AudioPreviewSourceKind =
   | "playback"
-  | "master";
+  | "master"
+  | "ingest";
 
 export type AudioPreviewSelection = {
   asset: DiscoveredAsset;

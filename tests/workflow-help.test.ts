@@ -206,3 +206,61 @@ test("documents bulk source-date tools in Staging", () => {
   assert.doesNotMatch(combinedText, /Copy to selected/);
   assert.match(combinedText, /Missing sources are skipped/i);
 });
+
+test("documents Staging source preview and compact Review icons", () => {
+  const staging = workflowStages.find(
+    ({ id }) => id === "staging",
+  );
+  const combinedText = [
+    staging?.currentNote,
+    ...(staging?.steps ?? []),
+    ...workflowFaqItems.map(
+      ({ question, answer }) =>
+        `${question} ${answer}`,
+    ),
+  ].join(" ");
+
+  assert.match(combinedText, /play\/pause/i);
+  assert.match(combinedText, /Tracks or Review/i);
+  assert.match(combinedText, /read-only/i);
+  assert.match(combinedText, /green check or red ×/i);
+});
+
+test("documents performer-credit destination range selection", () => {
+  const library = workflowStages.find(
+    ({ id }) => id === "library",
+  );
+  const combinedText = [
+    ...(library?.steps ?? []),
+    ...workflowFaqItems.map(
+      ({ question, answer }) =>
+        `${question} ${answer}`,
+    ),
+  ].join(" ");
+
+  assert.match(combinedText, /inclusive destination range/i);
+  assert.match(combinedText, /displayed disc\/track order/i);
+  assert.match(combinedText, /Replace selection/i);
+  assert.match(combinedText, /Add to selection/i);
+  assert.match(combinedText, /Remove from selection/i);
+  assert.match(combinedText, /duplicates are skipped/i);
+});
+
+
+test("documents Library sidebar keyboard navigation", () => {
+  const library = workflowStages.find(
+    ({ id }) => id === "library",
+  );
+  const combinedText = [
+    library?.currentNote,
+    ...(library?.steps ?? []),
+  ].join(" ");
+
+  assert.match(combinedText, /Arrow Up/i);
+  assert.match(combinedText, /Arrow Down/i);
+  assert.match(combinedText, /Release row/i);
+  assert.match(combinedText, /editable fields/i);
+  assert.match(combinedText, /sidebar remains sticky/i);
+  assert.match(combinedText, /page's native vertical scroll/i);
+  assert.match(combinedText, /only the sidebar scrolls/i);
+});
