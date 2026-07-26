@@ -4,8 +4,10 @@ import type {
   IngestBuildTrackDraft,
 } from "./ingest-builder.js";
 import {
+  buildReleaseDirectoryId,
   createDefaultIngestBuildDraft,
   defaultReleaseArtworkAssignment,
+  shouldSynchronizeReleaseDirectoryId,
 } from "./ingest-builder.js";
 import type {
   IngestCandidateInspection,
@@ -48,6 +50,56 @@ export type IngestDraftMergeResult = {
     missing: number;
   };
 };
+
+export type IngestDraftIdentitySeed = {
+  releaseArtist: string;
+  releaseTitle: string;
+};
+
+/*
+ * An identity choice made during Ingest is an explicit handoff, not another
+ * passive inference. Apply it after loading any locally saved draft while
+ * preserving custom directory IDs and track-specific artist overrides.
+ */
+export function applyIngestDraftIdentitySeed(
+  draft: IngestBuildDraft,
+  seed: IngestDraftIdentitySeed | null | undefined,
+): IngestBuildDraft {
+  if (!seed) {
+    return draft;
+  }
+
+  const releaseTitle = seed.releaseTitle.trim();
+  const releaseArtist = seed.releaseArtist.trim();
+
+  if (!releaseTitle) {
+    return draft;
+  }
+
+  const previousReleaseArtist = draft.releaseArtist;
+  const synchronizeReleaseId =
+    shouldSynchronizeReleaseDirectoryId(draft);
+
+  return {
+    ...draft,
+    releaseTitle,
+    releaseArtist,
+    releaseId: synchronizeReleaseId
+      ? buildReleaseDirectoryId(
+          draft.releaseDate,
+          releaseTitle,
+        )
+      : draft.releaseId,
+    tracks: draft.tracks.map((track) => ({
+      ...track,
+      artist:
+        !track.artist.trim() ||
+        track.artist === previousReleaseArtist
+          ? releaseArtist
+          : track.artist,
+    })),
+  };
+}
 
 function statusMap(
   statuses: IngestDraftSourceStatus[],

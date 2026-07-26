@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   getAdjacentMetadataSidebarId,
   getMetadataSidebarScrollTop,
+  normalizeMetadataSidebarWheelDelta,
+  planMetadataSidebarWheelHandoff,
 } from "../src/metadata-sidebar-navigation.js";
 
 const navigationIds = [
@@ -146,5 +148,73 @@ test("clamps sidebar adjustments to the available scroll range", () => {
       edgePadding: 12,
     }),
     600,
+  );
+});
+
+
+test("normalizes Firefox line and page wheel units", () => {
+  assert.equal(
+    normalizeMetadataSidebarWheelDelta({
+      deltaY: -3,
+      deltaMode: 1,
+      clientHeight: 400,
+    }),
+    -48,
+  );
+  assert.equal(
+    normalizeMetadataSidebarWheelDelta({
+      deltaY: 1,
+      deltaMode: 2,
+      clientHeight: 400,
+    }),
+    400,
+  );
+});
+
+test("leaves ordinary sidebar wheel movement to the browser", () => {
+  assert.deepEqual(
+    planMetadataSidebarWheelHandoff({
+      scrollTop: 200,
+      clientHeight: 300,
+      scrollHeight: 1200,
+      deltaY: -40,
+    }),
+    {
+      sidebarDeltaY: 0,
+      pageDeltaY: 0,
+      intercept: false,
+    },
+  );
+});
+
+test("hands unused upward movement to the page at the sidebar top", () => {
+  assert.deepEqual(
+    planMetadataSidebarWheelHandoff({
+      scrollTop: 18,
+      clientHeight: 300,
+      scrollHeight: 1200,
+      deltaY: -50,
+    }),
+    {
+      sidebarDeltaY: -18,
+      pageDeltaY: -32,
+      intercept: true,
+    },
+  );
+});
+
+test("hands unused downward movement to the page at the sidebar bottom", () => {
+  assert.deepEqual(
+    planMetadataSidebarWheelHandoff({
+      scrollTop: 880,
+      clientHeight: 300,
+      scrollHeight: 1200,
+      deltaY: 50,
+    }),
+    {
+      sidebarDeltaY: 20,
+      pageDeltaY: 30,
+      intercept: true,
+    },
   );
 });

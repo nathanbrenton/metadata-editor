@@ -32,6 +32,7 @@ export type ArtworkGalleryItem = {
   source: ArtworkGallerySource;
   inherited: boolean;
   previewable: boolean;
+  previewTranscoded: boolean;
 };
 
 const artworkRoleOrder: ArtworkRole[] = [
@@ -67,6 +68,11 @@ const browserPreviewExtensions = new Set([
   ".jpg",
   ".png",
   ".webp",
+]);
+
+const transcodedPreviewExtensions = new Set([
+  ".tif",
+  ".tiff",
 ]);
 
 function normalizeArtworkText(asset: ArtworkAssetLike): string {
@@ -179,7 +185,20 @@ export function isBrowserPreviewableArtwork(
     ? asset.extension.toLowerCase()
     : `.${asset.extension.toLowerCase()}`;
 
-  return browserPreviewExtensions.has(extension);
+  return (
+    browserPreviewExtensions.has(extension) ||
+    transcodedPreviewExtensions.has(extension)
+  );
+}
+
+export function requiresTranscodedArtworkPreview(
+  asset: ArtworkAssetLike,
+): boolean {
+  const extension = asset.extension.startsWith(".")
+    ? asset.extension.toLowerCase()
+    : `.${asset.extension.toLowerCase()}`;
+
+  return transcodedPreviewExtensions.has(extension);
 }
 
 function deduplicateArtworkAssets(
@@ -217,6 +236,7 @@ function buildGalleryItems(
         source,
         inherited: source === "inherited-release",
         previewable: isBrowserPreviewableArtwork(asset),
+        previewTranscoded: requiresTranscodedArtworkPreview(asset),
         sourceIndex,
       };
     })

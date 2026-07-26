@@ -76,6 +76,7 @@ The backend binds only to localhost during development. The public audio player 
 - TypeScript
 - Vite
 - Desktop-first workflow navigation: Ingest → Staging → Library → Publish
+- Ingest candidate inspection can seed release artist and title from selectable folder-field ranges or embedded album/artist tags. Continuing to Staging explicitly carries those selected values into the draft, including over an older locally saved inferred identity, while keeping the fields editable. Detailed inference evidence stays collapsed by default beneath the identity controls, and candidate file counts and media totals are condensed into the existing Source files header.
 - Library release rows show the authored release title and primary artist above the date and track count
 - Developer / Admin Tools start disabled on every page load and remain session-only when enabled
 - The Staging track table shows source paths relative to the selected candidate, provides read-only play/pause preview for inspected audio, uses direct three-digit track-number entry for ordering, can populate selected titles from a chosen filename field or each file's embedded TITLE tag, supports applying one source date across all included non-missing sources, and reports source dates after the release date as non-blocking advisories.
@@ -266,6 +267,8 @@ git diff --check;
 
 Saved release- or track-level performer name/role pairs can be copied to several track overrides through one reviewed operation. The destination selector supports an inclusive Start track and End track in the same disc/track order shown by Library navigation. A range can replace the current destination selection, add to it, or remove from it. The source track is excluded, existing credits are preserved, normalized name/role duplicates are skipped, and the server dry-run remains required before any `track-credits.toml` document is created or updated.
 
+Performer, songwriter, composer, lyricist, arrangement, and technical-credit sort names default from the credited name in `Last, First` form and remain synchronized while that generated value is in use. A manually authored sort name remains authoritative. Release and track license fields default to `All rights reserved.` in newly generated metadata, and existing blank license fields expose the same overrideable default in Library.
+
 ### Samples, Interpolations, and Clearance
 
 Track sample relationships are authored in **Artists, Performers & Writers → Samples & Interpolations** and stored in `track-credits.toml` under `track.samples`. Supported relationship types are sample, interpolation, musical quotation, lyrical quotation, and unknown sample source. Public liner-note wording remains editable because licensed wording may be supplied by a label, publisher, attorney, or clearance agreement. Source artists are not automatically added as performers, and source writers are not automatically copied into the current track's songwriting credits.
@@ -387,7 +390,7 @@ The endpoint rescans the release, regenerates and validates TOML, rebuilds the p
 
 ## Audio Preview
 
-Release detail views provide per-track play/pause controls in the sidebar plus previous, play/pause, next, and volume controls above the metadata tabs. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits use the page's native vertical scroll. This avoids nested vertical-wheel handoff: scrolling over metadata naturally reveals the release header and tabs above or the footer below, while the track list remains available beside it. Outside editable fields and open dialogs, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Keyboard navigation scrolls only the sidebar and only when the destination crosses its visible edge, avoiding whole-page jumps and unnecessary re-centering. The local API resolves tracks by release and track IDs, prefers `audio-playback.*`, and falls back to one unambiguous `audio-master.*`.
+Release detail views provide per-track play/pause controls in the sidebar plus previous, play/pause, next, and volume controls above the metadata tabs. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits use the page's native vertical scroll. The track list scrolls independently while it has room, then continued wheel or trackpad movement at its top or bottom edge hands off to the page so the release header, tabs, and footer remain reachable. Outside editable fields and open dialogs, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Keyboard navigation scrolls only the sidebar and only when the destination crosses its visible edge, avoiding whole-page jumps and unnecessary re-centering. The local API resolves tracks by release and track IDs, prefers `audio-playback.*`, and falls back to one unambiguous `audio-master.*`.
 
 API:
 
@@ -554,3 +557,15 @@ ranked first, followed by this format order:
 The selected suggestion is used consistently by metadata inference, gallery
 fallbacks, and starter TOML generation. Other candidates remain untouched and
 must never be deleted automatically.
+
+Library artwork views can display `.tif` and `.tiff` masters through a read-only
+FFmpeg conversion streamed as PNG. The conversion is held in memory and does
+not create a derivative or modify the archival master. The original TIFF remains
+available through **Open original**.
+
+### Calendar date fields
+
+Recognized full-date metadata fields use native calendar controls throughout the
+application and continue to store ISO `YYYY-MM-DD` strings in TOML. Existing
+partial legacy values remain preserved until they are deliberately replaced with
+a complete date.

@@ -2,6 +2,26 @@ export type MetadataSidebarNavigationDirection =
   | "previous"
   | "next";
 
+
+export type MetadataSidebarWheelMetrics = {
+  scrollTop: number;
+  clientHeight: number;
+  scrollHeight: number;
+  deltaY: number;
+};
+
+export type MetadataSidebarWheelHandoffPlan = {
+  sidebarDeltaY: number;
+  pageDeltaY: number;
+  intercept: boolean;
+};
+
+export type MetadataSidebarWheelDeltaInput = {
+  deltaY: number;
+  deltaMode: number;
+  clientHeight: number;
+};
+
 export type MetadataSidebarScrollMetrics = {
   scrollTop: number;
   clientHeight: number;
@@ -75,4 +95,94 @@ export function getMetadataSidebarScrollTop({
     maximumScrollTop,
     Math.max(0, nextScrollTop),
   );
+}
+
+/**
+ * Convert browser wheel units to pixels before splitting one gesture between
+ * the bounded sidebar and the page. Firefox may report line or page units.
+ */
+export function normalizeMetadataSidebarWheelDelta({
+  deltaY,
+  deltaMode,
+  clientHeight,
+}: MetadataSidebarWheelDeltaInput): number {
+  if (!Number.isFinite(deltaY)) {
+    return 0;
+  }
+
+  if (deltaMode === 1) {
+    return deltaY * 16;
+  }
+
+  if (deltaMode === 2) {
+    return deltaY * Math.max(1, clientHeight);
+  }
+
+  return deltaY;
+}
+
+/**
+ * Let the sidebar consume normal wheel movement. Only intercept a gesture
+ * when it reaches an edge, then pass the unused remainder to the page.
+ */
+export function planMetadataSidebarWheelHandoff({
+  scrollTop,
+  clientHeight,
+  scrollHeight,
+  deltaY,
+}: MetadataSidebarWheelMetrics): MetadataSidebarWheelHandoffPlan {
+  if (!Number.isFinite(deltaY) || deltaY === 0) {
+    return {
+      sidebarDeltaY: 0,
+      pageDeltaY: 0,
+      intercept: false,
+    };
+  }
+
+  const maximumScrollTop = Math.max(
+    0,
+    scrollHeight - clientHeight,
+  );
+  const currentScrollTop = Math.min(
+    maximumScrollTop,
+    Math.max(0, scrollTop),
+  );
+
+  if (deltaY < 0) {
+    const availableSidebarMovement = currentScrollTop;
+
+    if (-deltaY <= availableSidebarMovement) {
+      return {
+        sidebarDeltaY: 0,
+        pageDeltaY: 0,
+        intercept: false,
+      };
+    }
+
+    const sidebarDeltaY = -availableSidebarMovement;
+
+    return {
+      sidebarDeltaY,
+      pageDeltaY: deltaY - sidebarDeltaY,
+      intercept: true,
+    };
+  }
+
+  const availableSidebarMovement =
+    maximumScrollTop - currentScrollTop;
+
+  if (deltaY <= availableSidebarMovement) {
+    return {
+      sidebarDeltaY: 0,
+      pageDeltaY: 0,
+      intercept: false,
+    };
+  }
+
+  return {
+    sidebarDeltaY: availableSidebarMovement,
+    pageDeltaY:
+      deltaY - availableSidebarMovement,
+    intercept: true,
+  };
 }

@@ -23,6 +23,7 @@ import {
 } from "../shared/ingest-builder.js";
 import {
   buildBlockingSourceStatuses,
+  type IngestDraftIdentitySeed,
   type IngestDraftSourceStatus,
 } from "../shared/ingest-drafts.js";
 import type {
@@ -743,10 +744,12 @@ function ArtworkAssignmentSummary({
 
 export function IngestReleaseBuilder({
   inspection,
+  identitySeed,
   onCancel,
   onReleaseCreated,
 }: {
   inspection: IngestCandidateInspection;
+  identitySeed?: IngestDraftIdentitySeed | null;
   onCancel: () => void;
   onReleaseCreated: (
     releaseId: string,
@@ -768,7 +771,10 @@ export function IngestReleaseBuilder({
     detachFile,
     markReviewed,
     clearStoredDraft,
-  } = useIngestDraft(inspection);
+  } = useIngestDraft(
+    inspection,
+    identitySeed ?? null,
+  );
   const trackSourceFiles =
     currentInspection.files.filter(
       (file) => file.mediaKind === "audio",
@@ -1611,19 +1617,6 @@ export function IngestReleaseBuilder({
           </button>
         </div>
       </header>
-
-      <div className="ingest-safety-banner">
-        <strong>
-          {stagingOperation === "update"
-            ? "Copy-and-merge staging update"
-            : "Copy-only staging workflow"}
-        </strong>
-        <span>
-          {stagingOperation === "update"
-            ? "The updater preserves existing authored files, adds selected new masters, and changes only validated numbering documents. It never modifies ingest sources."
-            : "The builder writes only to the configured staging media root. It never moves, renames, tags, or deletes the ingest source."}
-        </span>
-      </div>
 
       {(targetStatusLoading || targetStatus?.exists) && (
         <div className="ingest-staging-target-banner">

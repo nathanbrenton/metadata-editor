@@ -132,6 +132,19 @@ import {
 } from "../shared/artist-sort-name.js";
 
 import {
+  creditNamePathForSortNamePath,
+  creditSortNamePathForNamePath,
+  generateCreditSortName,
+  resolveCreditSortName,
+  synchronizeCreditSortName,
+} from "./credit-sort-name.js";
+
+import {
+  defaultLicenseValue,
+  isLicenseMetadataPath,
+} from "../shared/rights-defaults.js";
+
+import {
   findProductionContextField,
   productionContextFields,
   resolveProductionContextGroup,
@@ -158,6 +171,12 @@ import {
   selectPreferredReleaseArtwork,
   type ArtworkGalleryItem,
 } from "./artwork-gallery.js";
+
+import {
+  getCalendarInputValue,
+  getLegacyCalendarDateValue,
+  isCalendarDateMetadataPath,
+} from "./metadata-date.js";
 
 import {
   filterPresentableMetadataRows,
@@ -225,7 +244,16 @@ import {
 import {
   getAdjacentMetadataSidebarId,
   getMetadataSidebarScrollTop,
+  normalizeMetadataSidebarWheelDelta,
+  planMetadataSidebarWheelHandoff,
 } from "./metadata-sidebar-navigation.js";
+
+import {
+  buildIngestIdentitySourcePlan,
+  mergeIngestIdentityEvidence,
+  selectIngestIdentityOverride,
+  type IngestIdentityOverride,
+} from "./ingest-identity-source.js";
 
 // Defer secondary workflows until they are opened so the initial editor
 // bundle remains smaller and faster to parse.
@@ -805,6 +833,8 @@ export function App() {
     useState(false);
   const [ingestInspection, setIngestInspection] =
     useState<IngestCandidateInspection | null>(null);
+  const [ingestIdentityOverride, setIngestIdentityOverride] =
+    useState<IngestIdentityOverride | null>(null);
   const [ingestInspectionError, setIngestInspectionError] =
     useState<string | null>(null);
   const [ingestInspectionLoading, setIngestInspectionLoading] =
@@ -1034,6 +1064,7 @@ export function App() {
   const inspectCandidate = useCallback(async (
     candidateId: string,
   ) => {
+    setIngestIdentityOverride(null);
     setIngestInspectionLoading(true);
     setIngestInspectionError(null);
 
@@ -1784,16 +1815,34 @@ export function App() {
               onInspect={(candidateId) =>
                 void inspectCandidate(candidateId)
               }
-              onBackToCandidates={() =>
-                setIngestInspection(null)
-              }
-              onOpenStaging={() =>
-                navigateWorkflowView("staging")
-              }
+              onBackToCandidates={() => {
+                setIngestInspection(null);
+                setIngestIdentityOverride(null);
+              }}
+              onOpenStaging={(identityOverride) => {
+                setIngestIdentityOverride(identityOverride);
+                setIngestInspection((current) =>
+                  current
+                    ? {
+                        ...current,
+                        candidate: {
+                          ...current.candidate,
+                          evidence:
+                            mergeIngestIdentityEvidence(
+                              current.candidate.evidence,
+                              identityOverride,
+                            ),
+                        },
+                      }
+                    : current,
+                );
+                navigateWorkflowView("staging");
+              }}
             />
           ) : applicationView === "staging" ? (
             <StagingWorkspace
               inspection={ingestInspection}
+              identitySeed={ingestIdentityOverride}
               releases={scan?.releases ?? []}
               inspectionError={
                 ingestInspectionError
@@ -1811,6 +1860,7 @@ export function App() {
                 releaseId,
               ) => {
                 setIngestInspection(null);
+                setIngestIdentityOverride(null);
                 await refreshLibrary();
                 await openReleaseInLibrary(
                   releaseId,
@@ -3874,6 +3924,7 @@ function CompatibilityPlayerCell({
 
 function StagingWorkspace({
   inspection,
+  identitySeed,
   releases,
   inspectionError,
   onChooseCandidate,
@@ -3882,6 +3933,7 @@ function StagingWorkspace({
   onReleaseCreated,
 }: {
   inspection: IngestCandidateInspection | null;
+  identitySeed: IngestIdentityOverride | null;
   releases: ReleaseScanResult[];
   inspectionError: string | null;
   onChooseCandidate: () => void;
@@ -3905,6 +3957,7 @@ function StagingWorkspace({
       >
         <LazyIngestReleaseBuilder
           inspection={inspection}
+          identitySeed={identitySeed}
           onCancel={onBackToInspection}
           onReleaseCreated={onReleaseCreated}
         />
@@ -4271,7 +4324,9 @@ function IngestView({
   onRefresh: () => void;
   onInspect: (candidateId: string) => void;
   onBackToCandidates: () => void;
-  onOpenStaging: () => void;
+  onOpenStaging: (
+    identityOverride: IngestIdentityOverride,
+  ) => void;
 }) {
   if (inspection) {
     return (
@@ -4522,9 +4577,36 @@ function IngestCandidateInspectionView({
 }: {
   inspection: IngestCandidateInspection;
   onBack: () => void;
-  onOpenStaging: () => void;
+  onOpenStaging: (
+    identityOverride: IngestIdentityOverride,
+  ) => void;
 }) {
   const { candidate } = inspection;
+  const identityPlan = useMemo(
+    () => buildIngestIdentitySourcePlan(inspection),
+    [inspection],
+  );
+  const [artistSourceId, setArtistSourceId] =
+    useState(identityPlan.defaultArtistSourceId);
+  const [titleSourceId, setTitleSourceId] =
+    useState(identityPlan.defaultTitleSourceId);
+  const identityOverride = useMemo(
+    () =>
+      selectIngestIdentityOverride(
+        identityPlan,
+        artistSourceId,
+        titleSourceId,
+      ),
+    [artistSourceId, identityPlan, titleSourceId],
+  );
+  const previewEvidence = useMemo(
+    () =>
+      mergeIngestIdentityEvidence(
+        candidate.evidence,
+        identityOverride,
+      ),
+    [candidate.evidence, identityOverride],
+  );
   const [expandedFiles, setExpandedFiles] = useState<
     string[]
   >([]);
@@ -4573,73 +4655,14 @@ function IngestCandidateInspectionView({
             type="button"
             className="primary-button"
             disabled={candidate.audioCount === 0}
-            onClick={onOpenStaging}
+            onClick={() =>
+              onOpenStaging(identityOverride)
+            }
           >
             Continue to Staging
           </button>
         </div>
       </header>
-
-      <section
-        className="ingest-table-panel"
-        aria-labelledby="candidate-summary-heading"
-      >
-        <header className="ingest-table-panel-header">
-          <h3 id="candidate-summary-heading">
-            Candidate summary
-          </h3>
-        </header>
-        <div className="ingest-table-scroll">
-          <table className="ingest-table ingest-summary-table">
-            <thead>
-              <tr>
-                <th scope="col">Candidate type</th>
-                <th scope="col" className="numeric">
-                  Files
-                </th>
-                <th scope="col" className="numeric">
-                  Audio
-                </th>
-                <th scope="col" className="numeric">
-                  Images
-                </th>
-                <th scope="col" className="numeric">
-                  Text
-                </th>
-                <th scope="col" className="numeric">
-                  Total size
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>
-                  {candidate.kind === "folder"
-                    ? "Folder"
-                    : "Loose file"}
-                </td>
-                <td className="numeric">
-                  {candidate.fileCount}
-                </td>
-                <td className="numeric">
-                  {candidate.audioCount}
-                </td>
-                <td className="numeric">
-                  {candidate.imageCount}
-                </td>
-                <td className="numeric">
-                  {candidate.textCount}
-                </td>
-                <td className="numeric">
-                  {formatByteSize(
-                    candidate.totalSizeBytes,
-                  )}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
 
       <section
         className="ingest-table-panel"
@@ -4656,9 +4679,73 @@ function IngestCandidateInspectionView({
             </p>
           </div>
         </header>
-        <IngestEvidenceTable
-          evidence={candidate.evidence}
-        />
+        <div className="ingest-identity-tools">
+          <div className="ingest-identity-tools-intro">
+            <strong>Release identity detection</strong>
+            <small>
+              Choose folder fields or embedded tags. These
+              selections seed Staging and remain manually editable.
+            </small>
+          </div>
+
+          <label>
+            <span>Artist source</span>
+            <select
+              value={artistSourceId}
+              onChange={(event) =>
+                setArtistSourceId(event.target.value)
+              }
+            >
+              {identityPlan.artistOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Release title source</span>
+            <select
+              value={titleSourceId}
+              onChange={(event) =>
+                setTitleSourceId(event.target.value)
+              }
+            >
+              {identityPlan.titleOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="ingest-identity-preview">
+            <span>Staging identity</span>
+            <strong>
+              {identityOverride.releaseArtist || "Artist not inferred"}
+            </strong>
+            <small>{identityOverride.releaseTitle}</small>
+          </div>
+        </div>
+        <details className="ingest-evidence-disclosure">
+          <summary>
+            <span
+              className="ingest-evidence-disclosure-triangle"
+              aria-hidden="true"
+            >
+              ▸
+            </span>
+            <strong>Inference evidence</strong>
+            <span>
+              {previewEvidence.length}{" "}
+              {previewEvidence.length === 1 ? "row" : "rows"}
+            </span>
+          </summary>
+          <IngestEvidenceTable
+            evidence={previewEvidence}
+          />
+        </details>
       </section>
 
       {inspection.warnings.length > 0 && (
@@ -4676,7 +4763,7 @@ function IngestCandidateInspectionView({
         className="ingest-table-panel"
         aria-labelledby="source-files-heading"
       >
-        <header className="ingest-table-panel-header">
+        <header className="ingest-table-panel-header ingest-source-panel-header">
           <div>
             <h3 id="source-files-heading">
               Source files
@@ -4686,12 +4773,23 @@ function IngestCandidateInspectionView({
               collected without modifying the files.
             </p>
           </div>
-          <strong>
-            {inspection.files.length}{" "}
-            {inspection.files.length === 1
-              ? "file"
-              : "files"}
-          </strong>
+          <div
+            className="ingest-source-summary"
+            aria-label="Candidate source summary"
+          >
+            <span>
+              {candidate.kind === "folder"
+                ? "Folder"
+                : "Loose file"}
+            </span>
+            <span>{candidate.fileCount} files</span>
+            <span>{candidate.audioCount} audio</span>
+            <span>{candidate.imageCount} images</span>
+            <span>{candidate.textCount} text</span>
+            <span>
+              {formatByteSize(candidate.totalSizeBytes)}
+            </span>
+          </div>
         </header>
 
         <div className="ingest-table-scroll">
@@ -5297,11 +5395,9 @@ function ReleaseCard({
           >
             {releaseArtwork ? (
               <img
-                src={`/api/library/artwork?${new URLSearchParams(
-                  {
-                    path: releaseArtwork.relativePath,
-                  },
-                ).toString()}`}
+                src={artworkPreviewUrl(
+                  releaseArtwork.relativePath,
+                )}
                 alt=""
                 loading="lazy"
               />
@@ -5716,6 +5812,42 @@ type SampleClearanceDraftMap = Record<
   SampleClearanceRecordDraft[]
 >;
 
+function applyCreditRecordUpdates<
+  RecordType extends {
+    name: string;
+    sortName: string;
+  },
+>(
+  record: RecordType,
+  updates: Partial<RecordType>,
+): RecordType {
+  const nextName =
+    typeof updates.name === "string"
+      ? updates.name
+      : record.name;
+  const updatesSortName =
+    Object.prototype.hasOwnProperty.call(
+      updates,
+      "sortName",
+    );
+
+  return {
+    ...record,
+    ...updates,
+    name: nextName,
+    sortName: updatesSortName
+      ? updates.sortName ?? ""
+      : nextName !== record.name
+        ? synchronizeCreditSortName({
+            previousName: record.name,
+            nextName,
+            currentSortName:
+              record.sortName,
+          })
+        : record.sortName,
+  } as RecordType;
+}
+
 
 type MetadataValueChange = {
   path: string;
@@ -6077,12 +6209,16 @@ function readPerformerRecords(
             typeof value.role === "string"
               ? value.role
               : "",
-          sortName:
+          sortName: resolveCreditSortName(
+            "name" in value &&
+            typeof value.name === "string"
+              ? value.name
+              : "",
             "sort_name" in value &&
-            typeof value.sort_name ===
-              "string"
+            typeof value.sort_name === "string"
               ? value.sort_name
               : "",
+          ),
         },
       ];
     },
@@ -6246,12 +6382,16 @@ function readTechnicalCreditRecords(
               ? value.name
               : "",
           role,
-          sortName:
+          sortName: resolveCreditSortName(
+            "name" in value &&
+            typeof value.name === "string"
+              ? value.name
+              : "",
             "sort_name" in value &&
-            typeof value.sort_name ===
-              "string"
+            typeof value.sort_name === "string"
               ? value.sort_name
               : "",
+          ),
         },
       ];
     },
@@ -6429,11 +6569,16 @@ function readArrangementCreditRecords(
             ? value.name
             : "",
         role,
-        sortName:
+        sortName: resolveCreditSortName(
+          "name" in value &&
+          typeof value.name === "string"
+            ? value.name
+            : "",
           "sort_name" in value &&
           typeof value.sort_name === "string"
             ? value.sort_name
             : "",
+        ),
       },
     ];
   });
@@ -6667,11 +6812,16 @@ function readWritingCreditRecords(
                 ? value.name
                 : "",
             role,
-            sortName:
+            sortName: resolveCreditSortName(
+              "name" in value &&
+              typeof value.name === "string"
+                ? value.name
+                : "",
               "sort_name" in value &&
               typeof value.sort_name === "string"
                 ? value.sort_name
                 : "",
+            ),
           },
         ];
       },
@@ -9079,9 +9229,9 @@ function getSupplementalFieldGuidance(
       },
       "track.rights.license": {
         help:
-          "Optional track-specific license or usage statement. Use only when this track differs from the release-level licensing terms.",
+          "Defaults to All rights reserved. when no release-level license applies. Use a track override only when this recording has different licensing terms.",
         examples: [
-          "All rights reserved",
+          "All rights reserved.",
         ],
       },
       "track.version": {
@@ -9631,6 +9781,16 @@ function getSupplementalFieldGuidance(
       examples: [
         "Concise internal or public-facing note.",
       ],
+    };
+  }
+
+  if (valueType === "date") {
+    return {
+      examples: [
+        "2026-07-26",
+      ],
+      help:
+        "Use the calendar control for a complete date. TOML stores the value as YYYY-MM-DD.",
     };
   }
 
@@ -10736,6 +10896,8 @@ function ReleaseMetadataDetailView({
   );
   const detailMenuRef =
     useRef<HTMLElement>(null);
+  const metadataSidebarRef =
+    useRef<HTMLElement>(null);
   const audioPreviewRef =
     useRef<HTMLAudioElement | null>(null);
   const [audioPreviewTrackId, setAudioPreviewTrackId] =
@@ -10815,6 +10977,89 @@ function ReleaseMetadataDetailView({
       audio.volume = audioPreviewVolume;
     }
   }, [audioPreviewVolume]);
+
+  useEffect(() => {
+    const sidebar = metadataSidebarRef.current;
+
+    if (!sidebar) {
+      return;
+    }
+
+    const handleSidebarWheel = (
+      event: WheelEvent,
+    ) => {
+      if (
+        event.defaultPrevented ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        Math.abs(event.deltaX) >
+          Math.abs(event.deltaY)
+      ) {
+        return;
+      }
+
+      const deltaY =
+        normalizeMetadataSidebarWheelDelta({
+          deltaY: event.deltaY,
+          deltaMode: event.deltaMode,
+          clientHeight: sidebar.clientHeight,
+        });
+      const plan =
+        planMetadataSidebarWheelHandoff({
+          scrollTop: sidebar.scrollTop,
+          clientHeight: sidebar.clientHeight,
+          scrollHeight: sidebar.scrollHeight,
+          deltaY,
+        });
+
+      if (!plan.intercept) {
+        return;
+      }
+
+      event.preventDefault();
+
+      if (plan.sidebarDeltaY !== 0) {
+        sidebar.scrollTop +=
+          plan.sidebarDeltaY;
+      }
+
+      const pageScroller =
+        document.scrollingElement;
+
+      if (
+        pageScroller &&
+        plan.pageDeltaY !== 0
+      ) {
+        const maximumPageScrollTop = Math.max(
+          0,
+          pageScroller.scrollHeight -
+            pageScroller.clientHeight,
+        );
+
+        pageScroller.scrollTop = Math.min(
+          maximumPageScrollTop,
+          Math.max(
+            0,
+            pageScroller.scrollTop +
+              plan.pageDeltaY,
+          ),
+        );
+      }
+    };
+
+    sidebar.addEventListener(
+      "wheel",
+      handleSidebarWheel,
+      { passive: false },
+    );
+
+    return () => {
+      sidebar.removeEventListener(
+        "wheel",
+        handleSidebarWheel,
+      );
+    };
+  }, [detail.releaseId]);
 
   const recordMetadataActivity = (
     entry: MetadataActivityEntry,
@@ -11247,15 +11492,12 @@ function ReleaseMetadataDetailView({
 
   const dirtyCount =
     Object.keys(draft).length +
-    Object.keys(
-      performerDrafts,
-    ).length +
-    Object.keys(
-      technicalCreditDrafts,
-    ).length +
-    Object.keys(
-      arrangementCreditDrafts,
-    ).length;
+    Object.keys(performerDrafts).length +
+    Object.keys(technicalCreditDrafts).length +
+    Object.keys(arrangementCreditDrafts).length +
+    Object.keys(writingCreditDrafts).length +
+    Object.keys(sampleRelationshipDrafts).length +
+    Object.keys(sampleClearanceDrafts).length;
 
   useEffect(() => {
     if (dirtyCount === 0) {
@@ -11379,6 +11621,59 @@ function ReleaseMetadataDetailView({
             delete nextDraft[derivedKey];
           } else {
             nextDraft[derivedKey] = change.value;
+          }
+        }
+      }
+
+      if (typeof nextValue === "string") {
+        const creditSortNamePath =
+          creditSortNamePathForNamePath(
+            metadataPath,
+          );
+
+        if (
+          creditSortNamePath &&
+          originalValues.has(creditSortNamePath)
+        ) {
+          const previousName =
+            readDocumentDraftString(
+              document,
+              metadataPath,
+              currentDraft,
+            );
+          const currentSortName =
+            readDocumentDraftString(
+              document,
+              creditSortNamePath,
+              currentDraft,
+            );
+          const nextSortName =
+            synchronizeCreditSortName({
+              previousName,
+              nextName: nextValue,
+              currentSortName,
+            });
+          const sortDraftKey =
+            buildDocumentDraftKey(
+              document,
+              creditSortNamePath,
+            );
+          const originalSortName =
+            originalValues.get(
+              creditSortNamePath,
+            );
+
+          if (
+            originalSortName !== undefined &&
+            metadataValuesEqual(
+              nextSortName,
+              originalSortName,
+            )
+          ) {
+            delete nextDraft[sortDraftKey];
+          } else {
+            nextDraft[sortDraftKey] =
+              nextSortName;
           }
         }
       }
@@ -13976,12 +14271,9 @@ function ReleaseMetadataDetailView({
           >
             {releaseArtwork ? (
               <img
-                src={`/api/library/artwork?${new URLSearchParams(
-                  {
-                    path:
-                      releaseArtwork.relativePath,
-                  },
-                ).toString()}`}
+                src={artworkPreviewUrl(
+                  releaseArtwork.relativePath,
+                )}
                 alt=""
               />
             ) : (
@@ -15013,6 +15305,7 @@ function ReleaseMetadataDetailView({
 
       <div className="release-metadata-workspace">
         <nav
+          ref={metadataSidebarRef}
           className="metadata-document-tabs"
           aria-label="Metadata document groups"
           aria-keyshortcuts="ArrowUp ArrowDown"
@@ -17413,6 +17706,102 @@ function MetadataValueCell({
     );
   }
 
+  const usesCalendarDateInput =
+    typeof currentValue === "string" &&
+    isCalendarDateMetadataPath(
+      row.path,
+      field?.valueType,
+    );
+
+  if (usesCalendarDateInput) {
+    const calendarValue =
+      getCalendarInputValue(currentValue);
+    const legacyDateValue =
+      getLegacyCalendarDateValue(currentValue);
+    const supportsDateReleaseValue =
+      inheritedValue !== undefined;
+    const restoreDateReleaseValuePending =
+      supportsDateReleaseValue &&
+      changed &&
+      isBlankMetadataValue(currentValue);
+    const showUseDateReleaseValue =
+      supportsDateReleaseValue &&
+      (changed || !isBlankMetadataValue(originalValue));
+
+    return (
+      <label className="metadata-editor-field metadata-date-field">
+        <input
+          type="date"
+          value={calendarValue}
+          onChange={(event) =>
+            onDraftValueChange(
+              document,
+              row.path,
+              originalValue,
+              event.target.value,
+            )
+          }
+        />
+
+        {legacyDateValue && (
+          <small className="metadata-provenance-note metadata-legacy-date-note">
+            Existing value: {legacyDateValue}. Select a complete calendar date to replace it.
+          </small>
+        )}
+
+        {supportsDateReleaseValue && (
+          <span className="metadata-inheritance-actions">
+            <small className="metadata-provenance-note metadata-inherited-note">
+              Release value: {formatMetadataValue(inheritedValue)}
+            </small>
+
+            {showUseDateReleaseValue && (
+              <button
+                type="button"
+                className="metadata-use-release-value-button"
+                disabled={restoreDateReleaseValuePending}
+                onClick={() =>
+                  onDraftValueChange(
+                    document,
+                    row.path,
+                    originalValue,
+                    "",
+                  )
+                }
+              >
+                {restoreDateReleaseValuePending
+                  ? "Release value selected"
+                  : "Use release value"}
+              </button>
+            )}
+          </span>
+        )}
+
+        {usingGeneratedValue && !changed && (
+          <span className="metadata-provenance-note metadata-derived-note">
+            {generatedNote}
+          </span>
+        )}
+
+        {usingInheritedValue && !changed && (
+          <span className="metadata-provenance-note metadata-inherited-note">
+            Inherited from release
+          </span>
+        )}
+
+        {changed && (
+          <span className="changed-indicator">
+            {restoreDateReleaseValuePending
+              ? "Restore release value"
+              : usingInheritedValue
+                ? "Track override"
+                : "Modified"}
+          </span>
+        )}
+      </label>
+    );
+  }
+
   const controlledVocabulary =
     field?.editor?.control ===
       "select-or-custom" &&
@@ -17944,6 +18333,9 @@ function getInitialMetadataFieldValue(
       readDocumentDraftString(document, "track.version", draft),
     );
   }
+  if (isLicenseMetadataPath(field.tomlPath)) {
+    return defaultLicenseValue;
+  }
   if (field.tomlPath === "track.sort_title") {
     return generateTrackSortTitle({
       title: readDocumentDraftString(
@@ -18044,7 +18436,7 @@ function buildDocumentMetadataRegistry(
         scope: document.scope,
         storageFileRole,
         tomlPath: field.path,
-        valueType: "string",
+        valueType: field.valueType ?? "string",
         required: false,
         repeatable: false,
         inherited:
@@ -18132,10 +18524,12 @@ function PerformerRecordEditor({
       records.map(
         (record, index) =>
           index === recordIndex
-            ? {
-                ...record,
-                ...updates,
-              }
+            ? applyCreditRecordUpdates<
+                PerformerRecordDraft
+              >(
+                record,
+                updates,
+              )
             : record,
       ),
     );
@@ -18601,11 +18995,13 @@ function WritingCreditRecordEditor({
             record.family,
           );
 
-        return {
-          ...record,
-          ...updates,
-          family: nextFamily,
-        };
+        return applyCreditRecordUpdates(
+          record,
+          {
+            ...updates,
+            family: nextFamily,
+          },
+        );
       }),
     );
   };
@@ -18641,7 +19037,10 @@ function WritingCreditRecordEditor({
         sourceIndex: null,
         name: initial?.name ?? "",
         role,
-        sortName: initial?.sortName ?? "",
+        sortName: resolveCreditSortName(
+          initial?.name ?? "",
+          initial?.sortName ?? "",
+        ),
       },
     ]);
   };
@@ -19177,10 +19576,12 @@ function ArrangementCreditRecordEditor({
     onChange(
       records.map((record, index) =>
         index === recordIndex
-          ? {
-              ...record,
-              ...updates,
-            }
+          ? applyCreditRecordUpdates<
+              PerformerRecordDraft
+            >(
+              record,
+              updates,
+            )
           : record,
       ),
     );
@@ -19210,8 +19611,10 @@ function ArrangementCreditRecordEditor({
         sourceIndex: null,
         name: initial?.name ?? "",
         role: initial?.role ?? "",
-        sortName:
+        sortName: resolveCreditSortName(
+          initial?.name ?? "",
           initial?.sortName ?? "",
+        ),
       },
     ]);
   };
@@ -19829,10 +20232,12 @@ function TechnicalCreditRecordEditor({
       records.map(
         (record, index) =>
           index === recordIndex
-            ? {
-                ...record,
-                ...updates,
-              }
+            ? applyCreditRecordUpdates<
+                PerformerRecordDraft
+              >(
+                record,
+                updates,
+              )
             : record,
       ),
     );
@@ -19862,8 +20267,10 @@ function TechnicalCreditRecordEditor({
         sourceIndex: null,
         name: initial?.name ?? "",
         role: initial?.role ?? "",
-        sortName:
+        sortName: resolveCreditSortName(
+          initial?.name ?? "",
           initial?.sortName ?? "",
+        ),
       },
     ]);
   };
@@ -22119,6 +22526,30 @@ function MetadataDocumentTable({
             ),
           ).value
         : "";
+    const creditNamePath =
+      creditNamePathForSortNamePath(
+        row.path,
+      );
+    const generatedCreditSortName =
+      !inherited &&
+      creditNamePath &&
+      typeof row.value === "string" &&
+      !row.value.trim()
+        ? generateCreditSortName(
+            readDocumentDraftString(
+              document,
+              creditNamePath,
+              draft,
+            ),
+          )
+        : "";
+    const generatedLicenseValue =
+      !inherited &&
+      isLicenseMetadataPath(row.path) &&
+      typeof row.value === "string" &&
+      !row.value.trim()
+        ? defaultLicenseValue
+        : "";
 
     return (
     <div
@@ -22160,6 +22591,7 @@ function MetadataDocumentTable({
             !row.path.includes("[") &&
             [
               "string",
+              "date",
               "number",
               "boolean",
               "string-array",
@@ -22242,7 +22674,9 @@ function MetadataDocumentTable({
               "track.text.lyrics_language"
               ? effectiveTrackLanguage
               : generatedArtistSortName ||
-                  undefined
+                generatedCreditSortName ||
+                generatedLicenseValue ||
+                undefined
           }
           generatedFallbackNote={
             row.path ===
@@ -22250,7 +22684,11 @@ function MetadataDocumentTable({
               ? "Generated from Track Language"
               : generatedArtistSortName
                 ? "Generated from Artist Name"
-                : undefined
+                : generatedCreditSortName
+                  ? "Generated from Credit Name"
+                  : generatedLicenseValue
+                    ? "Default rights reservation"
+                    : undefined
           }
           editMode={editMode}
           draft={draft}
@@ -22318,6 +22756,13 @@ function MetadataDocumentTable({
                   ? "Override Lyrics Language"
                   : "Add Lyrics Language",
             }
+          : isLicenseMetadataPath(field.tomlPath)
+            ? {
+                generatedValue: defaultLicenseValue,
+                generatedNote:
+                  "Default rights reservation",
+                actionLabel: "Add default license",
+              }
           : getMissingTrackOverviewFieldPresentation({
               path: field.tomlPath,
               label: field.label,
@@ -24327,6 +24772,14 @@ function artworkAssetUrl(
   }).toString()}`;
 }
 
+function artworkPreviewUrl(
+  relativePath: string,
+): string {
+  return `/api/library/artwork-preview?${new URLSearchParams({
+    path: relativePath,
+  }).toString()}`;
+}
+
 function ArtworkGallery({
   release,
   activeDocumentGroup,
@@ -24419,7 +24872,12 @@ function ArtworkGalleryCard({
 }) {
   const [dimensions, setDimensions] =
     useState<string | null>(null);
+  const [previewFailed, setPreviewFailed] =
+    useState(false);
   const assetUrl = artworkAssetUrl(
+    item.asset.relativePath,
+  );
+  const previewUrl = artworkPreviewUrl(
     item.asset.relativePath,
   );
   const extension = item.asset.extension
@@ -24450,9 +24908,9 @@ function ArtworkGalleryCard({
         rel="noreferrer"
         aria-label={`Open ${item.roleLabel} artwork: ${item.asset.filename}`}
       >
-        {item.previewable ? (
+        {item.previewable && !previewFailed ? (
           <img
-            src={assetUrl}
+            src={previewUrl}
             alt={`${item.roleLabel} artwork`}
             loading="lazy"
             onLoad={(event) => {
@@ -24461,12 +24919,15 @@ function ArtworkGalleryCard({
                 `${image.naturalWidth} × ${image.naturalHeight}`,
               );
             }}
+            onError={() => setPreviewFailed(true)}
           />
         ) : (
           <span className="metadata-artwork-preview-placeholder">
             <strong>{extension}</strong>
             <small>
-              Open original to inspect
+              {previewFailed
+                ? "Preview unavailable; open original"
+                : "Open original to inspect"}
             </small>
           </span>
         )}
@@ -24498,6 +24959,12 @@ function ArtworkGalleryCard({
             <dt>Source</dt>
             <dd>{sourceLabel}</dd>
           </div>
+          {item.previewTranscoded && (
+            <div>
+              <dt>Preview</dt>
+              <dd>Read-only PNG from TIFF</dd>
+            </div>
+          )}
           {dimensions && (
             <div>
               <dt>Dimensions</dt>

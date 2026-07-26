@@ -91,3 +91,10 @@ test(
     );
   },
 );
+
+test("marks recording source date as a calendar field", () => {
+  assert.equal(
+    findProductionContextField("production.recording.source_date")?.valueType,
+    "date",
+  );
+});

@@ -7,6 +7,11 @@ import {
   type SampleRelationshipRecordDraft,
 } from "./sample-relationship.js";
 
+import {
+  getCalendarInputValue,
+  getLegacyCalendarDateValue,
+} from "./metadata-date.js";
+
 // These editors are loaded only when their metadata sections are rendered.
 // Keeping the form-heavy sample workflow out of the initial application chunk
 // reduces startup parsing while preserving the same controlled draft callbacks.
@@ -388,11 +393,15 @@ export function SampleClearanceRecordEditor({
             <label>
               <span>Expiration date</span>
               <input
-                type="text"
-                value={record.expirationDate}
-                placeholder="YYYY-MM-DD"
+                type="date"
+                value={getCalendarInputValue(record.expirationDate)}
                 onChange={(event) => updateRecord(index, { expirationDate: event.target.value })}
               />
+              {getLegacyCalendarDateValue(record.expirationDate) && (
+                <small className="metadata-provenance-note metadata-legacy-date-note">
+                  Existing value: {record.expirationDate}. Select a complete calendar date to replace it.
+                </small>
+              )}
             </label>
 
             <label className="sample-record-wide">

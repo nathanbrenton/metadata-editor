@@ -48,12 +48,13 @@ export const workflowStages: readonly WorkflowStage[] = [
       "Find source candidates and inspect the audio, artwork, sidecars, inferred identity, and technical evidence without changing source files.",
     steps: [
       "Place an audio file or release folder in the configured ingest drop and refresh the source scan.",
-      "Inspect each candidate's file inventory, dates, titles, artists, technical properties, warnings, and possible artwork.",
+      "Inspect each candidate's file inventory, dates, titles, artists, technical properties, warnings, and possible artwork. Source counts and total size are condensed into the Source files header without adding another summary table.",
+      "Choose release artist and release title sources independently from folder-field ranges or embedded album and artist tags. Continuing to Staging explicitly carries those selected values into the release draft, including over an older locally saved inferred identity, while keeping both fields editable. Detailed inference evidence is available in a collapsed disclosure beneath the identity controls.",
       "Choose the candidate that should become a new release or update an existing release.",
       "Continue to Staging only after the candidate evidence has been reviewed.",
     ],
     currentNote:
-      "Read-only candidate scanning, row-based inspection, ffprobe/MediaInfo evidence, artwork preview, rescanning, and locally saved draft attachment state are available now.",
+      "Read-only candidate scanning, row-based inspection, selectable release-identity sources, ffprobe/MediaInfo evidence, artwork preview, rescanning, and locally saved draft attachment state are available now.",
   },
   {
     id: "staging",
@@ -78,10 +79,10 @@ export const workflowStages: readonly WorkflowStage[] = [
     summary:
       "Author canonical release and track metadata, review inheritance, preview audio, and prepare downstream media derivatives. Library release rows surface the authored title and release artist before the date and track count.",
     steps: [
-      "Add identity, numbering, dates, artists, performers, writers, sample and interpolation sources, arrangement, technical credits, rights, artwork metadata, lyrics, language, and notes.",
+      "Add identity, numbering, dates, artists, performers, writers, sample and interpolation sources, arrangement, technical credits, rights, artwork metadata, lyrics, language, and notes. Contributor sort names default from credited names and stay synchronized until individually overridden. Release and track licenses default to All rights reserved. while remaining editable.",
       "Use release-level defaults for shared values and override only the individual tracks that differ. The performer-credit copy dialog uses a dense destination table and can select an inclusive destination range in displayed disc/track order, then replace, add to, or remove from the current destination selection before its duplicate-aware dry-run.",
       "When saved track numbers change, save the metadata first, then load and confirm the server's exact artist_number_title dry-run plan; guarded synchronization updates track IDs and reference TOMLs without overwriting an existing target.",
-      "Preview tracks from the sidebar or transport while reviewing titles, sequence, and track-specific values. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits follow the page's native vertical scroll. Scrolling over metadata therefore reveals the release header and tabs above or the footer below without a nested wheel handoff. Outside editable fields, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Only the sidebar scrolls for keyboard navigation, and it moves only when the destination crosses a visible edge, preventing whole-page jumps and unnecessary re-centering.",
+      "Preview tracks from the sidebar or transport while reviewing titles, sequence, and track-specific values. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits follow the page's native vertical scroll. The sidebar scrolls independently while it has room, then continued wheel or trackpad movement at its top or bottom edge hands off to the page so the release header, tabs, and footer remain reachable. Outside editable fields, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Only the sidebar scrolls for keyboard navigation, and it moves only when the destination crosses a visible edge, preventing whole-page jumps and unnecessary re-centering.",
       "Inspect missing, stale, current, or blocked playback and waveform derivatives under Files & Sources.",
       "Generate playback audio, waveform peaks, analysis, and web artwork from canonical masters when write-enabled media preparation is implemented.",
     ],
@@ -197,7 +198,12 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
   {
     question: "How does the scanner choose between multiple artwork masters?",
     answer:
-      "The scanner keeps the ambiguity visible but suggests one deterministic candidate. Explicit front-cover and master naming is considered first, followed by the format order TIFF/TIF, PNG, WebP, AVIF, JPEG, and GIF. TIFF is preferred as the archival master when otherwise equivalent candidates are present. The non-selected files remain untouched and should be reviewed rather than deleted automatically.",
+      "The scanner keeps the ambiguity visible but suggests one deterministic candidate. Explicit front-cover and master naming is considered first, followed by the format order TIFF/TIF, PNG, WebP, AVIF, JPEG, and GIF. TIFF is preferred as the archival master when otherwise equivalent candidates are present. Library previews convert TIFF to an in-memory PNG through FFmpeg without changing or writing beside the archival master. The non-selected files remain untouched and should be reviewed rather than deleted automatically.",
+  },
+  {
+    question: "How are dates entered and stored?",
+    answer:
+      "Recognized full-date metadata fields use the same native calendar control throughout Ingest, Staging, Library, production notes, and sample-clearance editing. Saved TOML values remain ISO YYYY-MM-DD. Existing partial legacy values are preserved and identified until you deliberately replace them with a complete calendar date.",
   },
   {
     question: "What happens to track directory names when I renumber a release?",

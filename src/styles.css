@@ -9120,7 +9120,8 @@ input[aria-invalid="true"] {
     overflow-x: hidden;
     overflow-y: auto;
     overflow-anchor: none;
-    overscroll-behavior: contain;
+    overscroll-behavior-x: contain;
+    overscroll-behavior-y: auto;
     scroll-behavior: auto;
     scroll-padding-block: 0.5rem;
     scrollbar-gutter: stable;
@@ -9311,4 +9312,173 @@ input[aria-invalid="true"] {
 
 .scanner-warning-list li::marker {
   color: #d89a3d;
+}
+
+/* Keep detailed inference evidence available without dominating inspection. */
+.ingest-evidence-disclosure {
+  border-bottom: 1px solid var(--document-border);
+  background: #15191d;
+}
+
+.ingest-evidence-disclosure > summary {
+  display: flex;
+  min-height: 2.45rem;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 1rem;
+  color: #cbd3db;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.ingest-evidence-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ingest-evidence-disclosure > summary:hover,
+.ingest-evidence-disclosure > summary:focus-visible {
+  background: #1c2227;
+}
+
+.ingest-evidence-disclosure > summary > strong {
+  font-size: 0.82rem;
+}
+
+.ingest-evidence-disclosure > summary > span:last-child {
+  margin-left: auto;
+  color: #98a4af;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.ingest-evidence-disclosure-triangle {
+  display: inline-block;
+  color: #9eabb7;
+  font-size: 0.78rem;
+  transition: transform 120ms ease;
+}
+
+.ingest-evidence-disclosure[open]
+  .ingest-evidence-disclosure-triangle {
+  transform: rotate(90deg);
+}
+
+.ingest-evidence-disclosure .ingest-table-scroll {
+  border-top: 1px solid var(--document-border);
+}
+
+/* Candidate identity-source selection and compact source statistics. */
+.ingest-identity-tools {
+  display: grid;
+  grid-template-columns:
+    minmax(12rem, 0.85fr)
+    minmax(15rem, 1fr)
+    minmax(15rem, 1fr)
+    minmax(12rem, 0.8fr);
+  align-items: end;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--document-border);
+  background: #171c20;
+}
+
+.ingest-identity-tools label,
+.ingest-identity-preview,
+.ingest-identity-tools-intro {
+  display: grid;
+  min-width: 0;
+  gap: 0.28rem;
+}
+
+.ingest-identity-tools label > span,
+.ingest-identity-preview > span {
+  color: #9aa6b2;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.ingest-identity-tools select {
+  width: 100%;
+  min-width: 0;
+}
+
+.ingest-identity-tools-intro small,
+.ingest-identity-preview small {
+  color: #9ba6b1;
+  line-height: 1.35;
+}
+
+.ingest-identity-preview {
+  align-self: stretch;
+  align-content: center;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid #3b4650;
+  border-radius: 0.3rem;
+  background: #12171b;
+}
+
+.ingest-identity-preview strong,
+.ingest-identity-preview small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ingest-source-panel-header {
+  min-width: 0;
+}
+
+.ingest-source-summary {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  overflow-x: auto;
+  color: #c5cdd5;
+  font-size: 0.76rem;
+  font-weight: 700;
+  scrollbar-width: none;
+  white-space: nowrap;
+}
+
+.ingest-source-summary::-webkit-scrollbar {
+  display: none;
+}
+
+.ingest-source-summary span + span::before {
+  margin-right: 0.65rem;
+  color: #66727d;
+  content: "·";
+}
+
+@media (max-width: 70rem) {
+  .ingest-identity-tools {
+    grid-template-columns: minmax(12rem, 1fr) minmax(15rem, 1fr);
+  }
+}
+
+@media (max-width: 860px) {
+  .ingest-source-panel-header {
+    align-items: center;
+    flex-direction: row;
+  }
+
+  .ingest-source-panel-header > div:first-child {
+    flex: 0 0 auto;
+  }
+
+  .ingest-source-summary {
+    justify-content: flex-start;
+  }
+}
+
+.metadata-date-field .metadata-legacy-date-note,
+.sample-record-editor .metadata-legacy-date-note {
+  grid-column: 1 / -1;
+  color: #b9a37a;
 }

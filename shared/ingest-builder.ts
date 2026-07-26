@@ -357,11 +357,33 @@ function uniquifyPath(
   return candidate;
 }
 
+function selectedIdentityEvidenceValue(
+  inspection: IngestCandidateInspection,
+  field: "release.artist" | "release.title",
+): string | undefined {
+  const selected = inspection.candidate.evidence.find(
+    (item) =>
+      item.field === field &&
+      item.rule.startsWith("selected-"),
+  );
+
+  if (!selected) {
+    return undefined;
+  }
+
+  const value = String(selected.value).trim();
+  return value || undefined;
+}
+
 function defaultReleaseTitle(
   inspection: IngestCandidateInspection,
   audioFiles: IngestFileInspection[],
 ): string {
   return (
+    selectedIdentityEvidenceValue(
+      inspection,
+      "release.title",
+    ) ??
     sharedEmbeddedValue(
       audioFiles,
       ["album", "album_title"],
@@ -375,9 +397,14 @@ function defaultReleaseTitle(
 }
 
 function defaultReleaseArtist(
+  inspection: IngestCandidateInspection,
   audioFiles: IngestFileInspection[],
 ): string {
   return (
+    selectedIdentityEvidenceValue(
+      inspection,
+      "release.artist",
+    ) ??
     sharedEmbeddedValue(
       audioFiles,
       [
@@ -386,7 +413,12 @@ function defaultReleaseArtist(
         "album artist",
         "artist",
       ],
-    ) ?? ""
+    ) ??
+    evidenceValue(
+      inspection.candidate.evidence,
+      "release.artist",
+    ) ??
+    ""
   );
 }
 
@@ -493,7 +525,10 @@ export function createDefaultIngestBuildDraft(
     audioFiles,
   );
   const releaseArtist =
-    defaultReleaseArtist(audioFiles);
+    defaultReleaseArtist(
+      inspection,
+      audioFiles,
+    );
   const releaseDate = defaultReleaseDate(
     inspection,
     audioFiles,

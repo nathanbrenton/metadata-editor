@@ -8,6 +8,9 @@ import {
 import {
   generateArtistSortName,
 } from "../shared/artist-sort-name.js";
+import {
+  defaultLicenseValue,
+} from "../shared/rights-defaults.js";
 
 import {
   parse,
@@ -252,7 +255,7 @@ export function buildStarterMetadataPlan(
         publisher: "",
         label: "",
         distributor: "",
-        license: "",
+        license: defaultLicenseValue,
       },
 
       credits: {
@@ -331,7 +334,7 @@ export function buildStarterMetadataPlan(
           copyright: "",
           phonographic_copyright: "",
           publisher: "",
-          license: "",
+          license: defaultLicenseValue,
         },
 
         credit_sources: {

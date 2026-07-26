@@ -72,6 +72,37 @@ test(
   },
 );
 
+
+test(
+  "generates release and track license defaults",
+  () => {
+    const release = createIncompleteRelease();
+    const generated = buildGeneratedTomlPreview(
+      release,
+      buildMetadataPreview(release),
+    );
+    const releaseDocument =
+      generated.documents.find(
+        (document) =>
+          document.filename === "release.toml",
+      );
+    const trackDocument =
+      generated.documents.find(
+        (document) =>
+          document.filename === "track.toml",
+      );
+
+    assert.match(
+      releaseDocument?.content ?? "",
+      /license = "All rights reserved\."/,
+    );
+    assert.match(
+      trackDocument?.content ?? "",
+      /license = "All rights reserved\."/,
+    );
+  },
+);
+
 test(
   "uses integer track numbers without leading zeroes",
   () => {

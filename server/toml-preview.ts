@@ -3,6 +3,10 @@ import {
   stringify,
 } from "smol-toml";
 
+import {
+  defaultLicenseValue,
+} from "../shared/rights-defaults.js";
+
 import type {
   GeneratedMetadataDocument,
   GeneratedMetadataPreview,
@@ -98,7 +102,7 @@ function buildReleaseDocuments(
         publisher: "",
         label: "",
         distributor: "",
-        license: "",
+        license: defaultLicenseValue,
       },
 
       credits: {
@@ -313,7 +317,7 @@ function buildTrackDocuments(
         copyright: "",
         phonographic_copyright: "",
         publisher: "",
-        license: "",
+        license: defaultLicenseValue,
       },
 
       numbering: {

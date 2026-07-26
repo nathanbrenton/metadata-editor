@@ -11,10 +11,10 @@ const styles = await readFile(
   "utf8",
 );
 
-test("uses page-native metadata scrolling instead of a wheel interception layer", () => {
+test("uses page-native metadata scrolling without a metadata-pane wheel layer", () => {
   assert.doesNotMatch(
     appSource,
-    /metadata-scroll-handoff|data-metadata-scroll-handoff|addEventListener\(\s*["']wheel["']/,
+    /metadata-scroll-handoff|data-metadata-scroll-handoff/,
   );
   assert.doesNotMatch(
     appSource,

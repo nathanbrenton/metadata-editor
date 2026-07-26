@@ -5,6 +5,7 @@ import {
   buildArtworkGallery,
   inferArtworkRole,
   isBrowserPreviewableArtwork,
+  requiresTranscodedArtworkPreview,
   selectPreferredReleaseArtwork,
   type ArtworkAssetLike,
 } from "../src/artwork-gallery.js";
@@ -112,14 +113,18 @@ test("uses the highest-ranked release asset as a conservative front fallback", (
 });
 
 
-test("marks browser-friendly artwork formats without assuming TIFF or PDF support", () => {
+test("marks direct and server-transcoded browser artwork previews", () => {
   assert.equal(
     isBrowserPreviewableArtwork(asset("release/front.svg", ".svg")),
     false,
   );
   assert.equal(
     isBrowserPreviewableArtwork(asset("release/front.tif", ".tif")),
-    false,
+    true,
+  );
+  assert.equal(
+    requiresTranscodedArtworkPreview(asset("release/front.tif", ".tif")),
+    true,
   );
   assert.equal(
     isBrowserPreviewableArtwork(asset("release/booklet.pdf", ".pdf")),

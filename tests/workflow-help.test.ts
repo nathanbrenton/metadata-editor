@@ -262,5 +262,6 @@ test("documents Library sidebar keyboard navigation", () => {
   assert.match(combinedText, /editable fields/i);
   assert.match(combinedText, /sidebar remains sticky/i);
   assert.match(combinedText, /page's native vertical scroll/i);
+  assert.match(combinedText, /hands off to the page/i);
   assert.match(combinedText, /only the sidebar scrolls/i);
 });

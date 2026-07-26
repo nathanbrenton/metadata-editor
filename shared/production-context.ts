@@ -8,6 +8,7 @@ export type ProductionContextField = {
   label: string;
   group: ProductionContextGroup;
   order: number;
+  valueType?: "string" | "date";
   examples?: string[];
   help: string;
 };
@@ -197,6 +198,7 @@ export const productionContextFields:
       label: "Recording Source Date",
       group: "Recording",
       order: 100,
+      valueType: "date",
       examples: ["2016-07-26"],
       help:
         "Date represented by the source recording when known. Use YYYY-MM-DD when a complete date is available.",

@@ -236,5 +236,13 @@ test(
       trackToml,
       /\[track\.rights\]/,
     );
+    assert.match(
+      releaseToml,
+      /license = "All rights reserved\."/,
+    );
+    assert.match(
+      trackToml,
+      /license = "All rights reserved\."/,
+    );
   },
 );

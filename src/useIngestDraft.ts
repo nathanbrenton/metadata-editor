@@ -5,10 +5,12 @@ import {
 } from "react";
 
 import {
+  applyIngestDraftIdentitySeed,
   createStoredIngestDraft,
   INGEST_DRAFT_SCHEMA_VERSION,
   mergeIngestDraftAfterRescan,
   setIngestSourceReviewed,
+  type IngestDraftIdentitySeed,
   type IngestDraftSourceStatus,
   type StoredIngestDraft,
 } from "../shared/ingest-drafts.js";
@@ -109,14 +111,29 @@ function attachedFilesForStatuses(
 
 export function useIngestDraft(
   initialInspection: IngestCandidateInspection,
+  identitySeed: IngestDraftIdentitySeed | null = null,
 ) {
-  const initialStored = useMemo(
-    () =>
-      createStoredIngestDraft(
-        initialInspection,
+  const seedReleaseArtist =
+    identitySeed?.releaseArtist ?? "";
+  const seedReleaseTitle =
+    identitySeed?.releaseTitle ?? "";
+  const initialStored = useMemo(() => {
+    const stored = createStoredIngestDraft(
+      initialInspection,
+    );
+
+    return {
+      ...stored,
+      draft: applyIngestDraftIdentitySeed(
+        stored.draft,
+        identitySeed,
       ),
-    [initialInspection],
-  );
+    };
+  }, [
+    initialInspection,
+    seedReleaseArtist,
+    seedReleaseTitle,
+  ]);
   const [draft, setDraft] =
     useState<IngestBuildDraft>(
       initialStored.draft,
@@ -199,7 +216,12 @@ export function useIngestDraft(
               attachedFiles,
             );
 
-          setDraft(merged.draft);
+          setDraft(
+            applyIngestDraftIdentitySeed(
+              merged.draft,
+              identitySeed,
+            ),
+          );
           setSourceStatuses(
             merged.sourceStatuses,
           );
@@ -210,7 +232,12 @@ export function useIngestDraft(
           const fresh = createStoredIngestDraft(
             freshInspection,
           );
-          setDraft(fresh.draft);
+          setDraft(
+            applyIngestDraftIdentitySeed(
+              fresh.draft,
+              identitySeed,
+            ),
+          );
           setSourceStatuses(
             fresh.sourceStatuses,
           );
@@ -238,7 +265,11 @@ export function useIngestDraft(
     return () => {
       cancelled = true;
     };
-  }, [initialInspection]);
+  }, [
+    initialInspection,
+    seedReleaseArtist,
+    seedReleaseTitle,
+  ]);
 
   useEffect(() => {
     if (!hydrated) {

@@ -67,6 +67,10 @@ import {
   readIngestArtworkPreview,
 } from "./ingest-artwork.js";
 import {
+  getLibraryArtworkPreviewMode,
+  renderTiffArtworkPreview,
+} from "./library-artwork-preview.js";
+import {
   resolveIngestAudioPreviewSource,
 } from "./ingest-audio.js";
 import {
@@ -357,6 +361,67 @@ async function sendLibraryArtwork(
     );
   }
 
+  response.end(content);
+}
+
+async function sendLibraryArtworkPreview(
+  response: ServerResponse,
+  relativePath: string,
+): Promise<void> {
+  const extension = path
+    .extname(relativePath)
+    .toLowerCase();
+  const previewMode =
+    getLibraryArtworkPreviewMode(extension);
+
+  if (previewMode === "unsupported") {
+    sendJson(response, 415, {
+      error: "Unsupported artwork preview file type",
+    });
+    return;
+  }
+
+  const mediaRoot = await resolveMediaRoot();
+  const candidatePath = assertPathWithinRoot(
+    mediaRoot,
+    path.join(mediaRoot, relativePath),
+  );
+  const canonicalPath = await realpath(candidatePath);
+  assertPathWithinRoot(mediaRoot, canonicalPath);
+
+  const fileStatus = await stat(canonicalPath);
+
+  if (!fileStatus.isFile()) {
+    throw new Error("Artwork preview target is not a regular file.");
+  }
+
+  const content =
+    previewMode === "tiff-transcode"
+      ? await renderTiffArtworkPreview(canonicalPath)
+      : await readFile(canonicalPath);
+  const contentType =
+    previewMode === "tiff-transcode"
+      ? "image/png"
+      : artworkContentTypes.get(extension);
+
+  if (!contentType) {
+    throw new Error("Artwork preview content type is unavailable.");
+  }
+
+  response.statusCode = 200;
+  response.setHeader("Content-Type", contentType);
+  response.setHeader(
+    "Cache-Control",
+    "private, max-age=60",
+  );
+  response.setHeader(
+    "X-Content-Type-Options",
+    "nosniff",
+  );
+  response.setHeader(
+    "X-Artwork-Preview-Source",
+    previewMode,
+  );
   response.end(content);
 }
 
@@ -1292,6 +1357,38 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Audio preview not found",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/library/artwork-preview"
+    ) {
+      const relativePath =
+        requestUrl.searchParams.get("path");
+
+      if (!relativePath) {
+        sendJson(response, 400, {
+          error: "Missing artwork preview path",
+        });
+        return;
+      }
+
+      try {
+        await sendLibraryArtworkPreview(
+          response,
+          relativePath,
+        );
+      } catch (error) {
+        sendJson(response, 500, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Artwork preview unavailable",
         });
       }
 

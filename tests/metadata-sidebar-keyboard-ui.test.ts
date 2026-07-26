@@ -64,3 +64,23 @@ test("does not steal arrow keys from editable fields or open dialogs", () => {
     /interactiveTarget && !eventStartedInSidebar/,
   );
 });
+
+
+test("hands sidebar wheel movement to the page at scroll boundaries", () => {
+  assert.match(
+    appSource,
+    /ref=\{metadataSidebarRef\}/,
+  );
+  assert.match(
+    appSource,
+    /planMetadataSidebarWheelHandoff/,
+  );
+  assert.match(
+    appSource,
+    /sidebar\.addEventListener\([\s\S]*?"wheel"[\s\S]*?passive: false/,
+  );
+  assert.match(
+    appSource,
+    /document\.scrollingElement/,
+  );
+});

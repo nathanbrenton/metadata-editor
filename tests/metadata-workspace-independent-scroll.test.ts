@@ -14,7 +14,7 @@ test("keeps the desktop track sidebar independently scrollable while metadata fo
   );
   assert.match(
     styles,
-    /\.metadata-document-tabs \{[\s\S]*?position: sticky;[\s\S]*?max-height: calc\(100vh - 9rem\);[\s\S]*?overflow-y: auto;[\s\S]*?overscroll-behavior: contain;/,
+    /\.metadata-document-tabs \{[\s\S]*?position: sticky;[\s\S]*?max-height: calc\(100vh - 9rem\);[\s\S]*?overflow-y: auto;[\s\S]*?overscroll-behavior-y: auto;/,
   );
   assert.match(
     styles,
