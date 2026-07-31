@@ -915,9 +915,42 @@ export function App() {
     useState(false);
   const applicationMenuRef =
     useRef<HTMLElement>(null);
-  // Admin mode is intentionally session-only and starts disabled on reload.
+  // Admin mode is opt-in and never survives a page load or restored page.
   const [showAdminTools, setShowAdminTools] =
     useState(false);
+
+  useLayoutEffect(() => {
+    setShowAdminTools(false);
+
+    try {
+      window.localStorage.removeItem(
+        "metadata-editor.show-admin-tools-v2",
+      );
+      window.sessionStorage.removeItem(
+        "metadata-editor.show-admin-tools-v2",
+      );
+    } catch {
+      // Browser storage may be unavailable; the in-memory default is still off.
+    }
+  }, []);
+
+  useEffect(() => {
+    const disableAdminToolsOnPageRestore = () => {
+      setShowAdminTools(false);
+    };
+
+    window.addEventListener(
+      "pageshow",
+      disableAdminToolsOnPageRestore,
+    );
+
+    return () => {
+      window.removeEventListener(
+        "pageshow",
+        disableAdminToolsOnPageRestore,
+      );
+    };
+  }, []);
 
   const openReleaseDetail = useCallback(
     async (releaseId: string) => {
@@ -1743,6 +1776,7 @@ export function App() {
                 <label className="admin-toggle">
                   <input
                     type="checkbox"
+                    autoComplete="off"
                     checked={showAdminTools}
                     onChange={(event) =>
                       setShowAdminTools(
@@ -1755,7 +1789,8 @@ export function App() {
                   </span>
                 </label>
                 <p className="menu-meta">
-                  Enables troubleshooting controls,
+                  Disabled by default on every page load.
+                  Enable temporarily for troubleshooting controls,
                   source paths, settings, and raw TOML.
                 </p>
               </section>
@@ -14438,6 +14473,7 @@ function ReleaseMetadataDetailView({
               <label className="admin-toggle">
                 <input
                   type="checkbox"
+                  autoComplete="off"
                   checked={showAdminTools}
                   onChange={(event) =>
                     onShowAdminToolsChange(
@@ -14450,7 +14486,8 @@ function ReleaseMetadataDetailView({
                 </span>
               </label>
               <p className="menu-meta">
-                Enables troubleshooting controls,
+                Disabled by default on every page load.
+                Enable temporarily for troubleshooting controls,
                 source paths, settings, and raw TOML.
               </p>
             </section>
@@ -15364,10 +15401,15 @@ function ReleaseMetadataDetailView({
           const trackNumber =
             navigationEntry?.trackNumber ??
             index + 1;
+          const trackNumberLabel =
+            navigationEntry &&
+            navigationEntry.effectiveDiscNumber > 1
+              ? `${navigationEntry.effectiveDiscNumber}.${trackNumber}.`
+              : `${trackNumber}.`;
           const trackNavigationLabel =
             navigationEntry &&
             navigationEntry.effectiveDiscNumber > 1
-              ? `Disc ${navigationEntry.effectiveDiscNumber} · Track ${trackNumber}`
+              ? `Disc ${navigationEntry.effectiveDiscNumber}, track ${trackNumber}`
               : `Track ${trackNumber}`;
           const numberConflictTitle =
             navigationEntry?.hasNumberConflict
@@ -15398,6 +15440,16 @@ function ReleaseMetadataDetailView({
           const trackIsPlaying =
             audioPreviewPlaying &&
             audioPreviewTrackId === trackId;
+          const trackDisplayTitle =
+            readTrackDisplayTitle(
+              trackId,
+              trackDocuments,
+              inferredTracks.find(
+                (track) =>
+                  track.id === trackId,
+              )?.displayTitle ??
+                formatReleaseTitle(trackId),
+            );
 
           return (
             <div
@@ -15426,6 +15478,7 @@ function ReleaseMetadataDetailView({
                   trackId
                 }
                 title={trackId}
+                aria-label={`${trackNumberLabel} ${trackDisplayTitle}`}
                 onClick={() =>
                   setActiveDocumentGroup(
                     trackId,
@@ -15434,9 +15487,12 @@ function ReleaseMetadataDetailView({
               >
                 <span className="document-nav-label track-document-nav-label">
                   <span className="track-navigation-heading">
-                    <strong className="track-navigation-number">
-                      <span>
-                        {trackNavigationLabel}
+                    <span className="track-navigation-primary">
+                      <strong className="track-navigation-number">
+                        {trackNumberLabel}
+                      </strong>
+                      <span className="track-navigation-title">
+                        {trackDisplayTitle}
                       </span>
                       {navigationEntry?.hasNumberConflict && (
                         <small
@@ -15447,7 +15503,7 @@ function ReleaseMetadataDetailView({
                           !
                         </small>
                       )}
-                    </strong>
+                    </span>
 
                     <span
                       className="track-navigation-badges"
@@ -15475,18 +15531,6 @@ function ReleaseMetadataDetailView({
                       )}
                     </span>
                   </span>
-
-                  <small className="track-navigation-title">
-                    {readTrackDisplayTitle(
-                      trackId,
-                      trackDocuments,
-                      inferredTracks.find(
-                        (track) =>
-                          track.id === trackId,
-                      )?.displayTitle ??
-                        formatReleaseTitle(trackId),
-                    )}
-                  </small>
                 </span>
               </button>
 

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   lstat,
   readdir,
@@ -12,6 +13,7 @@ import type {
   IngestCandidateInspection,
   IngestCandidateKind,
   IngestCandidateSummary,
+  IngestEmbeddedArtworkInspection,
   IngestEmbeddedMetadata,
   IngestFileInspection,
   IngestMediaKind,
@@ -33,6 +35,7 @@ import {
   resolveIngestCandidate,
   toIngestRelativePath,
 } from "./ingest-root.js";
+import { extractEmbeddedArtwork } from "./embedded-artwork.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -422,6 +425,7 @@ export async function scanIngestDrop(
 }
 
 type FfprobeStream = {
+  index?: number;
   codec_type?: string;
   codec_name?: string;
   codec_long_name?: string;
@@ -435,6 +439,9 @@ type FfprobeStream = {
   width?: number;
   height?: number;
   tags?: Record<string, unknown>;
+  disposition?: {
+    attached_pic?: number;
+  };
 };
 
 type FfprobePayload = {
@@ -533,7 +540,9 @@ function technicalFromFfprobe(
     (stream) => stream.codec_type === "audio",
   );
   const videoStream = payload.streams?.find(
-    (stream) => stream.codec_type === "video",
+    (stream) =>
+      stream.codec_type === "video" &&
+      stream.disposition?.attached_pic !== 1,
   );
   const primaryStream = audioStream ?? videoStream;
   const bitDepth =
@@ -695,12 +704,88 @@ function compactTechnical(
   };
 }
 
+export type IngestEmbeddedArtworkReader = (
+  filePath: string,
+  streamIndex: number,
+  codecName?: string,
+) => Promise<{
+  bytes: Buffer;
+  extension: string;
+  contentType: string;
+}>;
+
+const defaultEmbeddedArtworkReader: IngestEmbeddedArtworkReader =
+  extractEmbeddedArtwork;
+
+function embeddedArtworkStreams(
+  payload: FfprobePayload,
+): FfprobeStream[] {
+  return (payload.streams ?? []).filter(
+    (stream) =>
+      stream.codec_type === "video" &&
+      stream.disposition?.attached_pic === 1 &&
+      Number.isInteger(stream.index) &&
+      (stream.index ?? -1) >= 0,
+  );
+}
+
+function embeddedArtworkTag(
+  tags: IngestEmbeddedMetadata,
+  key: string,
+): string | undefined {
+  return Object.entries(tags).find(
+    ([candidate]) => candidate.toLowerCase() === key,
+  )?.[1];
+}
+
+async function inspectEmbeddedArtwork(
+  filePath: string,
+  streams: FfprobeStream[],
+  reader: IngestEmbeddedArtworkReader,
+): Promise<IngestEmbeddedArtworkInspection[]> {
+  const artwork: IngestEmbeddedArtworkInspection[] = [];
+
+  for (const stream of streams) {
+    const streamIndex = stream.index as number;
+    const extracted = await reader(
+      filePath,
+      streamIndex,
+      stream.codec_name,
+    );
+    const sha256 = createHash("sha256")
+      .update(extracted.bytes)
+      .digest("hex");
+    const tags = stringTags(stream.tags);
+
+    artwork.push({
+      id: `embedded-artwork-${streamIndex}-${sha256.slice(0, 12)}`,
+      streamIndex,
+      ...(stream.codec_name ? { codecName: stream.codec_name } : {}),
+      extension: extracted.extension,
+      contentType: extracted.contentType,
+      ...(stream.width !== undefined ? { width: stream.width } : {}),
+      ...(stream.height !== undefined ? { height: stream.height } : {}),
+      ...(embeddedArtworkTag(tags, "title")
+        ? { title: embeddedArtworkTag(tags, "title") }
+        : {}),
+      ...(embeddedArtworkTag(tags, "comment")
+        ? { comment: embeddedArtworkTag(tags, "comment") }
+        : {}),
+      sizeBytes: extracted.bytes.length,
+      sha256,
+    });
+  }
+
+  return artwork;
+}
+
 async function inspectFile(
   ingestRoot: string,
   filePath: string,
   anchorYear: number | undefined,
   capabilities: IngestProbeCapabilities,
   commandRunner: IngestCommandRunner,
+  embeddedArtworkReader: IngestEmbeddedArtworkReader,
 ): Promise<IngestFileInspection> {
   const stats = await lstat(filePath);
   const filename = path.basename(filePath);
@@ -712,6 +797,7 @@ async function inspectFile(
   let detectedBy = "extension";
   let technical: IngestTechnicalMetadata = {};
   let embeddedMetadata: IngestEmbeddedMetadata = {};
+  let embeddedArtwork: IngestEmbeddedArtworkInspection[] = [];
 
   if (
     capabilities.ffprobe.available &&
@@ -744,6 +830,26 @@ async function inspectFile(
         technical = normalized.technical;
         embeddedMetadata =
           normalized.embeddedMetadata;
+
+        const attachedPictures =
+          embeddedArtworkStreams(payload);
+
+        if (attachedPictures.length > 0) {
+          try {
+            embeddedArtwork =
+              await inspectEmbeddedArtwork(
+                filePath,
+                attachedPictures,
+                embeddedArtworkReader,
+              );
+          } catch (error) {
+            warnings.push(
+              `Embedded artwork could not be inspected: ${
+                error instanceof Error ? error.message : "unknown error"
+              }`,
+            );
+          }
+        }
       } catch {
         warnings.push(
           "ffprobe returned invalid JSON; extension classification was retained.",
@@ -830,6 +936,7 @@ async function inspectFile(
     detectedBy,
     technical,
     embeddedMetadata,
+    embeddedArtwork,
     evidence,
     warnings,
   };
@@ -841,6 +948,8 @@ export async function inspectIngestCandidate(
   configuredRoot = defaultIngestRoot,
   commandRunner: IngestCommandRunner =
     defaultCommandRunner,
+  embeddedArtworkReader: IngestEmbeddedArtworkReader =
+    defaultEmbeddedArtworkReader,
 ): Promise<IngestCandidateInspection> {
   const candidatePath =
     await resolveIngestCandidate(
@@ -885,6 +994,7 @@ export async function inspectIngestCandidate(
         anchorYear,
         capabilities,
         commandRunner,
+        embeddedArtworkReader,
       ),
     );
   }
@@ -918,6 +1028,8 @@ export async function inspectIngestRelativeFiles(
   relativePaths: string[],
   commandRunner: IngestCommandRunner =
     defaultCommandRunner,
+  embeddedArtworkReader: IngestEmbeddedArtworkReader =
+    defaultEmbeddedArtworkReader,
 ): Promise<IngestFileInspection[]> {
   const capabilities =
     await detectIngestProbeCapabilities(
@@ -982,6 +1094,7 @@ export async function inspectIngestRelativeFiles(
         undefined,
         capabilities,
         commandRunner,
+        embeddedArtworkReader,
       ),
     );
   }

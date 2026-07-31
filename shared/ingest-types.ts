@@ -82,6 +82,20 @@ export type IngestScanResult = {
   warnings: string[];
 };
 
+export type IngestEmbeddedArtworkInspection = {
+  id: string;
+  streamIndex: number;
+  codecName?: string;
+  extension: string;
+  contentType: string;
+  width?: number;
+  height?: number;
+  title?: string;
+  comment?: string;
+  sizeBytes: number;
+  sha256: string;
+};
+
 export type IngestFileInspection = {
   relativePath: string;
   filename: string;
@@ -92,6 +106,7 @@ export type IngestFileInspection = {
   detectedBy: string;
   technical: IngestTechnicalMetadata;
   embeddedMetadata: IngestEmbeddedMetadata;
+  embeddedArtwork?: IngestEmbeddedArtworkInspection[];
   evidence: IngestEvidence[];
   warnings: string[];
 };

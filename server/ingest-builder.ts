@@ -15,6 +15,7 @@ import {
   rename,
   rm,
   unlink,
+  writeFile,
 } from "node:fs/promises";
 import {
   createHash,
@@ -50,6 +51,7 @@ import {
   type IngestBuildOperation,
   type IngestStagingTargetStatus,
   type IngestBuildTrackDraft,
+  type IngestEmbeddedArtworkSourceDraft,
 } from "../shared/ingest-builder.js";
 import type {
   IngestCandidateInspection,
@@ -62,6 +64,7 @@ import {
 import {
   assertPathWithinIngestRoot,
 } from "./ingest-root.js";
+import { extractEmbeddedArtwork } from "./embedded-artwork.js";
 import {
   buildGeneratedTomlPreview,
 } from "./toml-preview.js";
@@ -97,6 +100,13 @@ export async function resolveIngestOutputRoot(
 type PreparedCopy = {
   sourceRelativePath: string;
   sourcePath: string;
+  embeddedArtwork?: {
+    streamIndex: number;
+    codecName?: string;
+    containerBytes: number;
+    containerSha256: string;
+    containerMtimeMs: number;
+  };
   destinationRelativePath: string;
   destinationWithinRelease: string;
   mediaKind: IngestMediaKind;
@@ -230,6 +240,17 @@ function requirePositiveInteger(
   }
 
   return value;
+}
+
+function requireSha256(
+  value: unknown,
+  label: string,
+): string {
+  const normalized = requireString(value, label, 64);
+  if (!/^[a-f0-9]{64}$/i.test(normalized)) {
+    throw new Error(`${label} must be a 64-character hexadecimal digest.`);
+  }
+  return normalized.toLowerCase();
 }
 
 function requireIsoDate(
@@ -371,6 +392,54 @@ function parseArtworkAssignmentDraft(
   };
 }
 
+function parseEmbeddedArtworkSource(
+  value: unknown,
+  assetIndex: number,
+) {
+  if (!isRecord(value)) {
+    throw new Error(
+      `Asset ${assetIndex + 1} embedded artwork source must be an object.`,
+    );
+  }
+
+  const streamIndex = value.streamIndex;
+  if (!Number.isInteger(streamIndex) || Number(streamIndex) < 0) {
+    throw new Error(
+      `Asset ${assetIndex + 1} embedded artwork stream index must be a non-negative integer.`,
+    );
+  }
+
+  return {
+    audioSourceRelativePath: requireString(
+      value.audioSourceRelativePath,
+      `Asset ${assetIndex + 1} embedded artwork audio source`,
+      1000,
+    ),
+    streamIndex: Number(streamIndex),
+    ...(typeof value.codecName === "string" && value.codecName.trim()
+      ? { codecName: value.codecName.trim() }
+      : {}),
+    extension: requireString(
+      value.extension,
+      `Asset ${assetIndex + 1} embedded artwork extension`,
+      20,
+    ),
+    contentType: requireString(
+      value.contentType,
+      `Asset ${assetIndex + 1} embedded artwork content type`,
+      100,
+    ),
+    sizeBytes: requirePositiveInteger(
+      value.sizeBytes,
+      `Asset ${assetIndex + 1} embedded artwork size`,
+    ),
+    sha256: requireSha256(
+      value.sha256,
+      `Asset ${assetIndex + 1} embedded artwork SHA-256`,
+    ),
+  };
+}
+
 function parseAssetDraft(
   value: unknown,
   index: number,
@@ -408,12 +477,33 @@ function parseAssetDraft(
         ? [defaultReleaseArtworkAssignment()]
         : [];
 
+  if (
+    value.sourceType !== undefined &&
+    value.sourceType !== "file" &&
+    value.sourceType !== "embedded-artwork"
+  ) {
+    throw new Error(
+      `Asset ${index + 1} source type must be file or embedded-artwork.`,
+    );
+  }
+  const sourceType =
+    value.sourceType === "embedded-artwork"
+      ? "embedded-artwork"
+      : "file";
+  const embeddedArtwork =
+    sourceType === "embedded-artwork"
+      ? parseEmbeddedArtworkSource(value.embeddedArtwork, index)
+      : undefined;
+
   return {
     sourceRelativePath: requireString(
       value.sourceRelativePath,
       `Asset ${index + 1} source path`,
       1000,
     ),
+    ...(sourceType === "embedded-artwork"
+      ? { sourceType, embeddedArtwork }
+      : {}),
     include,
     mediaKind: value.mediaKind,
     destinationRelativePath: requireString(
@@ -1420,6 +1510,81 @@ async function prepareCopy(
   };
 }
 
+async function prepareEmbeddedArtworkCopy(
+  ingestRoot: string,
+  file: IngestFileInspection,
+  virtualSourceRelativePath: string,
+  embedded: IngestEmbeddedArtworkSourceDraft,
+  destinationWithinRelease: string,
+  destinationRelativePath: string,
+  logicalRoles: string[],
+): Promise<PreparedCopy> {
+  const sourcePath = assertPathWithinIngestRoot(
+    ingestRoot,
+    path.resolve(
+      ingestRoot,
+      ...file.relativePath.replaceAll("\\", "/").split("/"),
+    ),
+  );
+  const canonicalSource = await realpath(sourcePath);
+  assertPathWithinIngestRoot(ingestRoot, canonicalSource);
+  const stats = await lstat(canonicalSource);
+
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error(
+      `Embedded artwork audio source is not a regular file: ${file.relativePath}`,
+    );
+  }
+  if (
+    stats.size !== file.sizeBytes ||
+    stats.mtime.toISOString() !== file.modifiedAt
+  ) {
+    throw new Error(
+      `Ingest source changed after inspection: ${file.relativePath}. Inspect the candidate again.`,
+    );
+  }
+
+  const containerSha256 = await sha256File(canonicalSource);
+  const extracted = await extractEmbeddedArtwork(
+    canonicalSource,
+    embedded.streamIndex,
+    embedded.codecName,
+  );
+  const sha256 = createHash("sha256")
+    .update(extracted.bytes)
+    .digest("hex");
+
+  if (
+    sha256 !== embedded.sha256 ||
+    extracted.bytes.length !== embedded.sizeBytes ||
+    extracted.extension !== embedded.extension
+  ) {
+    throw new Error(
+      `${virtualSourceRelativePath}: embedded artwork changed after inspection.`,
+    );
+  }
+
+  return {
+    sourceRelativePath: virtualSourceRelativePath,
+    sourcePath: canonicalSource,
+    embeddedArtwork: {
+      streamIndex: embedded.streamIndex,
+      ...(embedded.codecName
+        ? { codecName: embedded.codecName }
+        : {}),
+      containerBytes: stats.size,
+      containerSha256,
+      containerMtimeMs: stats.mtimeMs,
+    },
+    destinationRelativePath,
+    destinationWithinRelease,
+    mediaKind: "image",
+    logicalRoles,
+    bytes: extracted.bytes.length,
+    sha256,
+  };
+}
+
 function validateUniqueTrackInputs(
   tracks: IngestBuildTrackDraft[],
 ): void {
@@ -1510,6 +1675,8 @@ function createReceiptContent(
             evidence: file.evidence,
             embeddedMetadata:
               file.embeddedMetadata,
+            embeddedArtwork:
+              file.embeddedArtwork ?? [],
           }),
         ),
       },
@@ -1921,8 +2088,13 @@ export async function prepareIngestReleaseBuild(
   );
   const normalizedAssets = includedAssets.map(
     (asset) => {
+      const embedded =
+        asset.sourceType === "embedded-artwork"
+          ? asset.embeddedArtwork
+          : undefined;
       const file = fileMap.get(
-        asset.sourceRelativePath,
+        embedded?.audioSourceRelativePath ??
+          asset.sourceRelativePath,
       );
 
       if (!file) {
@@ -1931,7 +2103,23 @@ export async function prepareIngestReleaseBuild(
         );
       }
 
-      if (file.mediaKind !== asset.mediaKind) {
+      if (embedded) {
+        if (file.mediaKind !== "audio") {
+          throw new Error(
+            `${asset.sourceRelativePath}: embedded artwork source is no longer audio.`,
+          );
+        }
+        const inspectedArtwork = (file.embeddedArtwork ?? []).find(
+          (item) =>
+            item.streamIndex === embedded.streamIndex &&
+            item.sha256 === embedded.sha256,
+        );
+        if (!inspectedArtwork) {
+          throw new Error(
+            `${asset.sourceRelativePath}: embedded artwork changed after inspection. Inspect the candidate again.`,
+          );
+        }
+      } else if (file.mediaKind !== asset.mediaKind) {
         throw new Error(
           `Asset kind changed after inspection: ${asset.sourceRelativePath}`,
         );
@@ -1942,17 +2130,20 @@ export async function prepareIngestReleaseBuild(
           asset.destinationRelativePath,
           `${asset.sourceRelativePath} destination`,
         );
+      const sourceExtension = embedded
+        ? embedded.extension.toLowerCase()
+        : extensionOf(file.filename);
 
       if (
         extensionOf(destinationRelativePath) !==
-          extensionOf(file.filename)
+          sourceExtension
       ) {
         throw new Error(
           `${asset.sourceRelativePath}: destination extension must match the source because ingestion does not transcode.`,
         );
       }
 
-      if (file.mediaKind === "image") {
+      if (asset.mediaKind === "image") {
         if (asset.artworkAssignments.length === 0) {
           throw new Error(
             `${asset.sourceRelativePath}: included artwork requires at least one release-level or track-level assignment.`,
@@ -2015,6 +2206,7 @@ export async function prepareIngestReleaseBuild(
       return {
         draft: asset,
         file,
+        embeddedArtwork: embedded,
         destinationRelativePath,
       };
     },
@@ -2053,7 +2245,7 @@ export async function prepareIngestReleaseBuild(
 
   const artworkAssets: PreparedArtworkAsset[] =
     normalizedAssets
-      .filter((asset) => asset.file.mediaKind === "image")
+      .filter((asset) => asset.draft.mediaKind === "image")
       .map((asset) => ({
         draft: asset.draft,
         destinationRelativePath:
@@ -2193,20 +2385,32 @@ export async function prepareIngestReleaseBuild(
   }
 
   for (const asset of normalizedAssets) {
-    const preparedCopy = await prepareCopy(
-      canonicalIngestRoot,
-      asset.file,
-      asset.destinationRelativePath,
-      `${releaseRelativePath}/${asset.destinationRelativePath}`,
-      asset.file.mediaKind === "image"
+    const logicalRoles =
+      asset.draft.mediaKind === "image"
         ? asset.draft.artworkAssignments.map(
             (assignment) =>
               assignment.scope === "release"
                 ? `release-artwork:${assignment.role}`
                 : `track-artwork:${assignment.role}:${assignment.trackSourceRelativePaths.length}-tracks`,
           )
-        : ["imported-text-sidecar"],
-    );
+        : ["imported-text-sidecar"];
+    const preparedCopy = asset.embeddedArtwork
+      ? await prepareEmbeddedArtworkCopy(
+          canonicalIngestRoot,
+          asset.file,
+          asset.draft.sourceRelativePath,
+          asset.embeddedArtwork,
+          asset.destinationRelativePath,
+          `${releaseRelativePath}/${asset.destinationRelativePath}`,
+          logicalRoles,
+        )
+      : await prepareCopy(
+          canonicalIngestRoot,
+          asset.file,
+          asset.destinationRelativePath,
+          `${releaseRelativePath}/${asset.destinationRelativePath}`,
+          logicalRoles,
+        );
 
     if (!existingReceipt) {
       copies.push(preparedCopy);
@@ -2784,24 +2988,62 @@ async function executePreparedCopy(
   );
   const sourceHashBefore =
     await sha256File(copy.sourcePath);
+  let payloadHash = sourceHashBefore;
+  let payloadBytes = sourceBefore.size;
 
-  if (
-    sourceBefore.size !== copy.bytes ||
-    sourceHashBefore !== copy.sha256
-  ) {
-    throw new Error(
-      `Source changed before copy: ${copy.sourceRelativePath}`,
+  if (copy.embeddedArtwork) {
+    if (
+      sourceBefore.size !== copy.embeddedArtwork.containerBytes ||
+      sourceHashBefore !== copy.embeddedArtwork.containerSha256 ||
+      sourceBefore.mtimeMs !== copy.embeddedArtwork.containerMtimeMs
+    ) {
+      throw new Error(
+        `Source changed before embedded artwork extraction: ${copy.sourceRelativePath}`,
+      );
+    }
+    const extracted = await extractEmbeddedArtwork(
+      copy.sourcePath,
+      copy.embeddedArtwork.streamIndex,
+      copy.embeddedArtwork.codecName,
+    );
+    payloadBytes = extracted.bytes.length;
+    payloadHash = createHash("sha256")
+      .update(extracted.bytes)
+      .digest("hex");
+    if (
+      payloadBytes !== copy.bytes ||
+      payloadHash !== copy.sha256
+    ) {
+      throw new Error(
+        `Embedded artwork changed before copy: ${copy.sourceRelativePath}`,
+      );
+    }
+    await mkdir(path.dirname(destinationPath), {
+      recursive: true,
+    });
+    await writeFile(
+      destinationPath,
+      extracted.bytes,
+      { flag: "wx" },
+    );
+  } else {
+    if (
+      sourceBefore.size !== copy.bytes ||
+      sourceHashBefore !== copy.sha256
+    ) {
+      throw new Error(
+        `Source changed before copy: ${copy.sourceRelativePath}`,
+      );
+    }
+    await mkdir(path.dirname(destinationPath), {
+      recursive: true,
+    });
+    await copyFile(
+      copy.sourcePath,
+      destinationPath,
+      fsConstants.COPYFILE_EXCL,
     );
   }
-
-  await mkdir(path.dirname(destinationPath), {
-    recursive: true,
-  });
-  await copyFile(
-    copy.sourcePath,
-    destinationPath,
-    fsConstants.COPYFILE_EXCL,
-  );
   await syncCopiedFile(destinationPath);
 
   const [
@@ -2815,7 +3057,7 @@ async function executePreparedCopy(
   ]);
 
   if (
-    destinationHash !== sourceHashBefore ||
+    destinationHash !== payloadHash ||
     sourceHashAfter !== sourceHashBefore ||
     sourceAfter.size !== sourceBefore.size ||
     sourceAfter.mtimeMs !== sourceBefore.mtimeMs
@@ -2832,8 +3074,8 @@ async function executePreparedCopy(
       copy.destinationRelativePath,
     mediaKind: copy.mediaKind,
     logicalRoles: copy.logicalRoles,
-    bytes: sourceAfter.size,
-    sourceSha256: sourceHashAfter,
+    bytes: payloadBytes,
+    sourceSha256: payloadHash,
     destinationSha256:
       destinationHash,
   };

@@ -12,33 +12,62 @@ const styleSource = await readFile(
   "utf8",
 );
 
-test("groups track identity and status badges into a stable sidebar heading", () => {
-  assert.match(appSource, /track-document-select/);
-  assert.match(appSource, /track-navigation-heading/);
-  assert.match(appSource, /track-navigation-badges/);
-  assert.match(appSource, /track-navigation-title/);
+const helpSource = await readFile(
+  new URL(
+    "../src/workflow-help-content.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
+test("places the saved track number directly before the title", () => {
+  assert.match(
+    appSource,
+    /const trackNumberLabel =\s*[\s\S]*?`\$\{trackNumber\}\.\`/,
+  );
+  assert.match(
+    appSource,
+    /className="track-navigation-primary"[\s\S]*?className="track-navigation-number"[\s\S]*?\{trackNumberLabel\}[\s\S]*?className="track-navigation-title"[\s\S]*?\{trackDisplayTitle\}/,
+  );
+  assert.doesNotMatch(
+    appSource,
+    /<small className="track-navigation-title">/,
+  );
 });
 
-test("prevents track numbers from breaking while allowing two title lines", () => {
+test("uses compact disc.track numbering for later discs", () => {
   assert.match(
-    styleSource,
-    /\.track-navigation-number > span\s*\{[\s\S]*?white-space:\s*nowrap;/,
-  );
-
-  assert.match(
-    styleSource,
-    /\.track-navigation-title\s*\{[\s\S]*?-webkit-line-clamp:\s*2;/,
+    appSource,
+    /`\$\{navigationEntry\.effectiveDiscNumber\}\.\$\{trackNumber\}\.\`/,
   );
 });
 
-test("gives the desktop sidebar enough room for track status and playback", () => {
+test("keeps title and status in one compact sidebar row", () => {
   assert.match(
     styleSource,
-    /minmax\(13\.5rem,\s*15\.5rem\)/,
+    /\.track-navigation-primary\s*\{[\s\S]*?display:\s*flex;[\s\S]*?align-items:\s*baseline;/,
   );
-
   assert.match(
     styleSource,
-    /\.metadata-track-preview-button\s*\{[\s\S]*?min-height:\s*4\.15rem;/,
+    /\.track-navigation-title\s*\{[\s\S]*?text-overflow:\s*ellipsis;[\s\S]*?white-space:\s*nowrap;/,
+  );
+  assert.match(
+    styleSource,
+    /\.metadata-document-select\.track-document-select\s*\{[\s\S]*?min-height:\s*3\.35rem;/,
+  );
+  assert.match(
+    styleSource,
+    /\.metadata-track-preview-button\s*\{[\s\S]*?min-height:\s*3\.35rem;/,
+  );
+});
+
+test("documents the compact number and title convention", () => {
+  assert.match(
+    helpSource,
+    /omit the repeated word Track/i,
+  );
+  assert.match(
+    helpSource,
+    /number directly before the display title/i,
   );
 });

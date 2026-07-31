@@ -12,6 +12,7 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  getIngestArtworkPreviewMode,
   isIngestArtworkPreviewExtension,
   readIngestArtworkPreview,
 } from "../server/ingest-artwork.js";
@@ -70,6 +71,7 @@ test(
       [...preview.bytes],
       [0x89, 0x50, 0x4e, 0x47],
     );
+    assert.equal(preview.source, "direct");
   },
 );
 
@@ -95,7 +97,7 @@ test(
 );
 
 test(
-  "rejects active or unsupported inline artwork types",
+  "accepts direct and TIFF-transcoded preview types while rejecting active types",
   async () => {
     assert.equal(
       isIngestArtworkPreviewExtension(
@@ -107,7 +109,13 @@ test(
       isIngestArtworkPreviewExtension(
         "candidate/front.tiff",
       ),
-      false,
+      true,
+    );
+    assert.equal(
+      getIngestArtworkPreviewMode(
+        "candidate/front.tif",
+      ),
+      "tiff-transcode",
     );
     assert.equal(
       isIngestArtworkPreviewExtension(

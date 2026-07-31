@@ -64,6 +64,7 @@ import {
   resolveIngestRoot,
 } from "./ingest-root.js";
 import {
+  readEmbeddedIngestArtworkPreview,
   readIngestArtworkPreview,
 } from "./ingest-artwork.js";
 import {
@@ -286,12 +287,18 @@ const artworkContentTypes = new Map([
 async function sendIngestArtworkPreview(
   response: ServerResponse,
   relativePath: string,
+  embeddedStreamIndex?: number,
+  embeddedCodecName?: string,
 ): Promise<void> {
   const ingestRoot = await resolveIngestRoot();
-  const preview = await readIngestArtworkPreview(
-    ingestRoot,
-    relativePath,
-  );
+  const preview = embeddedStreamIndex === undefined
+    ? await readIngestArtworkPreview(ingestRoot, relativePath)
+    : await readEmbeddedIngestArtworkPreview(
+        ingestRoot,
+        relativePath,
+        embeddedStreamIndex,
+        embeddedCodecName,
+      );
 
   response.statusCode = 200;
   response.setHeader(
@@ -305,6 +312,10 @@ async function sendIngestArtworkPreview(
   response.setHeader(
     "X-Content-Type-Options",
     "nosniff",
+  );
+  response.setHeader(
+    "X-Ingest-Artwork-Preview-Source",
+    preview.source,
   );
   response.end(preview.bytes);
 }
@@ -1077,10 +1088,30 @@ const server = createServer(
         return;
       }
 
+      const streamValue = requestUrl.searchParams.get("stream");
+      const streamIndex = streamValue === null
+        ? undefined
+        : Number(streamValue);
+
+      if (
+        streamValue !== null &&
+        (streamIndex === undefined ||
+          !Number.isInteger(streamIndex) ||
+          streamIndex < 0)
+      ) {
+        sendJson(response, 400, {
+          error:
+            "Invalid embedded artwork stream index",
+        });
+        return;
+      }
+
       try {
         await sendIngestArtworkPreview(
           response,
           relativePath,
+          streamIndex,
+          requestUrl.searchParams.get("codec") ?? undefined,
         );
       } catch (error) {
         sendJson(response, 404, {
@@ -1209,6 +1240,7 @@ const server = createServer(
               ...draft.assets
                 .filter((asset) => asset.include)
                 .map((asset) =>
+                  asset.embeddedArtwork?.audioSourceRelativePath ??
                   asset.sourceRelativePath,
                 ),
             ],
@@ -1293,6 +1325,7 @@ const server = createServer(
               ...draft.assets
                 .filter((asset) => asset.include)
                 .map((asset) =>
+                  asset.embeddedArtwork?.audioSourceRelativePath ??
                   asset.sourceRelativePath,
                 ),
             ],

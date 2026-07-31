@@ -237,6 +237,9 @@ export function mergeIngestDraftAfterRescan(
       asset,
     ]),
   );
+  const defaultAssetPaths = new Set(
+    defaults.assets.map((asset) => asset.sourceRelativePath),
+  );
   const previousStatuses = statusMap(
     stored.sourceStatuses,
   );
@@ -257,19 +260,39 @@ export function mergeIngestDraftAfterRescan(
     },
   );
 
+  let embeddedFrontAdded = false;
+  const existingIncludedArtwork = stored.draft.assets.some(
+    (asset) =>
+      asset.mediaKind === "image" &&
+      asset.include &&
+      asset.artworkAssignments.length > 0,
+  );
   const assets = defaults.assets.map(
     (fallback) => {
       const previous = previousAssets.get(
         fallback.sourceRelativePath,
       );
 
-      return previous
-        ? preserveAsset(previous, fallback)
-        : {
-            ...fallback,
-            include: false,
-            artworkAssignments: [],
-          };
+      if (previous) {
+        return preserveAsset(previous, fallback);
+      }
+
+      const retainEmbeddedFrontDefault =
+        fallback.sourceType === "embedded-artwork" &&
+        fallback.include &&
+        !existingIncludedArtwork &&
+        !embeddedFrontAdded;
+
+      if (retainEmbeddedFrontDefault) {
+        embeddedFrontAdded = true;
+        return fallback;
+      }
+
+      return {
+        ...fallback,
+        include: false,
+        artworkAssignments: [],
+      };
     },
   );
 
@@ -280,7 +303,7 @@ export function mergeIngestDraftAfterRescan(
   }
 
   for (const previous of stored.draft.assets) {
-    if (!currentFiles.has(previous.sourceRelativePath)) {
+    if (!defaultAssetPaths.has(previous.sourceRelativePath)) {
       assets.push(previous);
     }
   }
@@ -288,7 +311,9 @@ export function mergeIngestDraftAfterRescan(
   const allPaths = new Set([
     ...currentFiles.keys(),
     ...previousTracks.keys(),
-    ...previousAssets.keys(),
+    ...stored.draft.assets
+      .filter((asset) => !asset.embeddedArtwork)
+      .map((asset) => asset.sourceRelativePath),
   ]);
   const sourceStatuses: IngestDraftSourceStatus[] = [];
 
@@ -406,6 +431,7 @@ export function buildBlockingSourceStatuses(
     ...draft.assets
       .filter((asset) => asset.include)
       .map((asset) =>
+        asset.embeddedArtwork?.audioSourceRelativePath ??
         asset.sourceRelativePath,
       ),
   ]);

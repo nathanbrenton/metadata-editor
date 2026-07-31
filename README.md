@@ -80,6 +80,8 @@ The backend binds only to localhost during development. The public audio player 
 - Library release rows show the authored release title and primary artist above the date and track count
 - Developer / Admin Tools start disabled on every page load and remain session-only when enabled
 - The Staging track table shows source paths relative to the selected candidate, provides read-only play/pause preview for inspected audio, uses direct three-digit track-number entry for ordering, can populate selected titles from a chosen filename field or each file's embedded TITLE tag, supports applying one source date across all included non-missing sources, and reports source dates after the release date as non-blocking advisories.
+- Staging Other files displays read-only artwork thumbnails, including in-memory TIFF/TIF-to-PNG previews through FFmpeg; clicking a thumbnail opens the larger local preview without writing a derivative or changing the ingest source.
+- MP3 and other audio sources with FFprobe attached-picture streams expose deduplicated embedded artwork in Staging Other files. One unambiguous embedded cover is preassigned as the release-level `front_cover` and extracted only when the reviewed staging plan is applied; the audio source is never retagged or modified.
 - Staging Review reuses the source-audio preview control and keeps wide build plans compact with file-kind icons plus green-check/red-x readiness indicators.
 - Document-style release and track overview
 - Parsed TOML key/value tables
@@ -390,7 +392,7 @@ The endpoint rescans the release, regenerates and validates TOML, rebuilds the p
 
 ## Audio Preview
 
-Release detail views provide per-track play/pause controls in the sidebar plus previous, play/pause, next, and volume controls above the metadata tabs. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits use the page's native vertical scroll. The track list scrolls independently while it has room, then continued wheel or trackpad movement at its top or bottom edge hands off to the page so the release header, tabs, and footer remain reachable. Outside editable fields and open dialogs, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Keyboard navigation scrolls only the sidebar and only when the destination crosses its visible edge, avoiding whole-page jumps and unnecessary re-centering. The local API resolves tracks by release and track IDs, prefers `audio-playback.*`, and falls back to one unambiguous `audio-master.*`.
+Release detail views provide per-track play/pause controls in the sidebar plus previous, play/pause, next, and volume controls above the metadata tabs. Sidebar track rows omit the repeated word `Track` and place the saved track number directly before the display title on one compact line; multi-disc releases use `disc.track` numbering. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits use the page's native vertical scroll. The track list scrolls independently while it has room, then continued wheel or trackpad movement at its top or bottom edge hands off to the page so the release header, tabs, and footer remain reachable. Outside editable fields and open dialogs, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Keyboard navigation scrolls only the sidebar and only when the destination crosses its visible edge, avoiding whole-page jumps and unnecessary re-centering. The local API resolves tracks by release and track IDs, prefers `audio-playback.*`, and falls back to one unambiguous `audio-master.*`.
 
 API:
 
@@ -558,10 +560,11 @@ The selected suggestion is used consistently by metadata inference, gallery
 fallbacks, and starter TOML generation. Other candidates remain untouched and
 must never be deleted automatically.
 
-Library artwork views can display `.tif` and `.tiff` masters through a read-only
-FFmpeg conversion streamed as PNG. The conversion is held in memory and does
-not create a derivative or modify the archival master. The original TIFF remains
-available through **Open original**.
+Library artwork views and Staging source-artwork rows can display `.tif` and
+`.tiff` masters through a read-only FFmpeg conversion streamed as PNG. The
+conversion is held in memory and does not create a derivative or modify the
+archival master or ingest source. Library keeps the original TIFF available
+through **Open original**.
 
 ### Calendar date fields
 

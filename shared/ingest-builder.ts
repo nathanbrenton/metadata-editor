@@ -56,8 +56,20 @@ export const ingestArtworkRoleOptions = [
   "other",
 ] as const;
 
+export type IngestEmbeddedArtworkSourceDraft = {
+  audioSourceRelativePath: string;
+  streamIndex: number;
+  codecName?: string;
+  extension: string;
+  contentType: string;
+  sizeBytes: number;
+  sha256: string;
+};
+
 export type IngestBuildAssetDraft = {
   sourceRelativePath: string;
+  sourceType?: "file" | "embedded-artwork";
+  embeddedArtwork?: IngestEmbeddedArtworkSourceDraft;
   include: boolean;
   mediaKind: Extract<
     IngestMediaKind,
@@ -562,7 +574,7 @@ export function createDefaultIngestBuildDraft(
   const usedDestinations = new Set<string>();
   let releaseArtworkAssigned = false;
 
-  const assets = inspection.files
+  const physicalAssets = inspection.files
     .filter(
       (
         file,
@@ -620,6 +632,61 @@ export function createDefaultIngestBuildDraft(
         artworkAssignments,
       };
     });
+
+  const embeddedArtworkByHash = new Map<
+    string,
+    {
+      file: IngestFileInspection;
+      artwork: NonNullable<IngestFileInspection["embeddedArtwork"]>[number];
+    }
+  >();
+
+  for (const file of audioFiles) {
+    for (const artwork of file.embeddedArtwork ?? []) {
+      if (!embeddedArtworkByHash.has(artwork.sha256)) {
+        embeddedArtworkByHash.set(artwork.sha256, { file, artwork });
+      }
+    }
+  }
+
+  const embeddedEntries = [...embeddedArtworkByHash.values()];
+  const useEmbeddedFront =
+    !releaseArtworkAssigned && embeddedEntries.length === 1;
+  const embeddedAssets = embeddedEntries.map(
+    ({ file, artwork }, index): IngestBuildAssetDraft => {
+      const sourceRelativePath =
+        `embedded-artwork:${artwork.sha256}`;
+      const destinationRelativePath = uniquifyPath(
+        useEmbeddedFront && index === 0
+          ? `artwork/front/artwork-master${artwork.extension}`
+          : `artwork/supplemental/embedded-cover-${index + 1}${artwork.extension}`,
+        usedDestinations,
+      );
+      const artworkAssignments =
+        useEmbeddedFront && index === 0
+          ? [defaultReleaseArtworkAssignment()]
+          : [];
+
+      return {
+        sourceRelativePath,
+        sourceType: "embedded-artwork",
+        embeddedArtwork: {
+          audioSourceRelativePath: file.relativePath,
+          streamIndex: artwork.streamIndex,
+          ...(artwork.codecName ? { codecName: artwork.codecName } : {}),
+          extension: artwork.extension,
+          contentType: artwork.contentType,
+          sizeBytes: artwork.sizeBytes,
+          sha256: artwork.sha256,
+        },
+        include: artworkAssignments.length > 0,
+        mediaKind: "image",
+        destinationRelativePath,
+        artworkAssignments,
+      };
+    },
+  );
+  const assets = [...physicalAssets, ...embeddedAssets];
 
   return {
     candidateId: inspection.candidate.id,

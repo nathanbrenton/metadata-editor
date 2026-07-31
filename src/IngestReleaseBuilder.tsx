@@ -137,19 +137,28 @@ function messageFromResponse(
 }
 
 
-const browserPreviewArtworkExtensions =
+const stagingPreviewArtworkExtensions =
   new Set([
     ".avif",
     ".gif",
     ".jpeg",
     ".jpg",
     ".png",
+    ".tif",
+    ".tiff",
     ".webp",
+  ]);
+
+const stagingTranscodedArtworkExtensions =
+  new Set([
+    ".tif",
+    ".tiff",
   ]);
 
 function artworkPreviewUrl(
   sourceRelativePath: string,
   modifiedAt?: string,
+  embeddedArtwork?: IngestBuildAssetDraft["embeddedArtwork"],
 ): string {
   const parameters = new URLSearchParams({
     path: sourceRelativePath,
@@ -159,6 +168,13 @@ function artworkPreviewUrl(
     parameters.set("version", modifiedAt);
   }
 
+  if (embeddedArtwork) {
+    parameters.set("stream", String(embeddedArtwork.streamIndex));
+    if (embeddedArtwork.codecName) {
+      parameters.set("codec", embeddedArtwork.codecName);
+    }
+  }
+
   return `/api/ingest/artwork?${parameters.toString()}`;
 }
 
@@ -166,52 +182,81 @@ function ArtworkPreview({
   sourceRelativePath,
   modifiedAt,
   label,
+  embeddedArtwork,
 }: {
   sourceRelativePath: string;
   modifiedAt?: string;
   label?: string;
+  embeddedArtwork?: IngestBuildAssetDraft["embeddedArtwork"];
 }) {
-  const extension = sourceRelativePath
-    .slice(
-      sourceRelativePath.lastIndexOf("."),
-    )
-    .toLowerCase();
+  const [previewFailed, setPreviewFailed] =
+    useState(false);
+  const extension = embeddedArtwork?.extension ??
+    sourceRelativePath
+      .slice(
+        sourceRelativePath.lastIndexOf("."),
+      )
+      .toLowerCase();
+  const previewTranscoded =
+    stagingTranscodedArtworkExtensions.has(
+      extension,
+    );
 
   if (
-    !browserPreviewArtworkExtensions.has(
+    !stagingPreviewArtworkExtensions.has(
       extension,
-    )
+    ) ||
+    previewFailed
   ) {
     return (
       <span className="ingest-artwork-preview-unavailable">
-        Preview unavailable
+        {previewFailed
+          ? "Preview failed"
+          : "Preview unavailable"}
       </span>
     );
   }
 
   const source = artworkPreviewUrl(
-    sourceRelativePath,
+    embeddedArtwork?.audioSourceRelativePath ?? sourceRelativePath,
     modifiedAt,
+    embeddedArtwork,
   );
   const accessibleLabel =
     label ?? sourceRelativePath;
 
   return (
-    <a
-      className="ingest-artwork-preview-link"
-      href={source}
-      target="_blank"
-      rel="noreferrer"
-      aria-label={`Open full artwork preview for ${accessibleLabel}`}
-      title="Open full local artwork preview"
-    >
-      <img
-        className="ingest-artwork-thumbnail"
-        src={source}
-        alt={`Artwork preview for ${accessibleLabel}`}
-        loading="lazy"
-      />
-    </a>
+    <span className="ingest-artwork-preview-stack">
+      <a
+        className="ingest-artwork-preview-link"
+        href={source}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open full artwork preview for ${accessibleLabel}`}
+        title={
+          previewTranscoded
+            ? "Open read-only PNG preview generated from TIFF"
+            : "Open full local artwork preview"
+        }
+      >
+        <img
+          className="ingest-artwork-thumbnail"
+          src={source}
+          alt={`Artwork preview for ${accessibleLabel}`}
+          loading="lazy"
+          onError={() =>
+            setPreviewFailed(true)
+          }
+        />
+      </a>
+      {(previewTranscoded || embeddedArtwork) && (
+        <small className="ingest-artwork-preview-mode">
+          {embeddedArtwork
+            ? "Embedded artwork"
+            : "TIFF → PNG preview"}
+        </small>
+      )}
+    </span>
   );
 }
 
@@ -3168,9 +3213,12 @@ function AssetDraftTable({
             </thead>
             <tbody>
               {assets.map((asset) => {
+                const sourceStatusPath =
+                  asset.embeddedArtwork?.audioSourceRelativePath ??
+                  asset.sourceRelativePath;
                 const status = sourceStatusForPath(
                   sourceStatuses,
-                  asset.sourceRelativePath,
+                  sourceStatusPath,
                 );
                 const sourceMissing =
                   status?.state === "missing";
@@ -3199,7 +3247,9 @@ function AssetDraftTable({
                       className="ingest-sticky-column"
                     >
                       <code>
-                        {asset.sourceRelativePath}
+                        {asset.embeddedArtwork
+                          ? `Embedded cover · ${asset.embeddedArtwork.audioSourceRelativePath}`
+                          : asset.sourceRelativePath}
                       </code>
                     </th>
                     <td className="ingest-artwork-preview-cell">
@@ -3208,6 +3258,7 @@ function AssetDraftTable({
                           key={`${asset.sourceRelativePath}:${status?.modifiedAt ?? ""}`}
                           sourceRelativePath={asset.sourceRelativePath}
                           modifiedAt={status?.modifiedAt}
+                          embeddedArtwork={asset.embeddedArtwork}
                         />
                       ) : (
                         <span className="ingest-artwork-preview-unavailable">
@@ -3257,7 +3308,7 @@ function AssetDraftTable({
                         status={status}
                         onReviewed={(reviewed) =>
                           onSourceReviewed(
-                            asset.sourceRelativePath,
+                            sourceStatusPath,
                             reviewed,
                           )
                         }

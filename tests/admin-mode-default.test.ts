@@ -7,18 +7,43 @@ const appSource = await readFile(
   "utf8",
 );
 
-test("starts Developer / Admin Tools disabled without browser persistence", () => {
+test("starts Developer / Admin Tools disabled without persistence", () => {
   assert.match(
     appSource,
     /const \[showAdminTools, setShowAdminTools\] =\s*useState\(false\)/,
   );
   assert.doesNotMatch(
     appSource,
-    /metadata-editor\.show-admin-tools/,
+    /localStorage\.(?:getItem|setItem)\([^)]*show-admin-tools/s,
   );
   assert.doesNotMatch(
     appSource,
-    /localStorage\.(?:getItem|setItem)\([^)]*show-admin-tools/s,
+    /sessionStorage\.(?:getItem|setItem)\([^)]*show-admin-tools/s,
+  );
+});
+
+test("clears legacy Admin preferences and restored-page state", () => {
+  assert.match(
+    appSource,
+    /localStorage\.removeItem\(\s*["']metadata-editor\.show-admin-tools-v2/,
+  );
+  assert.match(
+    appSource,
+    /sessionStorage\.removeItem\(\s*["']metadata-editor\.show-admin-tools-v2/,
+  );
+  assert.match(
+    appSource,
+    /const disableAdminToolsOnPageRestore = \(\) => \{\s*setShowAdminTools\(false\);/,
+  );
+  assert.match(
+    appSource,
+    /addEventListener\(\s*["']pageshow["']\s*,\s*disableAdminToolsOnPageRestore/,
+  );
+  assert.equal(
+    appSource.match(
+      /<input\s+type="checkbox"\s+autoComplete="off"\s+checked=\{showAdminTools\}/g,
+    )?.length,
+    2,
   );
 });
 
