@@ -38,6 +38,21 @@ test("renders sidebar and desktop transport preview controls", () => {
   );
 });
 
+test("continues Library preview playback to the next playable track when audio ends", () => {
+  assert.match(
+    appSource,
+    /getNextPlayableTrackId/,
+  );
+  assert.match(
+    appSource,
+    /addEventListener\("ended", handleEnded\)/,
+  );
+  assert.match(
+    appSource,
+    /void loadTrack\(nextTrackId, true\)/,
+  );
+});
+
 test("keeps preview controls desktop-oriented and independently styled", () => {
   assert.match(
     styleSource,

@@ -46,17 +46,18 @@ Scalar edits are currently browser-local only. Persisting edits to existing TOML
 ~/Desktop/record-label/
 ├── audio-player/
 ├── metadata-editor/
-├── demo-media/
-├── media-library/
-└── deployment-output/
+├── ingest-drop/          # incoming read-only source candidates
+├── demo-media/           # private staging + canonical Library root by default
+├── media-library/        # optional private canonical root override
+└── published-media/      # planned sanitized public player output
 ```
 
 Repository boundaries:
 
 - `metadata-editor/` is its own Git repository.
 - `audio-player/` is a separate Git repository.
-- `demo-media/` remains outside both application repositories.
-- `media-library/` is private and must not be committed.
+- `ingest-drop/`, `demo-media/`, `media-library/`, and `published-media/` remain outside both application repositories.
+- Private canonical roots and public deployment output must not be committed with either application source repository.
 - Do not initialize Git at `~/Desktop/record-label/`.
 
 ## Architecture
@@ -77,17 +78,22 @@ The backend binds only to localhost during development. The public audio player 
 - Vite
 - Desktop-first workflow navigation: Ingest → Staging → Library → Publish
 - Ingest candidate inspection can seed release artist and title from selectable folder-field ranges or embedded album/artist tags. Continuing to Staging explicitly carries those selected values into the draft, including over an older locally saved inferred identity, while keeping the fields editable. Detailed inference evidence stays collapsed by default beneath the identity controls, and candidate file counts and media totals are condensed into the existing Source files header.
+- Ingest also treats source hierarchy as evidence. Numbered first-level folders such as `01/`, `track-02/`, or `03_track-name/` can seed track numbers. When one audio file and one image occupy the same numbered track scope, the image is suggested as that track's `front_cover` even when the filenames differ. A single image at the candidate release root is suggested as release-level `front_cover`; a single image under a release `artwork/`, `cover/`, or `covers/` folder is a secondary release-artwork hint. Ambiguous folders with multiple audio or image candidates remain unassigned for review.
 - Library release rows show the authored release title and primary artist above the date and track count
+- Library audio preview automatically advances to the next playable track in release order when a track ends, and stops after the final playable track; manual previous/next transport navigation retains its existing wraparound behavior.
 - Developer / Admin Tools start disabled on every page load and remain session-only when enabled
 - The Staging track table shows source paths relative to the selected candidate, provides read-only play/pause preview for inspected audio, uses direct three-digit track-number entry for ordering, can populate selected titles from a chosen filename field or each file's embedded TITLE tag, supports applying one source date across all included non-missing sources, and reports source dates after the release date as non-blocking advisories.
 - Staging Other files displays read-only artwork thumbnails, including in-memory TIFF/TIF-to-PNG previews through FFmpeg; clicking a thumbnail opens the larger local preview without writing a derivative or changing the ingest source.
 - MP3 and other audio sources with FFprobe attached-picture streams expose deduplicated embedded artwork in Staging Other files. One unambiguous embedded cover is preassigned as the release-level `front_cover` and extracted only when the reviewed staging plan is applied; the audio source is never retagged or modified.
+- Artwork copy destinations follow their explicit assignment scope. Release-level front artwork is staged under `artwork/front/artwork-master.<ext>`. Track-level `front_cover` / `track_artwork` assignments are copied into each selected track under `tracks/<track-id>/artwork/front/artwork-master.<ext>` and track TOML uses a track-local `artwork/front/...` path. Assigning one source to both release and track scopes intentionally creates independent canonical copies.
 - Staging Review reuses the source-audio preview control and keeps wide build plans compact with file-kind icons plus green-check/red-x readiness indicators.
 - Document-style release and track overview
 - Parsed TOML key/value tables
 - Read-only raw TOML inspection
 - Browser-local scalar draft editing
 - Track-number-driven Library navigation and guarded artist_number_title directory synchronization
+- Runtime media-location strip showing the configured Ingest, Staging, Library, and planned Publish roots
+- Guarded release-title / release-directory synchronization with TOML-reference updates, staging-receipt updates, manifests, backups, collision detection, and rollback
 - Read-only playback-MP3 and waveform processing plans
 - In-memory multiband waveform generation for PCM WAV sources
 
@@ -100,6 +106,7 @@ The backend binds only to localhost during development. The public audio player 
 - TOML parsing and generation with `smol-toml`
 - Atomic create-only writer
 - Two-phase track-directory renaming with case-insensitive collision guards, operation manifests, metadata-reference updates, and rollback
+- Dry-run-first release-directory renaming that updates `release.id`, `release.title`, `release_reference.release_id`, and `ingest-receipt.json` before the OS-level move
 - SHA-256 post-write verification
 
 ## In-App Workflow Documentation
@@ -128,6 +135,31 @@ artist_01_track-title
 
 convention, changing the saved track number also plans a directory rename that preserves the artist and title segments. Metadata saves do not move directories. After numbering is saved, Library loads the server's exact dry-run plan, displays every rename or blocked item, and requires the confirmation phrase before applying the reviewed plan. The apply request includes the plan fingerprint, so a release change invalidates the review before any directory is moved. The filesystem API never replaces an existing target directory, compares names case-insensitively for typical macOS filesystems, writes an operation manifest before changing names, renames through unique temporary directories, updates `track.id` and `track_reference.track_id` in existing track TOMLs, and rolls completed changes back when a later step fails. Custom directory IDs outside the numbered convention remain unchanged and require manual review.
 
+## Workflow Media Locations
+
+The application reads its configured roots from the backend and displays them directly beneath the four workflow tabs:
+
+```text
+Ingest    → INGEST_ROOT (default ../ingest-drop)
+Staging   → INGEST_OUTPUT_ROOT (default ../demo-media)
+Library   → MEDIA_LIBRARY_ROOT (default ../demo-media)
+Publish   → PUBLISHED_MEDIA_ROOT (default ../published-media; planned only)
+```
+
+Ingest inspection never modifies the source drop. Staging creates reviewed copies in the private workspace. Library authors that canonical private workspace. Publish does not currently copy anything; the planned behavior is to build a sanitized player-facing snapshot in `published-media/` alongside the application repositories while retaining the private canonical release.
+
+## Release Identity and Directory Synchronization
+
+Changing a public release title does not silently move its directory. From a Library release menu, **Release identity & directory** opens a server dry-run that can synchronize:
+
+- `release.title`
+- `release.id`
+- every existing `release_reference.release_id`
+- release-relative paths and identity fields in `ingest-receipt.json`
+- the OS-level directory under `releases/`
+
+The reviewed plan rejects blank or unsafe IDs, path traversal, symbolic links, stale content, and case-insensitive target collisions. Apply requires `RENAME_RELEASE_DIRECTORY`, creates an operation manifest and backups outside the release directory, performs a temporary-name move for case-only safety, and rolls metadata and directory changes back if a later step fails. Existing media bytes remain untouched.
+
 ## Media Root
 
 The default development media root is:
@@ -147,7 +179,10 @@ Relative paths are resolved from the `metadata-editor` project root.
 Example `.env` values:
 
 ```env
+INGEST_ROOT=../ingest-drop
+INGEST_OUTPUT_ROOT=../demo-media
 MEDIA_LIBRARY_ROOT=../demo-media
+PUBLISHED_MEDIA_ROOT=../published-media
 METADATA_EDITOR_PORT=4174
 ```
 
@@ -250,10 +285,16 @@ npm run dev
 npm run dev:server
 npm test
 npm run build
+npm run validate:library
+npm run validate:release -- <release-id>
+npm run publish:plan -- <release-id>
+npm run preflight:publish -- <release-id>
 npm run preview
 ```
 
 ## Validation
+
+Development validation:
 
 ```bash
 cd ~/Desktop/record-label/metadata-editor;
@@ -262,6 +303,70 @@ npm test;
 npm run build;
 git diff --check;
 ```
+
+Canonical media-library validation is a separate, read-only operation:
+
+```bash
+npm run validate:library;
+npm run validate:release -- 2008-10-24_yours;
+```
+
+The validator checks path confinement, symlinks, case-insensitive ID collisions,
+release and track directory identity, TOML parsing, required documents and
+fields, release/track references, numbering conflicts, master ambiguity,
+referenced asset paths, derivative status, and ingest-receipt identity and
+copy destinations. It never renames, rewrites, deletes, or repairs anything.
+
+Use JSON output for automation or later Publish preflight integration:
+
+```bash
+npm run validate:library -- --json;
+npm run validate:release -- 2008-10-24_yours --json;
+```
+
+Receipt destinations are checked by path and recorded byte size by default.
+Full SHA-256 verification is opt-in because it must read every recorded copied
+file:
+
+```bash
+npm run validate:library -- --verify-hashes;
+```
+
+Exit codes are stable for shell use:
+
+```text
+0  validation completed without blocked issues (warnings may remain)
+1  one or more blocked validation issues were found
+2  validator configuration or execution failed
+```
+
+Validation is intentionally distinct from repair and publication. Publish
+preflight now consumes the release-scoped validation report and adds the
+player-facing package requirements without writing files:
+
+```bash
+npm run publish:plan -- 2008-10-24_yours;
+npm run preflight:publish -- 2008-10-24_yours;
+```
+
+Use JSON output for automation or plan inspection:
+
+```bash
+npm run publish:plan -- 2008-10-24_yours --json;
+```
+
+The plan requires current playback MP3 and waveform derivatives, selects one
+browser-compatible release artwork source, inspects existing public
+destinations, and lists every copied or generated path. It excludes audio
+masters, archival TIFF artwork, TOML source documents, ingest receipts,
+backups, production notes, and editor-only administration. `publish:plan`
+reports the dry-run without writing; `preflight:publish` exits with status 1
+when the plan is blocked so it can gate later automation.
+
+The next write-enabled milestone will build the reviewed plan in an isolated
+temporary directory, validate hashes and catalog references, atomically promote
+it under `published-media/`, retain the previous public release for rollback,
+and refresh audio-player only after promotion succeeds.
 
 ## Core Workflows
 
@@ -392,7 +497,7 @@ The endpoint rescans the release, regenerates and validates TOML, rebuilds the p
 
 ## Audio Preview
 
-Release detail views provide per-track play/pause controls in the sidebar plus previous, play/pause, next, and volume controls above the metadata tabs. Sidebar track rows omit the repeated word `Track` and place the saved track number directly before the display title on one compact line; multi-disc releases use `disc.track` numbering. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits use the page's native vertical scroll. The track list scrolls independently while it has room, then continued wheel or trackpad movement at its top or bottom edge hands off to the page so the release header, tabs, and footer remain reachable. Outside editable fields and open dialogs, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Keyboard navigation scrolls only the sidebar and only when the destination crosses its visible edge, avoiding whole-page jumps and unnecessary re-centering. The local API resolves tracks by release and track IDs, prefers `audio-playback.*`, and falls back to one unambiguous `audio-master.*`.
+Release detail views provide per-track play/pause controls in the sidebar plus previous, play/pause, next, and volume controls above the metadata tabs. The release header displays only explicit release-scoped front artwork and never substitutes a track image. Sidebar rows show compact thumbnails for local track-level artwork when available, omit the repeated word `Track`, and place the saved track number directly before the display title on one compact line; multi-disc releases use `disc.track` numbering. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits use the page's native vertical scroll. The track list scrolls independently while it has room, then continued wheel or trackpad movement at its top or bottom edge hands off to the page so the release header, tabs, and footer remain reachable. Outside editable fields and open dialogs, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Keyboard navigation scrolls only the sidebar and only when the destination crosses its visible edge, avoiding whole-page jumps and unnecessary re-centering. The local API resolves tracks by release and track IDs, prefers `audio-playback.*`, and falls back to one unambiguous `audio-master.*`.
 
 API:
 

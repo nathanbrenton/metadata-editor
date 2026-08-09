@@ -231,3 +231,29 @@ test(
     );
   },
 );
+
+test(
+  "derives physical artwork copies from release and track assignments",
+  () => {
+    assert.match(
+      builderSource,
+      /Physical staged copies/,
+    );
+    assert.match(
+      builderSource,
+      /Derived from artwork assignments/,
+    );
+    assert.match(
+      serverSource,
+      /tracks\/\$\{track\.id\}\/artwork\/\$\{roleDirectory\}\/artwork-master/,
+    );
+    assert.match(
+      serverSource,
+      /release-artwork:\$\{placement\.assignment\.role\}/,
+    );
+    assert.match(
+      serverSource,
+      /track-artwork:\$\{placement\.assignment\.role\}:\$\{placement\.trackSourceRelativePath\}/,
+    );
+  },
+);

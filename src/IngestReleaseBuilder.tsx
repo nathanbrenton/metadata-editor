@@ -37,6 +37,7 @@ import {
   formatIngestSourceDisplayPath,
   sourceDateIsAfterReleaseDate,
   sourcePathsForBulkDate,
+  synchronizeBulkSourceDate,
 } from "./ingest-track-table.js";
 import {
   buildTrackTitlePlan,
@@ -425,6 +426,19 @@ function artworkTomlTargets(
     );
 }
 
+function artworkPhysicalCopyCount(
+  asset: IngestBuildAssetDraft,
+): number {
+  return asset.artworkAssignments.reduce(
+    (total, assignment) =>
+      total +
+      (assignment.scope === "release"
+        ? 1
+        : assignment.trackSourceRelativePaths.length),
+    0,
+  );
+}
+
 function ArtworkAssignmentsEditor({
   asset,
   tracks,
@@ -716,8 +730,9 @@ function ArtworkAssignmentSummary({
         <div>
           <h4>Artwork use</h4>
           <p>
-            One physical artwork copy may be referenced by the
-            release and by one or more tracks.
+            Artwork assignments determine physical placement. Release
+            artwork stays under the release artwork tree; track artwork
+            is copied into each selected track's own artwork directory.
           </p>
         </div>
         <span className="badge">
@@ -737,7 +752,7 @@ function ArtworkAssignmentSummary({
             <thead>
               <tr>
                 <th scope="col">Artwork source</th>
-                <th scope="col">Physical staged copy</th>
+                <th scope="col">Physical staged copies</th>
                 <th scope="col">Metadata assignments</th>
                 <th scope="col">TOMLs updated</th>
               </tr>
@@ -749,7 +764,15 @@ function ArtworkAssignmentSummary({
                     <code>{asset.sourceRelativePath}</code>
                   </th>
                   <td>
-                    <code>{asset.destinationRelativePath}</code>
+                    {artworkPhysicalCopyCount(asset)} assignment-scoped
+                    {" "}
+                    {artworkPhysicalCopyCount(asset) === 1
+                      ? "copy"
+                      : "copies"}
+                    <br />
+                    <span className="metadata-empty-value">
+                      Exact paths appear in Review.
+                    </span>
                   </td>
                   <td>
                     <div className="ingest-artwork-assignment-badges">
@@ -2558,8 +2581,23 @@ function TrackDraftTable({
     );
   const [filenameTitleFieldValue, setFilenameTitleFieldValue] =
     useState("last");
+  const previousReleaseDateRef = useRef(releaseDate);
   const [bulkSourceDate, setBulkSourceDate] =
-    useState("");
+    useState(releaseDate);
+
+  useEffect(() => {
+    const previousReleaseDate =
+      previousReleaseDateRef.current;
+
+    setBulkSourceDate((currentBulkSourceDate) =>
+      synchronizeBulkSourceDate(
+        currentBulkSourceDate,
+        previousReleaseDate,
+        releaseDate,
+      ),
+    );
+    previousReleaseDateRef.current = releaseDate;
+  }, [releaseDate]);
 
   if (tracks.length === 0) {
     return (
@@ -2826,6 +2864,13 @@ function TrackDraftTable({
               )
             }
           />
+          {releaseDate && (
+            <small className="ingest-source-date-origin">
+              {bulkSourceDate === releaseDate
+                ? "Prefilled from Release Date"
+                : `Release Date available: ${releaseDate}`}
+            </small>
+          )}
         </label>
         <button
           type="button"
@@ -3328,27 +3373,33 @@ function AssetDraftTable({
                       />
                     </td>
                     <td>
-                      <input
-                        type="text"
-                        value={
-                          asset.destinationRelativePath
-                        }
-                        disabled={
-                          !asset.include ||
-                          sourceMissing
-                        }
-                        spellCheck={false}
-                        aria-label={`Destination for ${asset.sourceRelativePath}`}
-                        onChange={(event) =>
-                          onChange(
-                            asset.sourceRelativePath,
-                            {
-                              destinationRelativePath:
-                                event.target.value,
-                            },
-                          )
-                        }
-                      />
+                      {asset.mediaKind === "image" ? (
+                        <span className="ingest-derived-destination">
+                          Derived from artwork assignments
+                        </span>
+                      ) : (
+                        <input
+                          type="text"
+                          value={
+                            asset.destinationRelativePath
+                          }
+                          disabled={
+                            !asset.include ||
+                            sourceMissing
+                          }
+                          spellCheck={false}
+                          aria-label={`Destination for ${asset.sourceRelativePath}`}
+                          onChange={(event) =>
+                            onChange(
+                              asset.sourceRelativePath,
+                              {
+                                destinationRelativePath:
+                                  event.target.value,
+                              },
+                            )
+                          }
+                        />
+                      )}
                     </td>
                     <td>
                       {sourceMissing ? (

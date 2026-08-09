@@ -661,36 +661,121 @@ type PreparedIngestTrack = {
   existingTrack?: ExistingReceiptTrack;
 };
 
-type PreparedArtworkAsset = {
+type PreparedArtworkPlacement = {
   draft: IngestBuildAssetDraft;
+  assignment: IngestArtworkAssignmentDraft;
   destinationRelativePath: string;
+  trackSourceRelativePath?: string;
 };
 
-function releaseArtworkAssignments(
-  artworkAssets: PreparedArtworkAsset[],
-) {
-  return artworkAssets.flatMap((asset) =>
-    asset.draft.artworkAssignments
-      .filter((assignment) => assignment.scope === "release")
-      .map((assignment) => ({ asset, assignment })),
+function artworkRoleDirectory(
+  assignment: IngestArtworkAssignmentDraft,
+): string {
+  const role = assignment.role.trim().toLowerCase();
+
+  if (role === "front_cover" || role === "track_artwork") {
+    return "front";
+  }
+
+  if (role === "back_cover") {
+    return "back";
+  }
+
+  if (role === "liner_notes") {
+    return "liner-notes";
+  }
+
+  const roleSlug = slugifyIngestValue(role) || "supplemental";
+
+  if (roleSlug === "disc" || roleSlug === "thumbnail") {
+    return roleSlug;
+  }
+
+  const assignmentSlug =
+    slugifyIngestValue(assignment.id) || "assignment";
+
+  return `${roleSlug}/${assignmentSlug}`;
+}
+
+function buildArtworkPlacements(
+  artworkDrafts: IngestBuildAssetDraft[],
+  tracks: PreparedIngestTrack[],
+): PreparedArtworkPlacement[] {
+  const trackBySource = new Map(
+    tracks.map((track) => [
+      track.draft.sourceRelativePath,
+      track,
+    ]),
   );
+  const placements: PreparedArtworkPlacement[] = [];
+
+  for (const draft of artworkDrafts) {
+    const extension = extensionOf(
+      draft.destinationRelativePath,
+    );
+
+    for (const assignment of draft.artworkAssignments) {
+      const roleDirectory = artworkRoleDirectory(assignment);
+
+      if (assignment.scope === "release") {
+        placements.push({
+          draft,
+          assignment,
+          destinationRelativePath:
+            `artwork/${roleDirectory}/artwork-master${extension}`,
+        });
+        continue;
+      }
+
+      for (const sourceRelativePath of
+        assignment.trackSourceRelativePaths) {
+        const track = trackBySource.get(sourceRelativePath);
+
+        if (!track) {
+          throw new Error(
+            `${draft.sourceRelativePath}: artwork assignment references an unavailable track: ${sourceRelativePath}`,
+          );
+        }
+
+        placements.push({
+          draft,
+          assignment,
+          trackSourceRelativePath: sourceRelativePath,
+          destinationRelativePath:
+            `tracks/${track.id}/artwork/${roleDirectory}/artwork-master${extension}`,
+        });
+      }
+    }
+  }
+
+  return placements;
+}
+
+function releaseArtworkAssignments(
+  artworkPlacements: PreparedArtworkPlacement[],
+) {
+  return artworkPlacements
+    .filter((placement) => !placement.trackSourceRelativePath)
+    .map((placement) => ({
+      placement,
+      assignment: placement.assignment,
+    }));
 }
 
 function trackArtworkAssignments(
-  artworkAssets: PreparedArtworkAsset[],
+  artworkPlacements: PreparedArtworkPlacement[],
   trackSourceRelativePath: string,
 ) {
-  return artworkAssets.flatMap((asset) =>
-    asset.draft.artworkAssignments
-      .filter(
-        (assignment) =>
-          assignment.scope === "track" &&
-          assignment.trackSourceRelativePaths.includes(
-            trackSourceRelativePath,
-          ),
-      )
-      .map((assignment) => ({ asset, assignment })),
-  );
+  return artworkPlacements
+    .filter(
+      (placement) =>
+        placement.trackSourceRelativePath ===
+        trackSourceRelativePath,
+    )
+    .map((placement) => ({
+      placement,
+      assignment: placement.assignment,
+    }));
 }
 
 function relativeArtworkPathForTrack(
@@ -708,11 +793,11 @@ function syntheticReleaseScan(
   releaseId: string,
   releaseRelativePath: string,
   tracks: PreparedIngestTrack[],
-  artworkAssets: PreparedArtworkAsset[],
+  artworkPlacements: PreparedArtworkPlacement[],
 ): ReleaseScanResult {
   const releaseArtwork = releaseArtworkAssignments(
-    artworkAssets,
-  )[0];
+    artworkPlacements,
+  );
   const release: ReleaseScanResult = {
     id: releaseId,
     relativePath: releaseRelativePath,
@@ -724,29 +809,27 @@ function syntheticReleaseScan(
         "release-production-notes.toml",
       ],
     ),
-    artworkMasters: releaseArtwork
-      ? [
-          {
-            filename: path.posix.basename(
-              releaseArtwork.asset.destinationRelativePath,
-            ),
-            relativePath:
-              `${releaseRelativePath}/${releaseArtwork.asset.destinationRelativePath}`,
-            extension: extensionOf(
-              releaseArtwork.asset.destinationRelativePath,
-            ),
-          },
-        ]
-      : [],
+    artworkMasters: releaseArtwork.map(
+      ({ placement }) => ({
+        filename: path.posix.basename(
+          placement.destinationRelativePath,
+        ),
+        relativePath:
+          `${releaseRelativePath}/${placement.destinationRelativePath}`,
+        extension: extensionOf(
+          placement.destinationRelativePath,
+        ),
+      }),
+    ),
     tracks: [],
   };
 
   release.tracks = tracks.map(
     (track): TrackScanResult => {
       const trackArtwork = trackArtworkAssignments(
-        artworkAssets,
+        artworkPlacements,
         track.draft.sourceRelativePath,
-      )[0];
+      );
 
       return {
         id: track.id,
@@ -767,20 +850,18 @@ function syntheticReleaseScan(
             extension: extensionOf(track.audioDestination),
           },
         ],
-        artworkMasters: trackArtwork
-          ? [
-              {
-                filename: path.posix.basename(
-                  trackArtwork.asset.destinationRelativePath,
-                ),
-                relativePath:
-                  `${releaseRelativePath}/${trackArtwork.asset.destinationRelativePath}`,
-                extension: extensionOf(
-                  trackArtwork.asset.destinationRelativePath,
-                ),
-              },
-            ]
-          : [],
+        artworkMasters: trackArtwork.map(
+          ({ placement }) => ({
+            filename: path.posix.basename(
+              placement.destinationRelativePath,
+            ),
+            relativePath:
+              `${releaseRelativePath}/${placement.destinationRelativePath}`,
+            extension: extensionOf(
+              placement.destinationRelativePath,
+            ),
+          }),
+        ),
       };
     },
   );
@@ -792,11 +873,15 @@ function syntheticMetadataPreview(
   release: ReleaseScanResult,
   draft: IngestBuildDraft,
   tracks: PreparedIngestTrack[],
-  artworkAssets: PreparedArtworkAsset[],
+  artworkPlacements: PreparedArtworkPlacement[],
 ): LibraryMetadataPreview {
-  const releaseArtwork = releaseArtworkAssignments(
-    artworkAssets,
-  )[0];
+  const releaseArtworkCandidates = releaseArtworkAssignments(
+    artworkPlacements,
+  );
+  const releaseArtwork =
+    releaseArtworkCandidates.find(
+      ({ assignment }) => assignment.role === "front_cover",
+    ) ?? releaseArtworkCandidates[0];
 
   return {
     release: {
@@ -816,7 +901,7 @@ function syntheticMetadataPreview(
         ? {
             artworkMasterPath: {
               value:
-                `${release.relativePath}/${releaseArtwork.asset.destinationRelativePath}`,
+                `${release.relativePath}/${releaseArtwork.placement.destinationRelativePath}`,
               source: "confirmed ingest artwork assignment",
             },
           }
@@ -928,15 +1013,19 @@ function customizeGeneratedDocuments(
   documents: GeneratedMetadataDocument[],
   draft: IngestBuildDraft,
   tracks: PreparedIngestTrack[],
-  artworkAssets: PreparedArtworkAsset[],
+  artworkPlacements: PreparedArtworkPlacement[],
   releaseRelativePath: string,
 ): GeneratedMetadataDocument[] {
   const trackByDirectory = new Map(
     tracks.map((track) => [track.relativePath, track]),
   );
   const releaseAssignments = releaseArtworkAssignments(
-    artworkAssets,
+    artworkPlacements,
   );
+  const primaryReleaseAssignment =
+    releaseAssignments.find(
+      ({ assignment }) => assignment.role === "front_cover",
+    ) ?? releaseAssignments[0];
 
   return documents.map((document) => {
     const data = parse(
@@ -973,12 +1062,12 @@ function customizeGeneratedDocuments(
         ["release"],
         "artwork",
         releaseAssignments.map(
-          ({ asset, assignment }, index) =>
+          ({ placement, assignment }) =>
             artworkRecord(
               assignment.id,
               assignment.role,
-              asset.destinationRelativePath,
-              index === 0,
+              placement.destinationRelativePath,
+              placement === primaryReleaseAssignment?.placement,
             ),
         ),
       );
@@ -988,11 +1077,12 @@ function customizeGeneratedDocuments(
       document.filename === "release-settings.toml" &&
       releaseAssignments.length > 0
     ) {
+      const releaseFallback = primaryReleaseAssignment;
       setNestedRecordValue(
         data,
         ["settings", "inheritance"],
         "release_artwork_fallback_path",
-        releaseAssignments[0].asset.destinationRelativePath,
+        releaseFallback.placement.destinationRelativePath,
       );
     }
 
@@ -1025,10 +1115,15 @@ function customizeGeneratedDocuments(
       );
 
       const assignments = trackArtworkAssignments(
-        artworkAssets,
+        artworkPlacements,
         track.draft.sourceRelativePath,
       );
-      const firstArtwork = assignments[0];
+      const firstArtwork =
+        assignments.find(
+          ({ assignment }) =>
+            assignment.role === "front_cover" ||
+            assignment.role === "track_artwork",
+        ) ?? assignments[0];
       setNestedRecordValue(
         data,
         ["track", "assets"],
@@ -1038,7 +1133,7 @@ function customizeGeneratedDocuments(
             ? relativeArtworkPathForTrack(
                 track,
                 releaseRelativePath,
-                firstArtwork.asset.destinationRelativePath,
+                firstArtwork.placement.destinationRelativePath,
               )
             : "",
           web: "",
@@ -1052,16 +1147,16 @@ function customizeGeneratedDocuments(
         data,
         ["track"],
         "artwork",
-        assignments.map(({ asset, assignment }, index) =>
+        assignments.map(({ placement, assignment }) =>
           artworkRecord(
             assignment.id,
             assignment.role,
             relativeArtworkPathForTrack(
               track,
               releaseRelativePath,
-              asset.destinationRelativePath,
+              placement.destinationRelativePath,
             ),
-            index === 0,
+            placement === firstArtwork?.placement,
           ),
         ),
       );
@@ -2212,12 +2307,24 @@ export async function prepareIngestReleaseBuild(
     },
   );
 
-  const existingCopyBySource = new Map(
+  const copyMappingKey = (
+    sourceRelativePath: string,
+    destinationRelativePath: string,
+  ) => `${sourceRelativePath}\u0000${destinationRelativePath}`;
+  const existingCopyByMapping = new Map(
     (existingReceipt?.copies ?? []).map(
       (copy) => [
-        copy.sourceRelativePath,
+        copyMappingKey(
+          copy.sourceRelativePath,
+          copy.destinationRelativePath,
+        ),
         copy,
       ],
+    ),
+  );
+  const existingCopySourcePaths = new Set(
+    (existingReceipt?.copies ?? []).map(
+      (copy) => copy.sourceRelativePath,
     ),
   );
 
@@ -2225,7 +2332,7 @@ export async function prepareIngestReleaseBuild(
     const newlyIncludedAssets =
       normalizedAssets.filter(
         (asset) =>
-          !existingCopyBySource.has(
+          !existingCopySourcePaths.has(
             asset.draft.sourceRelativePath,
           ),
       );
@@ -2243,20 +2350,19 @@ export async function prepareIngestReleaseBuild(
     }
   }
 
-  const artworkAssets: PreparedArtworkAsset[] =
-    normalizedAssets
-      .filter((asset) => asset.draft.mediaKind === "image")
-      .map((asset) => ({
-        draft: asset.draft,
-        destinationRelativePath:
-          asset.destinationRelativePath,
-      }));
+  const artworkDrafts = normalizedAssets
+    .filter((asset) => asset.draft.mediaKind === "image")
+    .map((asset) => asset.draft);
+  const artworkPlacements = buildArtworkPlacements(
+    artworkDrafts,
+    tracks,
+  );
 
   const release = syntheticReleaseScan(
     releaseId,
     releaseRelativePath,
     tracks,
-    artworkAssets,
+    artworkPlacements,
   );
   const generated =
     buildGeneratedTomlPreview(
@@ -2265,7 +2371,7 @@ export async function prepareIngestReleaseBuild(
         release,
         draft,
         tracks,
-        artworkAssets,
+        artworkPlacements,
       ),
     );
   const generatedDocuments =
@@ -2273,7 +2379,7 @@ export async function prepareIngestReleaseBuild(
       generated.documents,
       draft,
       tracks,
-      artworkAssets,
+      artworkPlacements,
       releaseRelativePath,
     );
   const copies: PreparedCopy[] = [];
@@ -2298,15 +2404,14 @@ export async function prepareIngestReleaseBuild(
     }
 
     const receiptCopy =
-      existingCopyBySource.get(
-        track.draft.sourceRelativePath,
+      existingCopyByMapping.get(
+        copyMappingKey(
+          track.draft.sourceRelativePath,
+          preparedCopy.destinationRelativePath,
+        ),
       );
 
-    if (
-      !receiptCopy ||
-      receiptCopy.destinationRelativePath !==
-        preparedCopy.destinationRelativePath
-    ) {
+    if (!receiptCopy) {
       blockedItems.push({
         kind: "copy",
         sourceRelativePath:
@@ -2385,69 +2490,85 @@ export async function prepareIngestReleaseBuild(
   }
 
   for (const asset of normalizedAssets) {
-    const logicalRoles =
+    const destinations =
       asset.draft.mediaKind === "image"
-        ? asset.draft.artworkAssignments.map(
-            (assignment) =>
-              assignment.scope === "release"
-                ? `release-artwork:${assignment.role}`
-                : `track-artwork:${assignment.role}:${assignment.trackSourceRelativePaths.length}-tracks`,
+        ? artworkPlacements
+            .filter(
+              (placement) =>
+                placement.draft === asset.draft,
+            )
+            .map((placement) => ({
+              destinationRelativePath:
+                placement.destinationRelativePath,
+              logicalRoles: [
+                placement.trackSourceRelativePath
+                  ? `track-artwork:${placement.assignment.role}:${placement.trackSourceRelativePath}`
+                  : `release-artwork:${placement.assignment.role}`,
+              ],
+            }))
+        : [
+            {
+              destinationRelativePath:
+                asset.destinationRelativePath,
+              logicalRoles: ["imported-text-sidecar"],
+            },
+          ];
+
+    for (const destination of destinations) {
+      const preparedCopy = asset.embeddedArtwork
+        ? await prepareEmbeddedArtworkCopy(
+            canonicalIngestRoot,
+            asset.file,
+            asset.draft.sourceRelativePath,
+            asset.embeddedArtwork,
+            destination.destinationRelativePath,
+            `${releaseRelativePath}/${destination.destinationRelativePath}`,
+            destination.logicalRoles,
           )
-        : ["imported-text-sidecar"];
-    const preparedCopy = asset.embeddedArtwork
-      ? await prepareEmbeddedArtworkCopy(
-          canonicalIngestRoot,
-          asset.file,
-          asset.draft.sourceRelativePath,
-          asset.embeddedArtwork,
-          asset.destinationRelativePath,
-          `${releaseRelativePath}/${asset.destinationRelativePath}`,
-          logicalRoles,
-        )
-      : await prepareCopy(
-          canonicalIngestRoot,
-          asset.file,
-          asset.destinationRelativePath,
-          `${releaseRelativePath}/${asset.destinationRelativePath}`,
-          logicalRoles,
-        );
+        : await prepareCopy(
+            canonicalIngestRoot,
+            asset.file,
+            destination.destinationRelativePath,
+            `${releaseRelativePath}/${destination.destinationRelativePath}`,
+            destination.logicalRoles,
+          );
 
-    if (!existingReceipt) {
-      copies.push(preparedCopy);
-      continue;
-    }
+      if (!existingReceipt) {
+        copies.push(preparedCopy);
+        continue;
+      }
 
-    const receiptCopy =
-      existingCopyBySource.get(
-        asset.draft.sourceRelativePath,
+      const receiptCopy = existingCopyByMapping.get(
+        copyMappingKey(
+          preparedCopy.sourceRelativePath,
+          preparedCopy.destinationRelativePath,
+        ),
       );
 
-    if (
-      !receiptCopy ||
-      receiptCopy.destinationRelativePath !==
-        preparedCopy.destinationRelativePath ||
-      receiptCopy.sourceSha256 !==
-        preparedCopy.sha256
-    ) {
-      blockedItems.push({
-        kind: "copy",
-        sourceRelativePath:
-          preparedCopy.sourceRelativePath,
-        destinationRelativePath:
-          preparedCopy.destinationRelativePath,
-        mediaKind: preparedCopy.mediaKind,
-        sizeBytes: preparedCopy.bytes,
-        sha256: preparedCopy.sha256,
-        logicalRoles:
-          preparedCopy.logicalRoles,
-        action: "blocked",
-        reason:
-          "Existing staging sidecars are preserved only when their source mapping and bytes still match the ingest receipt.",
-      });
-      continue;
-    }
+      if (
+        !receiptCopy ||
+        receiptCopy.sourceSha256 !== preparedCopy.sha256
+      ) {
+        blockedItems.push({
+          kind: "copy",
+          sourceRelativePath:
+            preparedCopy.sourceRelativePath,
+          destinationRelativePath:
+            preparedCopy.destinationRelativePath,
+          mediaKind: preparedCopy.mediaKind,
+          sizeBytes: preparedCopy.bytes,
+          sha256: preparedCopy.sha256,
+          logicalRoles:
+            preparedCopy.logicalRoles,
+          action: "blocked",
+          reason:
+            "Existing staging sidecars are preserved only when their source mapping and bytes still match the ingest receipt. Assignment-driven artwork relocation requires a fresh rebuild or a future reviewed asset-migration workflow.",
+        });
+        continue;
+      }
 
-    preservedCopies.push(preparedCopy);
+      preservedCopies.push(preparedCopy);
+    }
   }
 
   const documents: PreparedDocument[] = [];
@@ -2836,12 +2957,12 @@ export async function prepareIngestReleaseBuild(
       (item) => item.action === "blocked",
     ).length,
     artworkSourceCount:
-      artworkAssets.length,
+      artworkDrafts.length,
     artworkAssignmentCount:
-      artworkAssets.reduce(
+      artworkDrafts.reduce(
         (total, asset) =>
           total +
-          asset.draft.artworkAssignments.length,
+          asset.artworkAssignments.length,
         0,
       ),
     addedTrackCount: tracks.filter(

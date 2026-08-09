@@ -297,3 +297,30 @@ test(
     );
   },
 );
+
+test(
+  "ignores hidden operation directories beside canonical releases",
+  async () => {
+    await withTemporaryLibrary(async (mediaRoot) => {
+      const releasesRoot = path.join(mediaRoot, "releases");
+      await mkdir(
+        path.join(releasesRoot, "2026-08-01_visible-release"),
+        { recursive: true },
+      );
+      await mkdir(
+        path.join(
+          releasesRoot,
+          ".metadata-editor-release-rename-operation",
+        ),
+        { recursive: true },
+      );
+
+      const result = await scanMediaLibrary(mediaRoot);
+
+      assert.deepEqual(
+        result.releases.map((release) => release.id),
+        ["2026-08-01_visible-release"],
+      );
+    });
+  },
+);

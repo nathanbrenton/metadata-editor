@@ -6,6 +6,7 @@ import {
   formatIngestSourceDisplayPath,
   sourceDateIsAfterReleaseDate,
   sourcePathsForBulkDate,
+  synchronizeBulkSourceDate,
 } from "../src/ingest-track-table.js";
 
 const builderSource = await readFile(
@@ -63,6 +64,35 @@ test("targets included non-missing sources for bulk date changes", () => {
   );
 
   assert.deepEqual(targets, ["release/one.wav"]);
+});
+
+test("keeps the bulk source date synchronized with release date until manually overridden", () => {
+  assert.equal(
+    synchronizeBulkSourceDate("", "", "2025-08-31"),
+    "2025-08-31",
+  );
+  assert.equal(
+    synchronizeBulkSourceDate(
+      "2025-08-31",
+      "2025-08-31",
+      "2025-09-01",
+    ),
+    "2025-09-01",
+  );
+  assert.equal(
+    synchronizeBulkSourceDate(
+      "2025-08-30",
+      "2025-08-31",
+      "2025-09-01",
+    ),
+    "2025-08-30",
+  );
+});
+
+test("shows where the bulk source date came from", () => {
+  assert.match(builderSource, /Prefilled from Release Date/);
+  assert.match(builderSource, /Release Date available:/);
+  assert.match(builderSource, /synchronizeBulkSourceDate/);
 });
 
 test("identifies source dates after the release date as a non-blocking advisory", () => {

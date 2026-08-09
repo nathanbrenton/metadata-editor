@@ -5,6 +5,10 @@ import type {
   IngestMediaKind,
 } from "./ingest-types.js";
 
+import {
+  analyzeIngestStructure,
+} from "./ingest-structure-inference.js";
+
 export const INGEST_BUILD_CONFIRMATION_PHRASE =
   "CREATE_STAGING_RELEASE";
 
@@ -85,6 +89,19 @@ export function defaultReleaseArtworkAssignment(): IngestArtworkAssignmentDraft 
     scope: "release",
     role: "front_cover",
     trackSourceRelativePaths: [],
+  };
+}
+
+export function defaultTrackArtworkAssignment(
+  trackSourceRelativePath: string,
+): IngestArtworkAssignmentDraft {
+  return {
+    id: "track-front-cover",
+    scope: "track",
+    role: "front_cover",
+    trackSourceRelativePaths: [
+      trackSourceRelativePath,
+    ],
   };
 }
 
@@ -532,6 +549,9 @@ export function createDefaultIngestBuildDraft(
   const audioFiles = inspection.files.filter(
     (file) => file.mediaKind === "audio",
   );
+  const structure = analyzeIngestStructure(
+    inspection,
+  );
   const releaseTitle = defaultReleaseTitle(
     inspection,
     audioFiles,
@@ -550,15 +570,51 @@ export function createDefaultIngestBuildDraft(
     releaseTitle,
   );
 
+  const structurallyAssignedNumbers = new Map<
+    string,
+    number
+  >();
+  const usedTrackNumbers = new Set<number>();
+
+  for (const [
+    trackNumber,
+    sourceRelativePath,
+  ] of structure.uniqueAudioSourceByTrackNumber) {
+    structurallyAssignedNumbers.set(
+      sourceRelativePath,
+      trackNumber,
+    );
+    usedTrackNumbers.add(trackNumber);
+  }
+
+  let nextFallbackTrackNumber = 1;
+  const nextAvailableTrackNumber = () => {
+    while (
+      usedTrackNumbers.has(
+        nextFallbackTrackNumber,
+      )
+    ) {
+      nextFallbackTrackNumber += 1;
+    }
+
+    const assigned = nextFallbackTrackNumber;
+    usedTrackNumbers.add(assigned);
+    nextFallbackTrackNumber += 1;
+    return assigned;
+  };
+
   const tracks = audioFiles.map(
-    (file, index): IngestBuildTrackDraft => {
+    (file): IngestBuildTrackDraft => {
       const extension =
         extensionOf(file.filename);
 
       return {
         sourceRelativePath: file.relativePath,
         include: true,
-        trackNumber: index + 1,
+        trackNumber:
+          structurallyAssignedNumbers.get(
+            file.relativePath,
+          ) ?? nextAvailableTrackNumber(),
         title: defaultTrackTitle(file),
         version: defaultTrackVersion(file),
         artist:
@@ -570,9 +626,43 @@ export function createDefaultIngestBuildDraft(
       };
     },
   );
+  const trackSourceByStructureNumber = new Map(
+    tracks
+      .map((track) => {
+        const structuralNumber =
+          structurallyAssignedNumbers.get(
+            track.sourceRelativePath,
+          );
+
+        return structuralNumber === undefined
+          ? undefined
+          : ([
+              structuralNumber,
+              track.sourceRelativePath,
+            ] as const);
+      })
+      .filter(
+        (entry): entry is readonly [number, string] =>
+          entry !== undefined,
+      ),
+  );
+
+  const rootReleaseFrontSource =
+    structure.releaseRootImageSources.length === 1
+      ? structure.releaseRootImageSources[0]
+      : undefined;
+  const releaseArtworkDirectoryFrontSource =
+    structure.releaseRootImageSources.length === 0 &&
+    structure.releaseArtworkDirectoryImageSources
+      .length === 1
+      ? structure
+          .releaseArtworkDirectoryImageSources[0]
+      : undefined;
+  const releaseFrontSource =
+    rootReleaseFrontSource ??
+    releaseArtworkDirectoryFrontSource;
 
   const usedDestinations = new Set<string>();
-  let releaseArtworkAssigned = false;
 
   const physicalAssets = inspection.files
     .filter(
@@ -591,32 +681,44 @@ export function createDefaultIngestBuildDraft(
         slugifyIngestValue(
           filenameStem(file.filename),
         ) || "imported-file";
-
-      let destinationRelativePath: string;
-
-      if (
+      const structureHint = structure.files.get(
+        file.relativePath,
+      );
+      const trackNumber =
+        structureHint?.trackNumber;
+      const uniqueTrackImage =
+        trackNumber !== undefined &&
+        structure.uniqueImageSourceByTrackNumber.get(
+          trackNumber,
+        ) === file.relativePath;
+      const trackSourceRelativePath =
+        trackNumber !== undefined &&
+        uniqueTrackImage
+          ? trackSourceByStructureNumber.get(
+              trackNumber,
+            )
+          : undefined;
+      const isReleaseFront =
         file.mediaKind === "image" &&
-        !releaseArtworkAssigned
-      ) {
-        releaseArtworkAssigned = true;
-        destinationRelativePath =
-          `artwork/front/artwork-master${extension}`;
-      } else if (file.mediaKind === "image") {
-        destinationRelativePath =
-          `artwork/supplemental/${sourceStem}${extension}`;
-      } else {
-        destinationRelativePath =
-          `notes/imported/${sourceStem}${extension}`;
-      }
-
+        file.relativePath === releaseFrontSource;
       const artworkAssignments =
-        file.mediaKind === "image" &&
-        releaseArtworkAssigned &&
-        destinationRelativePath.startsWith(
-          "artwork/front/",
-        )
-          ? [defaultReleaseArtworkAssignment()]
-          : [];
+        file.mediaKind !== "image"
+          ? []
+          : isReleaseFront
+            ? [defaultReleaseArtworkAssignment()]
+            : trackSourceRelativePath
+              ? [
+                  defaultTrackArtworkAssignment(
+                    trackSourceRelativePath,
+                  ),
+                ]
+              : [];
+      const destinationRelativePath =
+        file.mediaKind === "text"
+          ? `notes/imported/${sourceStem}${extension}`
+          : isReleaseFront
+            ? `artwork/front/artwork-master${extension}`
+            : `artwork/supplemental/${sourceStem}${extension}`;
 
       return {
         sourceRelativePath: file.relativePath,
@@ -651,7 +753,8 @@ export function createDefaultIngestBuildDraft(
 
   const embeddedEntries = [...embeddedArtworkByHash.values()];
   const useEmbeddedFront =
-    !releaseArtworkAssigned && embeddedEntries.length === 1;
+    releaseFrontSource === undefined &&
+    embeddedEntries.length === 1;
   const embeddedAssets = embeddedEntries.map(
     ({ file, artwork }, index): IngestBuildAssetDraft => {
       const sourceRelativePath =

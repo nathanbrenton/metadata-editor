@@ -48,13 +48,13 @@ export const workflowStages: readonly WorkflowStage[] = [
       "Find source candidates and inspect the audio, artwork, sidecars, inferred identity, and technical evidence without changing source files.",
     steps: [
       "Place an audio file or release folder in the configured ingest drop and refresh the source scan.",
-      "Inspect each candidate's file inventory, dates, titles, artists, technical properties, warnings, and possible artwork. Source counts and total size are condensed into the Source files header without adding another summary table.",
+      "Inspect each candidate's file inventory, dates, titles, artists, technical properties, warnings, and possible artwork. The Source files table puts a media-preview column first: image rows show clickable thumbnails and audio rows provide play/pause preview controls, while probe provenance remains in Details instead of occupying a dedicated table column. Numbered track folders such as 01, 02, track-03, or 04_title are treated as high-confidence structural hints: one audio file in that scope seeds the track number, one image paired with that audio seeds track-level front artwork, and one image at the release root seeds release-level front artwork. Filename disagreement does not override the stronger folder association. Source counts and total size are condensed into the Source files header without adding another summary table.",
       "Choose release artist and release title sources independently from folder-field ranges or embedded album and artist tags. Continuing to Staging explicitly carries those selected values into the release draft, including over an older locally saved inferred identity, while keeping both fields editable. Detailed inference evidence is available in a collapsed disclosure beneath the identity controls.",
       "Choose the candidate that should become a new release or update an existing release.",
       "Continue to Staging only after the candidate evidence has been reviewed.",
     ],
     currentNote:
-      "Read-only candidate scanning, row-based inspection, selectable release-identity sources, ffprobe/MediaInfo evidence, artwork preview, rescanning, and locally saved draft attachment state are available now.",
+      "Read-only candidate scanning, row-based inspection, selectable release-identity sources, source-path/folder-structure evidence, ffprobe/MediaInfo evidence, artwork preview, rescanning, and locally saved draft attachment state are available now. Structural suggestions remain editable in Staging and ambiguous multi-audio or multi-image folders are not silently collapsed into one assignment.",
   },
   {
     id: "staging",
@@ -70,7 +70,7 @@ export const workflowStages: readonly WorkflowStage[] = [
       "Preserve existing authored metadata and never infer that an omitted source should delete an existing track.",
     ],
     currentNote:
-      "New staging-release creation, incremental audio-track updates, track-number ordering, bulk title selection, bulk source-date application, read-only source-audio and artwork preview, stable-ID preservation, dry-run plans, explicit confirmation, copy verification, and rollback-safe promotion are available now. The track table shows source paths relative to the selected candidate and flags source dates later than the release date as non-blocking advisories. Intentional removals and general sidecar replacement remain future workflows.",
+      "New staging-release creation, incremental audio-track updates, track-number ordering, bulk title selection, bulk source-date application, read-only source-audio and artwork preview, stable-ID preservation, dry-run plans, explicit confirmation, copy verification, and rollback-safe promotion are available now. Artwork destinations are assignment-driven: release front artwork is staged under the release artwork tree, while track-level artwork is copied into each selected track's own artwork directory and referenced locally from track.toml. The track table shows source paths relative to the selected candidate and flags source dates later than the release date as non-blocking advisories. Intentional removals and general sidecar replacement remain future workflows.",
   },
   {
     id: "library",
@@ -82,28 +82,29 @@ export const workflowStages: readonly WorkflowStage[] = [
       "Add identity, numbering, dates, artists, performers, writers, sample and interpolation sources, arrangement, technical credits, rights, artwork metadata, lyrics, language, and notes. Contributor sort names default from credited names and stay synchronized until individually overridden. Release and track licenses default to All rights reserved. while remaining editable.",
       "Use release-level defaults for shared values and override only the individual tracks that differ. The performer-credit copy dialog uses a dense destination table and can select an inclusive destination range in displayed disc/track order, then replace, add to, or remove from the current destination selection before its duplicate-aware dry-run.",
       "When saved track numbers change, save the metadata first, then load and confirm the server's exact artist_number_title dry-run plan; guarded synchronization updates track IDs and reference TOMLs without overwriting an existing target.",
-      "Preview tracks from the sidebar or transport while reviewing titles, sequence, and track-specific values. Track rows omit the repeated word Track and present the saved number directly before the display title in one compact line; multi-disc releases use disc.track numbering. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits follow the page's native vertical scroll. The sidebar scrolls independently while it has room, then continued wheel or trackpad movement at its top or bottom edge hands off to the page so the release header, tabs, and footer remain reachable. Outside editable fields, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Only the sidebar scrolls for keyboard navigation, and it moves only when the destination crosses a visible edge, preventing whole-page jumps and unnecessary re-centering.",
+      "When a release title or generated directory identity changes, use Release identity & directory from the release menu. Review the server plan before updating release.id, release.title, release_reference.release_id values, the staging receipt, and the OS-level release folder. Existing targets are never overwritten; an operation manifest, backups, stale-plan detection, and rollback protect the move.",
+      "Preview tracks from the sidebar or transport while reviewing titles, sequence, and track-specific values. When a Library preview reaches the end of a track, playback automatically continues to the next playable track in the displayed release order and stops after the final playable track. The release header displays only explicit release-scoped front artwork; it never substitutes the selected track's image. Track rows show compact local track-artwork thumbnails when available, omit the repeated word Track, and present the saved number directly before the display title in one compact line; multi-disc releases use disc.track numbering. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits follow the page's native vertical scroll. The sidebar scrolls independently while it has room, then continued wheel or trackpad movement at its top or bottom edge hands off to the page so the release header, tabs, and footer remain reachable. Outside editable fields, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Only the sidebar scrolls for keyboard navigation, and it moves only when the destination crosses a visible edge, preventing whole-page jumps and unnecessary re-centering.",
       "Inspect missing, stale, current, or blocked playback and waveform derivatives under Files & Sources.",
       "Generate playback audio, waveform peaks, analysis, and web artwork from canonical masters when write-enabled media preparation is implemented.",
     ],
     currentNote:
-      "Metadata editing, release-to-track inheritance, controlled TOML saving, track-number-driven sidebar ordering, guarded track-directory synchronization, readiness guidance, and broad-format browser audio preview are available. Directory swaps use temporary names, an operation manifest, collision checks, and rollback protection. Media-processing status planning and waveform-generation code exist, but derivative-generation UI writes are not enabled yet.",
+      "Metadata editing, release-to-track inheritance, controlled TOML saving, track-number-driven sidebar ordering, guarded track- and release-directory synchronization, readiness guidance, and broad-format browser audio preview are available. Directory changes use temporary names, operation manifests, collision checks, backups, stale-plan detection, and rollback protection. Media-processing status planning and waveform-generation code exist, but derivative-generation UI writes are not enabled yet.",
   },
   {
     id: "publish",
     title: "Publish",
-    availability: "planned",
+    availability: "partial",
     summary:
       "Run consolidated preflight and build a sanitized public deployment snapshot from the private canonical release.",
     steps: [
-      "Validate required metadata, numbering, dates, rights, masters, artwork, playback audio, waveforms, and public catalog entries.",
-      "Block publication when files are missing, ambiguous, invalid, stale, or outside the configured media root.",
-      "Preview the exact player-facing package while excluding archival masters, private notes, source documents, logs, and editor-only data.",
+      "Run the release-scoped Library validator, then review the exact Publish preflight for required metadata, numbering, dates, masters, browser artwork, playback audio, waveforms, and public catalog destinations.",
+      "Block publication when files are missing, ambiguous, invalid, stale, outside configured roots, or unsuitable for browser playback.",
+      "Preview the exact player-facing package under published-media while excluding archival masters, TOML source documents, ingest receipts, backups, production notes, and editor-only administration.",
       "Build in a temporary output directory, verify the completed snapshot, and atomically promote the public deployment.",
       "Record publish history and support later republish, withdrawal, and rollback without deleting the private canonical release.",
     ],
     currentNote:
-      "The Publish tab currently provides a read-only readiness overview. Consolidated preflight, Ready/Published state changes, deployment writes, withdrawal, and rollback are planned and are clearly labeled as unavailable.",
+      "The Publish tab now builds an exact read-only preflight and public-package plan for one release. It combines Library validation with derivative freshness, browser-artwork requirements, destination inspection, the audio-player catalog contract, and an itemized list of copied or generated public files. The CLI commands publish:plan and preflight:publish expose the same plan in human or JSON form. Nothing is copied to published-media yet; temporary builds, atomic promotion, republish history, withdrawal, and rollback remain the next write-enabled milestone.",
   },
 ] as const;
 
@@ -173,7 +174,7 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
   {
     question: "How do I apply one source date to several Staging tracks?",
     answer:
-      "In Staging → Tracks, the Use checkboxes define the current source selection. Enter a date in Source date tools above the table and choose Apply to selected. Missing sources are skipped and the resulting draft change remains reviewable before the staging plan is applied.",
+      "In Staging → Tracks, the Use checkboxes define the current source selection. Source date tools are prefilled from the Release Date confirmed in Staging → Release, including a date inferred during Ingest. The bulk value follows the Release Date until you manually override it. Choose Apply to selected to copy that date into the selected track drafts; each track Source Date remains independently editable afterward. Missing sources are skipped and the resulting draft change remains reviewable before the staging plan is applied.",
   },
   {
     question: "How do I copy performer credits to a track range?",
@@ -188,7 +189,7 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
   {
     question: "Where is the summary for the current workflow tab?",
     answer:
-      "The left side of the sticky footer shows context for the active tab. Ingest displays the drop point, candidate and file totals, and probe availability; Staging displays the selected candidate or release-workspace count; Library displays release, track, master, artwork, and metadata totals; Publish displays readiness counts and reminds you that publishing writes are disabled.",
+      "The left side of the sticky footer shows context for the active tab. Ingest displays the drop point, candidate and file totals, and probe availability; Staging displays the selected candidate or release-workspace count; Library displays release, track, master, artwork, and metadata totals; Publish displays readiness counts and indicates that exact preflight planning is enabled while filesystem publishing remains disabled.",
   },
   {
     question: "Why are Developer / Admin Tools disabled after a reload?",
@@ -254,6 +255,16 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
     question: "Which file should be used to generate a waveform?",
     answer:
       "Generate waveforms directly from the lossless audio master. Do not use the playback MP3 as an intermediate source.",
+  },
+  {
+    question: "Where do files live during each workflow stage?",
+    answer:
+      "The runtime location strip beneath the workflow tabs shows the configured roots. Ingest reads the source drop without modifying it. Staging copies into the private release workspace. Library authors that canonical private workspace. Publish is planned to build a sanitized copy in the configured published-media root alongside the applications; it does not move or expose the only canonical release.",
+  },
+  {
+    question: "How do I check whether manual folder, filename, or TOML changes left the Library inconsistent?",
+    answer:
+      "Run npm run validate:release -- <release-id> for one release or npm run validate:library for the entire canonical Library. The validator is read-only: it reports path, identity, reference, numbering, TOML, master, derivative, and ingest-receipt issues without renaming, rewriting, deleting, or repairing files. Add --json for machine-readable output or --verify-hashes for full receipt copy verification.",
   },
 ] as const;
 

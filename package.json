@@ -8,6 +8,10 @@
     "dev:server": "tsx watch server/index.ts",
     "test": "node --import tsx --test tests/*.test.ts",
     "build": "tsc --noEmit && vite build",
+    "validate:library": "tsx scripts/validate-library.ts",
+    "validate:release": "tsx scripts/validate-library.ts --release",
+    "publish:plan": "tsx scripts/plan-publish.ts",
+    "preflight:publish": "tsx scripts/plan-publish.ts --strict",
     "preview": "vite preview",
     "tags:generate": "scripts/player-tag-tests/generate-fixtures.sh",
     "tags:summarize": "scripts/player-tag-tests/summarize-probes.py"

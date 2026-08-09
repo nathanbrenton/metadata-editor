@@ -40,7 +40,7 @@ test("does not present unfinished write stages as available", () => {
       ["ingest", "available"],
       ["staging", "available"],
       ["library", "partial"],
-      ["publish", "planned"],
+      ["publish", "partial"],
     ],
   );
 });
@@ -264,4 +264,19 @@ test("documents Library sidebar keyboard navigation", () => {
   assert.match(combinedText, /page's native vertical scroll/i);
   assert.match(combinedText, /hands off to the page/i);
   assert.match(combinedText, /only the sidebar scrolls/i);
+});
+
+
+test("documents Ingest Source files media previews", () => {
+  const ingest = workflowStages.find(({ id }) => id === "ingest");
+  const text = [
+    ingest?.summary,
+    ingest?.currentNote,
+    ...(ingest?.steps ?? []),
+  ].join(" ");
+
+  assert.match(text, /media-preview column first/i);
+  assert.match(text, /image rows show clickable thumbnails/i);
+  assert.match(text, /audio rows provide play\/pause preview controls/i);
+  assert.match(text, /probe provenance remains in Details/i);
 });

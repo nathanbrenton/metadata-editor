@@ -198,7 +198,8 @@ async function listRealDirectories(
     .filter(
       (entry) =>
         entry.isDirectory() &&
-        !entry.isSymbolicLink(),
+        !entry.isSymbolicLink() &&
+        !entry.name.startsWith("."),
     )
     .map((entry) => entry.name)
     .sort((left, right) =>

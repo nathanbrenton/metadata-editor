@@ -72,7 +72,7 @@ test("moves tab-specific summaries into the sticky footer", () => {
   assert.match(appSource, /Drop point \$\{ingestScan\.configuredRoot\}/);
   assert.match(appSource, /ffprobe \$\{/);
   assert.match(appSource, /MediaInfo \$\{/);
-  assert.match(appSource, /publishing disabled/);
+  assert.match(appSource, /preflight planning enabled · writes disabled/);
   assert.match(appSource, /className="footer-summary"/);
   assert.doesNotMatch(appSource, />\s*Drop summary\s*</);
   assert.doesNotMatch(appSource, /ingest-safety-banner/);

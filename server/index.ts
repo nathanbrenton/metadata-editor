@@ -128,6 +128,17 @@ import {
   scanMediaLibrary,
   scanReleaseById,
 } from "./scanner.js";
+import {
+  buildReleaseRenamePlan,
+  executeReleaseRenamePlan,
+} from "./release-rename.js";
+import {
+  buildPublishPlan,
+} from "./publish-plan.js";
+import {
+  readWorkflowLocations,
+  resolvePublishRoot,
+} from "./workflow-locations.js";
 
 const host = "127.0.0.1";
 const port = Number.parseInt(
@@ -871,6 +882,24 @@ const server = createServer(
       request.url ?? "/",
       `http://${host}:${port}`,
     );
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/workflow/locations"
+    ) {
+      try {
+        sendJson(response, 200, await readWorkflowLocations());
+      } catch (error) {
+        sendJson(response, 500, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown workflow location error",
+        });
+      }
+
+      return;
+    }
 
     if (
       request.method === "GET" &&
@@ -3246,6 +3275,172 @@ const server = createServer(
     }
 
     if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/release-rename-plan"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : "";
+        const targetReleaseId =
+          "targetReleaseId" in body &&
+          typeof body.targetReleaseId === "string"
+            ? body.targetReleaseId
+            : "";
+        const targetTitle =
+          "targetTitle" in body &&
+          typeof body.targetTitle === "string"
+            ? body.targetTitle
+            : "";
+
+        if (!releaseId || !targetReleaseId || !targetTitle) {
+          sendJson(response, 400, {
+            error:
+              "releaseId, targetReleaseId, and targetTitle are required",
+          });
+          return;
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        const release = await scanReleaseById(mediaRoot, releaseId);
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: `Release not found: ${releaseId}`,
+          });
+          return;
+        }
+
+        sendJson(
+          response,
+          200,
+          await buildReleaseRenamePlan(
+            mediaRoot,
+            release,
+            targetReleaseId,
+            targetTitle,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown release rename planning error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/apply-release-rename"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : "";
+        const targetReleaseId =
+          "targetReleaseId" in body &&
+          typeof body.targetReleaseId === "string"
+            ? body.targetReleaseId
+            : "";
+        const targetTitle =
+          "targetTitle" in body &&
+          typeof body.targetTitle === "string"
+            ? body.targetTitle
+            : "";
+        const confirmation =
+          "confirmation" in body &&
+          typeof body.confirmation === "string"
+            ? body.confirmation
+            : "";
+        const planFingerprint =
+          "planFingerprint" in body &&
+          typeof body.planFingerprint === "string"
+            ? body.planFingerprint
+            : "";
+
+        if (
+          !releaseId ||
+          !targetReleaseId ||
+          !targetTitle ||
+          !confirmation ||
+          !planFingerprint
+        ) {
+          sendJson(response, 400, {
+            error:
+              "releaseId, targetReleaseId, targetTitle, confirmation, and planFingerprint are required",
+          });
+          return;
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        const release = await scanReleaseById(mediaRoot, releaseId);
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: `Release not found: ${releaseId}`,
+          });
+          return;
+        }
+
+        sendJson(
+          response,
+          200,
+          await executeReleaseRenamePlan(
+            mediaRoot,
+            release,
+            targetReleaseId,
+            targetTitle,
+            confirmation,
+            planFingerprint,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown release rename error",
+        });
+      }
+
+      return;
+    }
+
+    if (
       request.method === "GET" &&
       requestUrl.pathname ===
         "/api/library/track-directory-rename-plan"
@@ -4128,6 +4323,48 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown preview error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/publish/plan"
+    ) {
+      try {
+        const releaseId =
+          requestUrl.searchParams.get("release");
+
+        if (!releaseId) {
+          sendJson(response, 400, {
+            error: "Missing release query parameter",
+          });
+          return;
+        }
+
+        const [mediaRoot, publishRoot] =
+          await Promise.all([
+            resolveMediaRoot(),
+            resolvePublishRoot(),
+          ]);
+
+        sendJson(
+          response,
+          200,
+          await buildPublishPlan(
+            mediaRoot,
+            publishRoot,
+            releaseId,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown publish-plan error",
         });
       }
 

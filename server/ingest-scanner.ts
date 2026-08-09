@@ -8,6 +8,9 @@ import {
 import path from "node:path";
 import { promisify } from "node:util";
 
+import {
+  addIngestStructureEvidence,
+} from "../shared/ingest-structure-inference.js";
 import type {
   IngestAttachmentOptions,
   IngestCandidateInspection,
@@ -1013,14 +1016,14 @@ export async function inspectIngestCandidate(
       : []),
   ];
 
-  return {
+  return addIngestStructureEvidence({
     inspectedAt: new Date().toISOString(),
     candidate,
     files,
     capabilities,
     warnings,
     readOnly: true,
-  };
+  });
 }
 
 export async function inspectIngestRelativeFiles(

@@ -4,6 +4,15 @@ export type WorkflowApplicationView =
   | "library"
   | "publish";
 
+export type WorkflowLocationDisplay = {
+  id: WorkflowApplicationView;
+  label: string;
+  purpose: string;
+  displayPath: string;
+  exists: boolean;
+  writeEnabled: boolean;
+};
+
 export const workflowNavigationItems: ReadonlyArray<{
   id: WorkflowApplicationView;
   step: number;
@@ -39,39 +48,75 @@ export const workflowNavigationItems: ReadonlyArray<{
 export function WorkflowNavigation({
   activeView,
   onNavigate,
+  locations = [],
 }: {
   activeView: WorkflowApplicationView | null;
   onNavigate: (view: WorkflowApplicationView) => void;
+  locations?: readonly WorkflowLocationDisplay[];
 }) {
-  return (
-    <div className="workflow-navigation-scroll">
-      <nav
-        className="application-tabs workflow-navigation"
-        aria-label="Release workflow"
-      >
-        {workflowNavigationItems.map((item) => {
-          const active = activeView === item.id;
+  const locationById = new Map(
+    locations.map((location) => [location.id, location]),
+  );
 
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className={active ? "active" : undefined}
-              aria-current={active ? "step" : undefined}
-              aria-pressed={active}
-              onClick={() => onNavigate(item.id)}
-            >
-              <span className="workflow-navigation-step">
-                {item.step}
-              </span>
-              <span className="workflow-navigation-copy">
-                <strong>{item.label}</strong>
-                <small>{item.description}</small>
-              </span>
-            </button>
-          );
-        })}
-      </nav>
+  return (
+    <div className="workflow-navigation-region">
+      <div className="workflow-navigation-scroll">
+        <nav
+          className="application-tabs workflow-navigation"
+          aria-label="Release workflow"
+        >
+          {workflowNavigationItems.map((item) => {
+            const active = activeView === item.id;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className={active ? "active" : undefined}
+                aria-current={active ? "step" : undefined}
+                aria-pressed={active}
+                onClick={() => onNavigate(item.id)}
+              >
+                <span className="workflow-navigation-step">
+                  {item.step}
+                </span>
+                <span className="workflow-navigation-copy">
+                  <strong>{item.label}</strong>
+                  <small>{item.description}</small>
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+
+      {locations.length > 0 && (
+        <div className="workflow-location-scroll">
+          <div
+            className="workflow-location-strip"
+            aria-label="Workflow media locations"
+          >
+            {workflowNavigationItems.map((item) => {
+            const location = locationById.get(item.id);
+            const active = activeView === item.id;
+
+            return (
+              <div
+                key={item.id}
+                className={active ? "active" : undefined}
+                title={location?.purpose}
+              >
+                <span>{location?.label ?? "Location"}</span>
+                <code>{location?.displayPath ?? "Unavailable"}</code>
+                {item.id === "publish" && !location?.writeEnabled && (
+                  <small>Preflight only · no writes</small>
+                )}
+              </div>
+            );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -18,10 +18,15 @@ import {
 import {
   buildAudioPreviewUrl,
   getAdjacentPlayableTrackId,
+  getNextPlayableTrackId,
   getAudioPreviewSourceLabel,
   getPlayableTrackIds,
   trackHasAudioPreview,
 } from "./audio-preview.js";
+
+import {
+  buildIngestAudioPreviewUrl,
+} from "./ingest-audio-preview.js";
 
 
 import {
@@ -169,6 +174,7 @@ import {
 import {
   buildArtworkGallery,
   selectPreferredReleaseArtwork,
+  selectReleaseFrontArtwork,
   type ArtworkGalleryItem,
 } from "./artwork-gallery.js";
 
@@ -227,6 +233,7 @@ import {
 import {
   WorkflowNavigation,
   type WorkflowApplicationView,
+  type WorkflowLocationDisplay,
 } from "./WorkflowNavigation.js";
 
 import {
@@ -236,6 +243,9 @@ import {
 import {
   buildTrackDirectoryIdForNumber,
 } from "../shared/track-directory-naming.js";
+import {
+  buildReleaseDirectoryId,
+} from "../shared/ingest-builder.js";
 
 import {
   resolveReleaseDisplayTitle,
@@ -342,6 +352,77 @@ type LibraryScanResult = {
   scannedAt: string;
   releases: ReleaseScanResult[];
   warnings: string[];
+};
+
+type PublishPlanIssue = {
+  code: string;
+  severity: "warning" | "blocked";
+  relativePath: string;
+  message: string;
+  suggestion?: string;
+};
+
+type PublishPlanItem = {
+  kind:
+    | "catalog"
+    | "publication-manifest"
+    | "release-metadata"
+    | "track-metadata"
+    | "release-artwork"
+    | "track-playback"
+    | "track-waveform";
+  action:
+    | "create"
+    | "replace"
+    | "generate"
+    | "update"
+    | "blocked";
+  destinationRelativePath: string;
+  reason: string;
+  sourceRelativePath?: string;
+  trackId?: string;
+  sizeBytes?: number;
+};
+
+type PublishPlan = {
+  releaseId: string;
+  generatedAt: string;
+  readOnly: true;
+  writesEnabled: false;
+  sourceRoot: string;
+  destinationRoot: string;
+  destinationReleaseRelativePath: string;
+  planFingerprint: string;
+  status: "ready" | "warning" | "blocked";
+  issues: PublishPlanIssue[];
+  items: PublishPlanItem[];
+  validation: {
+    status: "ok" | "warning" | "blocked";
+    warningCount: number;
+    blockedCount: number;
+  };
+  derivatives: {
+    trackCount: number;
+    currentCount: number;
+    createCount: number;
+    replaceCount: number;
+    blockedCount: number;
+  };
+  summary: {
+    itemCount: number;
+    createCount: number;
+    replaceCount: number;
+    generateCount: number;
+    updateCount: number;
+    blockedCount: number;
+  };
+  contract: {
+    name: string;
+    version: number;
+    catalogSchemaVersion: number;
+    mediaBaseUrl: string;
+    privateContentExcluded: readonly string[];
+  };
 };
 
 type InferredValue<T> = {
@@ -566,6 +647,49 @@ type ToastMessage = {
   id: number;
   message: string;
   tone: "success" | "info" | "error";
+};
+
+type WorkflowLocationsResponse = {
+  locations: WorkflowLocationDisplay[];
+  publishState: "planned";
+};
+
+type ReleaseRenamePlanItem = {
+  kind: "directory" | "toml" | "receipt";
+  relativePath: string;
+  targetRelativePath: string;
+  action: "rename" | "update" | "unchanged" | "blocked";
+  reason: string;
+};
+
+type ReleaseRenamePlan = {
+  releaseId: string;
+  targetReleaseId: string;
+  currentTitle: string;
+  targetTitle: string;
+  sourceRelativePath: string;
+  targetRelativePath: string;
+  confirmation: "RENAME_RELEASE_DIRECTORY";
+  generatedAt: string;
+  items: ReleaseRenamePlanItem[];
+  summary: {
+    renameCount: number;
+    updateCount: number;
+    unchangedCount: number;
+    blockedCount: number;
+  };
+  fingerprint: string;
+};
+
+type ReleaseRenameReceipt = {
+  previousReleaseId: string;
+  releaseId: string;
+  previousRelativePath: string;
+  relativePath: string;
+  operationId: string | null;
+  manifestRelativePath: string | null;
+  updatedFiles: string[];
+  completedAt: string;
 };
 
 type ReleaseMetadataTab =
@@ -856,6 +980,8 @@ export function App() {
     useState<string | null>(null);
   const [metadataRegistry, setMetadataRegistry] =
     useState<MetadataFieldDefinition[]>([]);
+  const [workflowLocations, setWorkflowLocations] =
+    useState<WorkflowLocationDisplay[]>([]);
   const [applicationView, setApplicationView] =
     useState<ApplicationView>("library");
   const [
@@ -949,6 +1075,40 @@ export function App() {
         "pageshow",
         disableAdminToolsOnPageRestore,
       );
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetch("/api/workflow/locations")
+      .then(async (response) => {
+        const result = (await response.json()) as
+          | WorkflowLocationsResponse
+          | { error?: string };
+
+        if (!response.ok) {
+          throw new Error(
+            "error" in result
+              ? result.error ?? `Workflow location request failed: HTTP ${response.status}`
+              : `Workflow location request failed: HTTP ${response.status}`,
+          );
+        }
+
+        if (!cancelled) {
+          setWorkflowLocations(
+            (result as WorkflowLocationsResponse).locations,
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkflowLocations([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -1507,7 +1667,7 @@ export function App() {
           publishCounts.preflightCandidate,
           "preflight candidate",
         ),
-        "publishing disabled",
+        "preflight planning enabled · writes disabled",
       ].join(" · ");
     }
 
@@ -1592,9 +1752,14 @@ export function App() {
             setShowAdminTools
           }
           onNotify={notify}
+          workflowLocations={workflowLocations}
           onBack={() =>
             setSelectedReleaseDetail(null)
           }
+          onReleaseRenamed={async (releaseId) => {
+            await refreshLibrary();
+            await openReleaseDetail(releaseId);
+          }}
           onRefresh={async () => {
             const releaseId =
               selectedReleaseDetail.releaseId;
@@ -1798,6 +1963,7 @@ export function App() {
           )}
 
           <WorkflowNavigation
+            locations={workflowLocations}
             activeView={
               applicationView === "ingest" ||
               applicationView === "staging" ||
@@ -1905,6 +2071,7 @@ export function App() {
           ) : applicationView === "publish" ? (
             <PublishWorkspace
               releases={scan?.releases ?? []}
+              workflowLocations={workflowLocations}
               loading={loading}
               error={error}
               onRefresh={() =>
@@ -4136,7 +4303,7 @@ function assessPublishReadiness(
     (track) => track.audioMasters.length === 1,
   ).length;
   const playbackCount = release.tracks.filter(
-    (track) => track.playbackAudio !== undefined,
+    (track) => track.playbackAudio?.length === 1,
   ).length;
   const artworkCount =
     release.artworkMasters.length +
@@ -4154,9 +4321,9 @@ function assessPublishReadiness(
     return {
       metadataLabel: readinessBadgeLabel(metadata),
       metadataTone: readinessTone(metadata),
-      masterLabel: `${readyMasters}/${release.tracks.length} unambiguous`,
-      playbackLabel: `${playbackCount}/${release.tracks.length} available`,
-      artworkLabel: `${artworkCount} source${artworkCount === 1 ? "" : "s"}`,
+      masterLabel: `${readyMasters}/${release.tracks.length}`,
+      playbackLabel: `${playbackCount}/${release.tracks.length}`,
+      artworkLabel: `${artworkCount}`,
       preflightLabel: "Needs work",
       preflightTone: "missing",
       note:
@@ -4172,9 +4339,9 @@ function assessPublishReadiness(
     return {
       metadataLabel: readinessBadgeLabel(metadata),
       metadataTone: readinessTone(metadata),
-      masterLabel: `${readyMasters}/${release.tracks.length} unambiguous`,
-      playbackLabel: `${playbackCount}/${release.tracks.length} available`,
-      artworkLabel: `${artworkCount} source${artworkCount === 1 ? "" : "s"}`,
+      masterLabel: `${readyMasters}/${release.tracks.length}`,
+      playbackLabel: `${playbackCount}/${release.tracks.length}`,
+      artworkLabel: `${artworkCount}`,
       preflightLabel: "Review candidate",
       preflightTone: "warning",
       note:
@@ -4185,9 +4352,9 @@ function assessPublishReadiness(
   return {
     metadataLabel: readinessBadgeLabel(metadata),
     metadataTone: readinessTone(metadata),
-    masterLabel: `${readyMasters}/${release.tracks.length} unambiguous`,
-    playbackLabel: `${playbackCount}/${release.tracks.length} available`,
-    artworkLabel: `${artworkCount} source${artworkCount === 1 ? "" : "s"}`,
+    masterLabel: `${readyMasters}/${release.tracks.length}`,
+    playbackLabel: `${playbackCount}/${release.tracks.length}`,
+    artworkLabel: `${artworkCount}`,
     preflightLabel: "Preflight candidate",
     preflightTone: "preview",
     note:
@@ -4195,8 +4362,48 @@ function assessPublishReadiness(
   };
 }
 
+function publishPlanTone(
+  status: PublishPlan["status"],
+): string {
+  if (status === "blocked") {
+    return "missing";
+  }
+
+  if (status === "warning") {
+    return "warning";
+  }
+
+  return "preview";
+}
+
+function publishPlanActionTone(
+  action: PublishPlanItem["action"],
+): string {
+  if (action === "blocked") {
+    return "missing";
+  }
+
+  if (action === "replace") {
+    return "warning";
+  }
+
+  return "preview";
+}
+
+function formatPublishPlanKind(
+  kind: PublishPlanItem["kind"],
+): string {
+  return kind
+    .split("-")
+    .map((part) =>
+      part.charAt(0).toUpperCase() + part.slice(1),
+    )
+    .join(" ");
+}
+
 function PublishWorkspace({
   releases,
+  workflowLocations,
   loading,
   error,
   onRefresh,
@@ -4204,24 +4411,65 @@ function PublishWorkspace({
   onOpenWorkflowHelp,
 }: {
   releases: ReleaseScanResult[];
+  workflowLocations: WorkflowLocationDisplay[];
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
   onOpenRelease: (releaseId: string) => void;
   onOpenWorkflowHelp: () => void;
 }) {
+  const [selectedPlan, setSelectedPlan] =
+    useState<PublishPlan | null>(null);
+  const [planLoadingReleaseId, setPlanLoadingReleaseId] =
+    useState<string | null>(null);
+  const [planError, setPlanError] =
+    useState<string | null>(null);
+
+  const loadPublishPlan = useCallback(async (
+    releaseId: string,
+  ) => {
+    setPlanLoadingReleaseId(releaseId);
+    setPlanError(null);
+
+    try {
+      const response = await fetch(
+        `/api/publish/plan?release=${encodeURIComponent(releaseId)}`,
+      );
+      const payload = await response.json() as
+        | PublishPlan
+        | { error?: string };
+
+      if (!response.ok || !("releaseId" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to build the publish preflight plan.",
+        );
+      }
+
+      setSelectedPlan(payload);
+    } catch (planRequestError) {
+      setPlanError(
+        planRequestError instanceof Error
+          ? planRequestError.message
+          : "Unable to build the publish preflight plan.",
+      );
+    } finally {
+      setPlanLoadingReleaseId(null);
+    }
+  }, []);
+
   return (
     <section className="workflow-workspace publish-workspace">
       <header className="workflow-workspace-header">
         <div>
           <p className="eyebrow">Step 4 · Publish</p>
-          <h2>Preflight and deploy releases</h2>
+          <h2>Preflight and package releases</h2>
           <p>
-            Review private-library readiness before a
-            sanitized player-facing deployment is built.
-            This workspace is intentionally read-only until
-            consolidated preflight and atomic publishing are
-            implemented.
+            Validate one private canonical release and review
+            the exact sanitized package intended for
+            audio-player. Preflight and dry-run planning are
+            enabled; filesystem publication remains disabled.
           </p>
         </div>
         <div className="workflow-workspace-actions">
@@ -4230,7 +4478,7 @@ function PublishWorkspace({
             disabled={loading}
             onClick={onRefresh}
           >
-            {loading ? "Refreshing…" : "Refresh readiness"}
+            {loading ? "Refreshing…" : "Refresh Library"}
           </button>
           <button
             type="button"
@@ -4242,16 +4490,38 @@ function PublishWorkspace({
       </header>
 
       <div className="workflow-workspace-notice planned">
-        <strong>Publishing writes are not enabled</strong>
+        <strong>Preflight planning is read-only</strong>
         <span>
-          The table consolidates currently visible evidence.
-          It does not mark a release Ready, generate a public
-          snapshot, or change deployment output.
+          Review validates the canonical release, requires
+          current playback MP3 and waveform derivatives,
+          selects browser-compatible front artwork, and lists
+          every public asset and generated JSON destination.
+          Nothing is copied or replaced yet.
         </span>
       </div>
 
+      <section className="publish-location-boundary" aria-label="Publish storage boundary">
+        <div>
+          <span>Private canonical source</span>
+          <code>
+            {workflowLocations.find((location) => location.id === "library")?.displayPath ?? "Configured Library root"}
+          </code>
+        </div>
+        <span className="publish-location-arrow" aria-hidden="true">→</span>
+        <div className="planned">
+          <span>Sanitized public output</span>
+          <code>
+            {workflowLocations.find((location) => location.id === "publish")?.displayPath ?? "Configured published-media root"}
+          </code>
+          <small>Dry-run plan available · nothing is copied yet</small>
+        </div>
+      </section>
+
       {error && (
         <p className="message error">{error}</p>
+      )}
+      {planError && (
+        <p className="message error">{planError}</p>
       )}
 
       <section className="workflow-table-panel">
@@ -4259,8 +4529,9 @@ function PublishWorkspace({
           <div>
             <h3>Release readiness overview</h3>
             <p>
-              Open a release in Library to resolve metadata,
-              source, playback, artwork, or derivative gaps.
+              Review exact preflight before publication. Open
+              Library to resolve metadata, derivative, artwork,
+              or filesystem blockers.
             </p>
           </div>
           <strong>{releases.length} releases</strong>
@@ -4274,7 +4545,7 @@ function PublishWorkspace({
                 <th scope="col">Metadata</th>
                 <th scope="col">Audio masters</th>
                 <th scope="col">Playback media</th>
-                <th scope="col">Artwork</th>
+                <th scope="col">Artwork Sources</th>
                 <th scope="col">Preflight</th>
                 <th scope="col">Current guidance</th>
                 <th scope="col">Publication</th>
@@ -4292,11 +4563,16 @@ function PublishWorkspace({
                 releases.map((release) => {
                   const assessment =
                     assessPublishReadiness(release);
+                  const loadingPlan =
+                    planLoadingReleaseId === release.id;
 
                   return (
                     <tr key={release.id}>
                       <th scope="row">
-                        <strong>{formatReleaseTitle(release.id)}</strong>
+                        <strong>{release.releaseTitle ?? formatReleaseTitle(release.id)}</strong>
+                        {release.primaryArtistName && (
+                          <span>{release.primaryArtistName}</span>
+                        )}
                         <code>{release.relativePath}</code>
                       </th>
                       <td>
@@ -4315,10 +4591,17 @@ function PublishWorkspace({
                       <td>{assessment.note}</td>
                       <td>
                         <span className="badge planned">
-                          Not enabled
+                          Dry-run only
                         </span>
                       </td>
-                      <td className="action-column">
+                      <td className="action-column publish-row-actions">
+                        <button
+                          type="button"
+                          disabled={loadingPlan}
+                          onClick={() => void loadPublishPlan(release.id)}
+                        >
+                          {loadingPlan ? "Planning…" : "Review preflight"}
+                        </button>
                         <button
                           type="button"
                           onClick={() => onOpenRelease(release.id)}
@@ -4334,6 +4617,123 @@ function PublishWorkspace({
           </table>
         </div>
       </section>
+
+      {selectedPlan && (
+        <section className="publish-plan-panel" aria-label="Publish preflight plan">
+          <header>
+            <div>
+              <p className="eyebrow">Exact publish preflight</p>
+              <h3>{selectedPlan.releaseId}</h3>
+              <p>
+                Package contract: {selectedPlan.contract.name} v{selectedPlan.contract.version}
+                {" · "}catalog schema v{selectedPlan.contract.catalogSchemaVersion}
+              </p>
+            </div>
+            <span className={`badge ${publishPlanTone(selectedPlan.status)}`}>
+              {selectedPlan.status}
+            </span>
+          </header>
+
+          <dl className="publish-plan-summary">
+            <div>
+              <dt>Validation</dt>
+              <dd>
+                {selectedPlan.validation.blockedCount} blocked · {selectedPlan.validation.warningCount} warnings
+              </dd>
+            </div>
+            <div>
+              <dt>Derivatives</dt>
+              <dd>
+                {selectedPlan.derivatives.currentCount} current · {selectedPlan.derivatives.createCount} missing · {selectedPlan.derivatives.replaceCount} stale
+              </dd>
+            </div>
+            <div>
+              <dt>Package</dt>
+              <dd>
+                {selectedPlan.summary.itemCount} items · {selectedPlan.summary.blockedCount} blocked
+              </dd>
+            </div>
+            <div>
+              <dt>Destination</dt>
+              <dd><code>{selectedPlan.destinationReleaseRelativePath}</code></dd>
+            </div>
+          </dl>
+
+          {selectedPlan.issues.length > 0 && (
+            <div className="publish-plan-issues">
+              <h4>Preflight issues</h4>
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Status</th>
+                    <th scope="col">Path</th>
+                    <th scope="col">Issue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedPlan.issues.map((item, index) => (
+                    <tr key={`${item.code}-${item.relativePath}-${index}`}>
+                      <td>
+                        <span className={`badge ${item.severity === "blocked" ? "missing" : "warning"}`}>
+                          {item.severity}
+                        </span>
+                      </td>
+                      <td><code>{item.relativePath}</code></td>
+                      <td>
+                        <strong>{item.message}</strong>
+                        {item.suggestion && <span>{item.suggestion}</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="publish-plan-items">
+            <h4>Player-facing package plan</h4>
+            <div className="workflow-table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Action</th>
+                    <th scope="col">Kind</th>
+                    <th scope="col">Source</th>
+                    <th scope="col">Public destination</th>
+                    <th scope="col">Size</th>
+                    <th scope="col">Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedPlan.items.map((item, index) => (
+                    <tr key={`${item.kind}-${item.destinationRelativePath}-${index}`}>
+                      <td>
+                        <span className={`badge ${publishPlanActionTone(item.action)}`}>
+                          {item.action}
+                        </span>
+                      </td>
+                      <td>{formatPublishPlanKind(item.kind)}</td>
+                      <td><code>{item.sourceRelativePath ?? "Generated"}</code></td>
+                      <td><code>{item.destinationRelativePath}</code></td>
+                      <td>{item.sizeBytes === undefined ? "—" : formatByteSize(item.sizeBytes)}</td>
+                      <td>{item.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <footer>
+            <span>
+              Private content excluded: {selectedPlan.contract.privateContentExcluded.join(", ")}.
+            </span>
+            <code title="Plan fingerprint">
+              {selectedPlan.planFingerprint}
+            </code>
+          </footer>
+        </section>
+      )}
     </section>
   );
 }
@@ -4605,6 +5005,113 @@ function IngestCandidateTable({
   );
 }
 
+function buildIngestArtworkPreviewUrl(
+  sourceRelativePath: string,
+  modifiedAt?: string,
+): string {
+  const parameters = new URLSearchParams({
+    path: sourceRelativePath,
+  });
+
+  if (modifiedAt) {
+    parameters.set("version", modifiedAt);
+  }
+
+  return `/api/ingest/artwork?${parameters.toString()}`;
+}
+
+function IngestSourcePreview({
+  file,
+  audioSourcePath,
+  audioPlaying,
+  audioLoading,
+  onToggleAudio,
+}: {
+  file: IngestFileInspection;
+  audioSourcePath: string | null;
+  audioPlaying: boolean;
+  audioLoading: boolean;
+  onToggleAudio: (file: IngestFileInspection) => void;
+}) {
+  const [imagePreviewFailed, setImagePreviewFailed] =
+    useState(false);
+
+  if (file.mediaKind === "image") {
+    if (imagePreviewFailed) {
+      return (
+        <span
+          className="ingest-source-preview-unavailable"
+          title="Image preview unavailable"
+          aria-label="Image preview unavailable"
+        >
+          —
+        </span>
+      );
+    }
+
+    const source = buildIngestArtworkPreviewUrl(
+      file.relativePath,
+      file.modifiedAt,
+    );
+
+    return (
+      <a
+        className="ingest-source-image-preview"
+        href={source}
+        target="_blank"
+        rel="noreferrer"
+        aria-label={`Open image preview for ${file.filename}`}
+        title="Open full image preview"
+      >
+        <img
+          src={source}
+          alt=""
+          loading="lazy"
+          onError={() => setImagePreviewFailed(true)}
+        />
+      </a>
+    );
+  }
+
+  if (file.mediaKind === "audio") {
+    const selected = audioSourcePath === file.relativePath;
+    const playing = selected && audioPlaying;
+    const loading = selected && audioLoading;
+
+    return (
+      <button
+        type="button"
+        className="ingest-source-audio-preview"
+        aria-label={
+          playing
+            ? `Pause ${file.filename}`
+            : `Play ${file.filename}`
+        }
+        aria-pressed={playing}
+        title={
+          playing
+            ? "Pause source preview"
+            : "Play source preview"
+        }
+        onClick={() => onToggleAudio(file)}
+      >
+        <span aria-hidden="true">
+          {loading ? "…" : playing ? "❚❚" : "▶"}
+        </span>
+      </button>
+    );
+  }
+
+  return (
+    <span
+      className="ingest-source-preview-unavailable"
+      aria-hidden="true"
+    >
+      —
+    </span>
+  );
+}
+
 function IngestCandidateInspectionView({
   inspection,
   onBack,
@@ -4645,6 +5152,105 @@ function IngestCandidateInspectionView({
   const [expandedFiles, setExpandedFiles] = useState<
     string[]
   >([]);
+  const sourceAudioPreviewRef =
+    useRef<HTMLAudioElement | null>(null);
+  const [sourceAudioPreviewPath, setSourceAudioPreviewPath] =
+    useState<string | null>(null);
+  const [sourceAudioPreviewPlaying, setSourceAudioPreviewPlaying] =
+    useState(false);
+  const [sourceAudioPreviewLoading, setSourceAudioPreviewLoading] =
+    useState(false);
+  const [sourceAudioPreviewError, setSourceAudioPreviewError] =
+    useState<string | null>(null);
+
+  useEffect(() => {
+    const audio = new Audio();
+    audio.preload = "metadata";
+
+    const handlePlay = () => {
+      setSourceAudioPreviewPlaying(true);
+      setSourceAudioPreviewLoading(false);
+    };
+    const handlePause = () => {
+      setSourceAudioPreviewPlaying(false);
+      setSourceAudioPreviewLoading(false);
+    };
+    const handleWaiting = () => {
+      setSourceAudioPreviewLoading(true);
+    };
+    const handleCanPlay = () => {
+      setSourceAudioPreviewLoading(false);
+    };
+    const handleError = () => {
+      setSourceAudioPreviewPlaying(false);
+      setSourceAudioPreviewLoading(false);
+      setSourceAudioPreviewError(
+        "The selected ingest source could not be decoded or transcoded for preview.",
+      );
+    };
+
+    audio.addEventListener("play", handlePlay);
+    audio.addEventListener("pause", handlePause);
+    audio.addEventListener("ended", handlePause);
+    audio.addEventListener("waiting", handleWaiting);
+    audio.addEventListener("canplay", handleCanPlay);
+    audio.addEventListener("error", handleError);
+    sourceAudioPreviewRef.current = audio;
+
+    return () => {
+      audio.pause();
+      audio.removeAttribute("src");
+      audio.load();
+      audio.removeEventListener("play", handlePlay);
+      audio.removeEventListener("pause", handlePause);
+      audio.removeEventListener("ended", handlePause);
+      audio.removeEventListener("waiting", handleWaiting);
+      audio.removeEventListener("canplay", handleCanPlay);
+      audio.removeEventListener("error", handleError);
+      sourceAudioPreviewRef.current = null;
+    };
+  }, []);
+
+  const toggleSourceAudioPreview = (
+    file: IngestFileInspection,
+  ) => {
+    const audio = sourceAudioPreviewRef.current;
+
+    if (!audio || file.mediaKind !== "audio") {
+      return;
+    }
+
+    setSourceAudioPreviewError(null);
+
+    if (
+      sourceAudioPreviewPath === file.relativePath &&
+      !audio.paused
+    ) {
+      audio.pause();
+      return;
+    }
+
+    if (sourceAudioPreviewPath !== file.relativePath) {
+      audio.pause();
+      audio.src = buildIngestAudioPreviewUrl(
+        file.relativePath,
+        file.modifiedAt,
+      );
+      audio.load();
+      setSourceAudioPreviewPath(file.relativePath);
+      setSourceAudioPreviewLoading(true);
+    }
+
+    void audio.play().catch((previewError: unknown) => {
+      setSourceAudioPreviewPlaying(false);
+      setSourceAudioPreviewLoading(false);
+      setSourceAudioPreviewError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Audio preview could not start.",
+      );
+    });
+  };
 
   const toggleFile = (relativePath: string) => {
     setExpandedFiles((current) =>
@@ -4827,11 +5433,28 @@ function IngestCandidateInspectionView({
           </div>
         </header>
 
+        {sourceAudioPreviewError && (
+          <p className="message error ingest-source-preview-error">
+            Audio preview: {sourceAudioPreviewError}
+          </p>
+        )}
+
         <div className="ingest-table-scroll">
           <table className="ingest-table ingest-source-table">
             <thead>
               <tr>
-                <th scope="col">Filename</th>
+                <th
+                  scope="col"
+                  className="ingest-source-preview-column"
+                >
+                  Preview
+                </th>
+                <th
+                  scope="col"
+                  className="ingest-source-filename-column"
+                >
+                  Filename
+                </th>
                 <th scope="col">Type</th>
                 <th scope="col">Container</th>
                 <th scope="col">Codec</th>
@@ -4847,7 +5470,6 @@ function IngestCandidateInspectionView({
                 <th scope="col" className="numeric">
                   Size
                 </th>
-                <th scope="col">Probe</th>
                 <th scope="col" className="action-column">
                   Details
                 </th>
@@ -4861,9 +5483,18 @@ function IngestCandidateInspectionView({
               return (
                 <tbody key={file.relativePath}>
                   <tr>
+                    <td className="ingest-source-preview-column">
+                      <IngestSourcePreview
+                        file={file}
+                        audioSourcePath={sourceAudioPreviewPath}
+                        audioPlaying={sourceAudioPreviewPlaying}
+                        audioLoading={sourceAudioPreviewLoading}
+                        onToggleAudio={toggleSourceAudioPreview}
+                      />
+                    </td>
                     <th
                       scope="row"
-                      className="ingest-sticky-column"
+                      className="ingest-sticky-column ingest-source-filename-column"
                     >
                       <strong>{file.filename}</strong>
                       <code>{file.relativePath}</code>
@@ -4884,8 +5515,9 @@ function IngestCandidateInspectionView({
                       {file.technical.codec ?? "—"}
                     </td>
                     <td className="numeric">
-                      {file.technical.durationSeconds !==
-                      undefined
+                      {file.mediaKind === "audio" &&
+                      file.technical.durationSeconds !==
+                        undefined
                         ? formatDuration(
                             file.technical
                               .durationSeconds,
@@ -4904,7 +5536,6 @@ function IngestCandidateInspectionView({
                     <td className="numeric">
                       {formatByteSize(file.sizeBytes)}
                     </td>
-                    <td>{file.detectedBy}</td>
                     <td className="action-column">
                       <button
                         type="button"
@@ -5011,15 +5642,13 @@ function IngestFileInspectionDetail({
       <div className="ingest-file-detail-columns">
         <section>
           <h4>Technical properties</h4>
-          {technicalEntries.length === 0 ? (
-            <p className="metadata-empty-value">
-              No normalized technical properties were
-              reported.
-            </p>
-          ) : (
-            <table className="ingest-property-table">
-              <tbody>
-                {technicalEntries.map(
+          <table className="ingest-property-table">
+            <tbody>
+              <tr>
+                <th scope="row">Probe</th>
+                <td>{file.detectedBy}</td>
+              </tr>
+              {technicalEntries.map(
                   ([key, value]) => (
                     <tr key={key}>
                       <th scope="row">{key}</th>
@@ -5031,10 +5660,9 @@ function IngestFileInspectionDetail({
                       </td>
                     </tr>
                   ),
-                )}
-              </tbody>
-            </table>
-          )}
+              )}
+            </tbody>
+          </table>
         </section>
 
         <section>
@@ -5061,7 +5689,7 @@ function IngestFileInspectionDetail({
       </div>
 
       <section className="ingest-file-evidence">
-        <h4>Filename and embedded evidence</h4>
+        <h4>Source-path, filename and embedded evidence</h4>
         <IngestEvidenceTable
           evidence={file.evidence}
         />
@@ -5388,7 +6016,7 @@ function ReleaseCard({
     : "Release date not identified";
 
   const releaseArtwork =
-    selectPreferredReleaseArtwork(
+    selectReleaseFrontArtwork(
       release.artworkMasters,
     );
   const releaseDisplayTitle =
@@ -10754,7 +11382,9 @@ function ReleaseMetadataDetailView({
   showAdminTools,
   onShowAdminToolsChange,
   onNotify,
+  workflowLocations,
   onBack,
+  onReleaseRenamed,
   onRefresh,
   onOpenWorkflowHelp,
   onNavigateWorkflow,
@@ -10771,7 +11401,9 @@ function ReleaseMetadataDetailView({
     message: string,
     tone?: ToastMessage["tone"],
   ) => void;
+  workflowLocations: WorkflowLocationDisplay[];
   onBack: () => void;
+  onReleaseRenamed: (releaseId: string) => void | Promise<void>;
   onRefresh: () => void | Promise<void>;
   onOpenWorkflowHelp: () => void;
   onNavigateWorkflow: (
@@ -10848,6 +11480,20 @@ function ReleaseMetadataDetailView({
     trackDirectoryRenameConfirmationInput,
     setTrackDirectoryRenameConfirmationInput,
   ] = useState("");
+  const [releaseRenameOpen, setReleaseRenameOpen] =
+    useState(false);
+  const [releaseRenameTitle, setReleaseRenameTitle] =
+    useState("");
+  const [releaseRenameId, setReleaseRenameId] =
+    useState("");
+  const [releaseRenamePlan, setReleaseRenamePlan] =
+    useState<ReleaseRenamePlan | null>(null);
+  const [releaseRenameConfirmation, setReleaseRenameConfirmation] =
+    useState("");
+  const [releaseRenameLoading, setReleaseRenameLoading] =
+    useState(false);
+  const [releaseRenameError, setReleaseRenameError] =
+    useState<string | null>(null);
   const [
     addingFieldsPath,
     setAddingFieldsPath,
@@ -10935,6 +11581,16 @@ function ReleaseMetadataDetailView({
     useRef<HTMLElement>(null);
   const audioPreviewRef =
     useRef<HTMLAudioElement | null>(null);
+  const audioPreviewTrackIdRef =
+    useRef<string | null>(null);
+  const playableTrackIdsRef =
+    useRef<readonly string[]>([]);
+  const loadAudioPreviewTrackRef = useRef<
+    ((
+      trackId: string,
+      playImmediately: boolean,
+    ) => Promise<void>) | null
+  >(null);
   const [audioPreviewTrackId, setAudioPreviewTrackId] =
     useState<string | null>(null);
   const [audioPreviewPlaying, setAudioPreviewPlaying] =
@@ -10949,10 +11605,15 @@ function ReleaseMetadataDetailView({
   useEffect(() => {
     setTrackDirectoryRenameReview(null);
     setTrackDirectoryRenameConfirmationInput("");
+    setReleaseRenameOpen(false);
+    setReleaseRenamePlan(null);
+    setReleaseRenameConfirmation("");
+    setReleaseRenameError(null);
   }, [detail.releaseId]);
 
   useEffect(() => {
     setAudioPreviewTrackId(null);
+    audioPreviewTrackIdRef.current = null;
     setAudioPreviewPlaying(false);
     setAudioPreviewLoading(false);
     setAudioPreviewError(null);
@@ -10982,10 +11643,30 @@ function ReleaseMetadataDetailView({
         "The selected source could not be decoded or transcoded for preview. Confirm FFmpeg is available, or generate audio-playback.mp3.",
       );
     };
+    const handleEnded = () => {
+      setAudioPreviewPlaying(false);
+      setAudioPreviewLoading(false);
+
+      const nextTrackId = getNextPlayableTrackId(
+        playableTrackIdsRef.current,
+        audioPreviewTrackIdRef.current,
+      );
+
+      if (!nextTrackId) {
+        return;
+      }
+
+      const loadTrack =
+        loadAudioPreviewTrackRef.current;
+
+      if (loadTrack) {
+        void loadTrack(nextTrackId, true);
+      }
+    };
 
     audio.addEventListener("play", handlePlay);
     audio.addEventListener("pause", handlePause);
-    audio.addEventListener("ended", handlePause);
+    audio.addEventListener("ended", handleEnded);
     audio.addEventListener("waiting", handleWaiting);
     audio.addEventListener("canplay", handleCanPlay);
     audio.addEventListener("error", handleError);
@@ -10997,7 +11678,7 @@ function ReleaseMetadataDetailView({
       audio.load();
       audio.removeEventListener("play", handlePlay);
       audio.removeEventListener("pause", handlePause);
-      audio.removeEventListener("ended", handlePause);
+      audio.removeEventListener("ended", handleEnded);
       audio.removeEventListener("waiting", handleWaiting);
       audio.removeEventListener("canplay", handleCanPlay);
       audio.removeEventListener("error", handleError);
@@ -13476,6 +14157,9 @@ function ReleaseMetadataDetailView({
   const playableTrackIds = getPlayableTrackIds(
     orderedScannedTracks,
   );
+  playableTrackIdsRef.current = playableTrackIds;
+  audioPreviewTrackIdRef.current =
+    audioPreviewTrackId;
   const activeTrackIsPlayable =
     activeDocumentGroup !== "release" &&
     playableTrackIds.includes(
@@ -13522,6 +14206,7 @@ function ReleaseMetadataDetailView({
       );
       audio.load();
       setAudioPreviewTrackId(trackId);
+      audioPreviewTrackIdRef.current = trackId;
       setAudioPreviewLoading(true);
     }
 
@@ -13542,6 +14227,9 @@ function ReleaseMetadataDetailView({
       );
     }
   };
+
+  loadAudioPreviewTrackRef.current =
+    loadAudioPreviewTrack;
 
   const toggleAudioPreviewTrack = (
     trackId: string,
@@ -13724,7 +14412,7 @@ function ReleaseMetadataDetailView({
   const releaseDateLabel =
     formatReleaseDate(detail.releaseId);
   const releaseArtwork =
-    selectPreferredReleaseArtwork(
+    selectReleaseFrontArtwork(
       release?.artworkMasters ?? [],
     );
   const isMetadataEmpty =
@@ -13749,6 +14437,142 @@ function ReleaseMetadataDetailView({
       authoredReleaseTitle,
       inferredReleaseTitle,
     );
+  const authoredReleaseDate = releaseTitleDocument
+    ? readDocumentDraftString(
+        releaseTitleDocument,
+        "release.dates.release",
+        draft,
+      )
+    : "";
+  const releaseRenameDate =
+    /^\d{4}-\d{2}-\d{2}$/.test(authoredReleaseDate)
+      ? authoredReleaseDate
+      : detail.releaseId.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? "";
+  const releaseRenameSuggestedId =
+    buildReleaseDirectoryId(
+      releaseRenameDate,
+      releaseRenameTitle || releaseDisplayTitle,
+    );
+
+  const openReleaseRename = () => {
+    if (dirtyCount > 0) {
+      setSaveError(
+        "Save or discard browser metadata changes before reviewing a release directory rename.",
+      );
+      return;
+    }
+
+    setReleaseRenameTitle(releaseDisplayTitle);
+    setReleaseRenameId(detail.releaseId);
+    setReleaseRenamePlan(null);
+    setReleaseRenameConfirmation("");
+    setReleaseRenameError(null);
+    setReleaseRenameOpen(true);
+    setDetailMenuOpen(false);
+  };
+
+  const previewReleaseRename = async () => {
+    setReleaseRenameLoading(true);
+    setReleaseRenameError(null);
+
+    try {
+      const response = await fetch(
+        "/api/library/release-rename-plan",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: detail.releaseId,
+            targetReleaseId: releaseRenameId,
+            targetTitle: releaseRenameTitle,
+          }),
+        },
+      );
+      const result = (await response.json()) as
+        | ReleaseRenamePlan
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error ?? `Release rename plan failed: HTTP ${response.status}`
+            : `Release rename plan failed: HTTP ${response.status}`,
+        );
+      }
+
+      setReleaseRenamePlan(result as ReleaseRenamePlan);
+      setReleaseRenameConfirmation("");
+    } catch (error) {
+      setReleaseRenameError(
+        error instanceof Error
+          ? error.message
+          : "Unknown release rename planning error",
+      );
+    } finally {
+      setReleaseRenameLoading(false);
+    }
+  };
+
+  const applyReleaseRename = async () => {
+    if (!releaseRenamePlan) {
+      return;
+    }
+
+    setReleaseRenameLoading(true);
+    setReleaseRenameError(null);
+
+    try {
+      const response = await fetch(
+        "/api/library/apply-release-rename",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: detail.releaseId,
+            targetReleaseId: releaseRenamePlan.targetReleaseId,
+            targetTitle: releaseRenamePlan.targetTitle,
+            confirmation: releaseRenameConfirmation,
+            planFingerprint: releaseRenamePlan.fingerprint,
+          }),
+        },
+      );
+      const result = (await response.json()) as
+        | ReleaseRenameReceipt
+        | { error?: string };
+
+      if (!response.ok) {
+        throw new Error(
+          "error" in result
+            ? result.error ?? `Release rename failed: HTTP ${response.status}`
+            : `Release rename failed: HTTP ${response.status}`,
+        );
+      }
+
+      const receipt = result as ReleaseRenameReceipt;
+      setReleaseRenameOpen(false);
+      setReleaseRenamePlan(null);
+      setReleaseRenameConfirmation("");
+      onNotify(
+        receipt.releaseId === receipt.previousReleaseId
+          ? "Release metadata identity synchronized"
+          : `Release renamed to ${receipt.releaseId}`,
+        "success",
+      );
+      await onReleaseRenamed(receipt.releaseId);
+    } catch (error) {
+      setReleaseRenameError(
+        error instanceof Error
+          ? error.message
+          : "Unknown release rename error",
+      );
+    } finally {
+      setReleaseRenameLoading(false);
+    }
+  };
 
   const inferredTracks = trackIds
     .map(inferTrackSummary)
@@ -14323,6 +15147,13 @@ function ReleaseMetadataDetailView({
               {releaseDateLabel}
             </p>
 
+            <p className="metadata-detail-location">
+              <span>Library</span>
+              <code>
+                {`${workflowLocations.find((location) => location.id === "library")?.displayPath ?? "Library root"}/${release?.relativePath ?? `releases/${detail.releaseId}`}`}
+              </code>
+            </p>
+
             <div
               className="metadata-health-summary"
               aria-label="Metadata health summary"
@@ -14397,6 +15228,27 @@ function ReleaseMetadataDetailView({
               >
                 Refresh metadata
               </button>
+            </section>
+
+            <section className="menu-card">
+              <h2>Release identity &amp; directory</h2>
+              <p>
+                Review a guarded plan that synchronizes the release title,
+                release ID, reference TOMLs, staging receipt, and the OS-level
+                release directory without overwriting an existing target.
+              </p>
+              <button
+                type="button"
+                disabled={dirtyCount > 0}
+                onClick={openReleaseRename}
+              >
+                Review release rename
+              </button>
+              {dirtyCount > 0 && (
+                <p className="menu-meta">
+                  Save or discard browser edits first.
+                </p>
+              )}
             </section>
 
             <section className="menu-card">
@@ -14497,6 +15349,7 @@ function ReleaseMetadataDetailView({
 
       <WorkflowNavigation
         activeView="library"
+        locations={workflowLocations}
         onNavigate={navigateFromRelease}
       />
 
@@ -14865,6 +15718,226 @@ function ReleaseMetadataDetailView({
             Saving metadata does not rename folders. Existing targets are never overwritten. Confirmed swaps use temporary names, an operation manifest, TOML backups, and rollback protection.
           </p>
         </section>
+      )}
+
+      {releaseRenameOpen && (
+        <MetadataFieldModal
+          title="Review release identity and directory"
+          onClose={() => {
+            if (releaseRenameLoading) return;
+            setReleaseRenameOpen(false);
+            setReleaseRenamePlan(null);
+            setReleaseRenameConfirmation("");
+            setReleaseRenameError(null);
+          }}
+        >
+          <section className="release-rename-review metadata-field-full-width">
+            <div className="release-rename-inputs">
+              <label>
+                <span>Release title</span>
+                <input
+                  type="text"
+                  value={releaseRenameTitle}
+                  disabled={releaseRenameLoading || releaseRenamePlan !== null}
+                  onChange={(event) => {
+                    setReleaseRenameTitle(event.target.value);
+                    setReleaseRenamePlan(null);
+                  }}
+                />
+              </label>
+
+              <label>
+                <span>Release directory ID</span>
+                <input
+                  type="text"
+                  value={releaseRenameId}
+                  disabled={releaseRenameLoading || releaseRenamePlan !== null}
+                  spellCheck={false}
+                  onChange={(event) => {
+                    setReleaseRenameId(event.target.value);
+                    setReleaseRenamePlan(null);
+                  }}
+                />
+              </label>
+
+              <button
+                type="button"
+                disabled={
+                  releaseRenameLoading ||
+                  releaseRenamePlan !== null ||
+                  releaseRenameId === releaseRenameSuggestedId
+                }
+                onClick={() => setReleaseRenameId(releaseRenameSuggestedId)}
+              >
+                Use date + title ID
+              </button>
+            </div>
+
+            <dl className="release-rename-path-summary">
+              <div>
+                <dt>Current</dt>
+                <dd><code>{release?.relativePath ?? `releases/${detail.releaseId}`}</code></dd>
+              </div>
+              <div>
+                <dt>Proposed</dt>
+                <dd><code>{`releases/${releaseRenameId || "…"}`}</code></dd>
+              </div>
+            </dl>
+
+            {!releaseRenamePlan ? (
+              <>
+                <p>
+                  Previewing is read-only. The server checks case-insensitive
+                  directory collisions, parses every TOML, and identifies the
+                  staging receipt changes before any file is moved.
+                </p>
+                <div className="release-rename-actions">
+                  <button
+                    type="button"
+                    disabled={releaseRenameLoading}
+                    onClick={() => {
+                      setReleaseRenameOpen(false);
+                      setReleaseRenameError(null);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-action"
+                    disabled={
+                      releaseRenameLoading ||
+                      !releaseRenameTitle.trim() ||
+                      !releaseRenameId.trim()
+                    }
+                    onClick={() => void previewReleaseRename()}
+                  >
+                    {releaseRenameLoading
+                      ? "Building dry-run plan…"
+                      : "Preview release rename plan"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="track-directory-rename-review-summary">
+                  <div>
+                    <strong>Server dry-run plan</strong>
+                    <span>
+                      {releaseRenamePlan.summary.renameCount} directory rename
+                      {" · "}
+                      {releaseRenamePlan.summary.updateCount} metadata update
+                      {releaseRenamePlan.summary.updateCount === 1 ? "" : "s"}
+                      {" · "}
+                      {releaseRenamePlan.summary.blockedCount} blocked
+                    </span>
+                  </div>
+                  <code title={releaseRenamePlan.fingerprint}>
+                    Plan {releaseRenamePlan.fingerprint.slice(0, 12)}…
+                  </code>
+                </div>
+
+                <div className="track-directory-rename-review-table-wrap">
+                  <table className="track-directory-rename-review-table release-rename-plan-table">
+                    <thead>
+                      <tr>
+                        <th>Kind</th>
+                        <th>Action</th>
+                        <th>Current</th>
+                        <th>Target</th>
+                        <th>Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {releaseRenamePlan.items.map((item) => (
+                        <tr
+                          key={`${item.kind}:${item.relativePath}`}
+                          className={item.action === "blocked" ? "blocked" : undefined}
+                        >
+                          <td>{item.kind}</td>
+                          <td>
+                            <span className={`badge ${item.action === "blocked" ? "blocked" : item.action === "unchanged" ? "optional" : "preview"}`}>
+                              {item.action}
+                            </span>
+                          </td>
+                          <td><code>{item.relativePath}</code></td>
+                          <td><code>{item.targetRelativePath}</code></td>
+                          <td>{item.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <p>
+                  Apply revalidates this exact plan, creates an operation
+                  manifest and backups, updates release.id, release.title and
+                  release_reference.release_id values, updates the staging
+                  receipt, then performs the OS-level directory move. A failure
+                  triggers rollback.
+                </p>
+
+                {releaseRenamePlan.summary.blockedCount > 0 ? (
+                  <p className="message error" role="alert">
+                    This plan is blocked. Resolve the listed issue and preview
+                    a new plan.
+                  </p>
+                ) : (
+                  <label className="track-directory-rename-confirmation">
+                    <span>
+                      Type <code>{releaseRenamePlan.confirmation}</code> to
+                      confirm this filesystem operation.
+                    </span>
+                    <input
+                      type="text"
+                      value={releaseRenameConfirmation}
+                      autoComplete="off"
+                      spellCheck={false}
+                      disabled={releaseRenameLoading}
+                      onChange={(event) =>
+                        setReleaseRenameConfirmation(event.target.value)
+                      }
+                    />
+                  </label>
+                )}
+
+                <div className="release-rename-actions">
+                  <button
+                    type="button"
+                    disabled={releaseRenameLoading}
+                    onClick={() => {
+                      setReleaseRenamePlan(null);
+                      setReleaseRenameConfirmation("");
+                      setReleaseRenameError(null);
+                    }}
+                  >
+                    Edit proposal
+                  </button>
+                  <button
+                    type="button"
+                    className="primary-action"
+                    disabled={
+                      releaseRenameLoading ||
+                      releaseRenamePlan.summary.blockedCount > 0 ||
+                      releaseRenameConfirmation !== releaseRenamePlan.confirmation
+                    }
+                    onClick={() => void applyReleaseRename()}
+                  >
+                    {releaseRenameLoading
+                      ? "Applying guarded release rename…"
+                      : "Apply reviewed release rename"}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {releaseRenameError && (
+              <p className="message error" role="alert">
+                {releaseRenameError}
+              </p>
+            )}
+          </section>
+        </MetadataFieldModal>
       )}
 
       {trackDirectoryRenameReview && (
@@ -15450,6 +16523,10 @@ function ReleaseMetadataDetailView({
               )?.displayTitle ??
                 formatReleaseTitle(trackId),
             );
+          const trackArtwork =
+            selectPreferredReleaseArtwork(
+              scannedTrack?.artworkMasters ?? [],
+            );
 
           return (
             <div
@@ -15485,50 +16562,72 @@ function ReleaseMetadataDetailView({
                   )
                 }
               >
-                <span className="document-nav-label track-document-nav-label">
-                  <span className="track-navigation-heading">
-                    <span className="track-navigation-primary">
-                      <strong className="track-navigation-number">
-                        {trackNumberLabel}
-                      </strong>
-                      <span className="track-navigation-title">
-                        {trackDisplayTitle}
-                      </span>
-                      {navigationEntry?.hasNumberConflict && (
-                        <small
-                          className="track-number-conflict-badge"
-                          title={numberConflictTitle}
-                          aria-label={numberConflictTitle}
-                        >
-                          !
-                        </small>
-                      )}
-                    </span>
-
-                    <span
-                      className="track-navigation-badges"
-                      aria-label="Track metadata status"
-                    >
-                      <small
-                        className="document-count"
-                        title={`${trackDocumentCount} metadata documents`}
-                      >
-                        {trackDocumentCount}
-                      </small>
-
-                      <ReadinessNavBadge
-                        scope={trackReadinessScope}
-                        skippedPaths={skippedReadinessPathSet}
+                <span className="track-navigation-row">
+                  <span
+                    className={[
+                      "track-navigation-artwork",
+                      trackArtwork ? "" : "is-empty",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    aria-hidden="true"
+                  >
+                    {trackArtwork ? (
+                      <img
+                        src={artworkPreviewUrl(
+                          trackArtwork.relativePath,
+                        )}
+                        alt=""
+                        loading="lazy"
                       />
+                    ) : null}
+                  </span>
 
-                      {trackDraftCount > 0 && (
+                  <span className="document-nav-label track-document-nav-label">
+                    <span className="track-navigation-heading">
+                      <span className="track-navigation-primary">
+                        <strong className="track-navigation-number">
+                          {trackNumberLabel}
+                        </strong>
+                        <span className="track-navigation-title">
+                          {trackDisplayTitle}
+                        </span>
+                        {navigationEntry?.hasNumberConflict && (
+                          <small
+                            className="track-number-conflict-badge"
+                            title={numberConflictTitle}
+                            aria-label={numberConflictTitle}
+                          >
+                            !
+                          </small>
+                        )}
+                      </span>
+
+                      <span
+                        className="track-navigation-badges"
+                        aria-label="Track metadata status"
+                      >
                         <small
-                          className="unsaved-count"
-                          title={`${trackDraftCount} unsaved changes`}
+                          className="document-count"
+                          title={`${trackDocumentCount} metadata documents`}
                         >
-                          {trackDraftCount}
+                          {trackDocumentCount}
                         </small>
-                      )}
+
+                        <ReadinessNavBadge
+                          scope={trackReadinessScope}
+                          skippedPaths={skippedReadinessPathSet}
+                        />
+
+                        {trackDraftCount > 0 && (
+                          <small
+                            className="unsaved-count"
+                            title={`${trackDraftCount} unsaved changes`}
+                          >
+                            {trackDraftCount}
+                          </small>
+                        )}
+                      </span>
                     </span>
                   </span>
                 </span>
@@ -17443,6 +18542,22 @@ function MetadataValueCell({
       : null;
   const displayCurrentValue =
     guidedNoticeDisplayValue ?? currentValue;
+
+  const usesGuardedReleaseIdentity =
+    document.scope === "release" &&
+    row.path === "release.id";
+
+  if (editMode && usesGuardedReleaseIdentity) {
+    return (
+      <span className="metadata-value guarded-release-identity">
+        <span>{formatMetadataValue(displayCurrentValue)}</span>
+        <small className="metadata-provenance-note">
+          Use Release identity &amp; directory from the release menu so the
+          folder, references, receipt, and release ID stay synchronized.
+        </small>
+      </span>
+    );
+  }
 
   if (!editMode) {
     return (

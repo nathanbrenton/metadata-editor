@@ -12,6 +12,7 @@ import {
 import {
   buildAudioPreviewUrl,
   getAdjacentPlayableTrackId,
+  getNextPlayableTrackId,
   getAudioPreviewSourceLabel,
   getPlayableTrackIds,
   trackHasAudioPreview,
@@ -180,6 +181,37 @@ test("builds a playable track sequence and wraps transport navigation", () => {
       1,
     ),
     "one",
+  );
+});
+
+test("advances ended playback to the next playable track without wrapping", () => {
+  assert.equal(
+    getNextPlayableTrackId(
+      ["one", "two", "three"],
+      "one",
+    ),
+    "two",
+  );
+  assert.equal(
+    getNextPlayableTrackId(
+      ["one", "two", "three"],
+      "two",
+    ),
+    "three",
+  );
+  assert.equal(
+    getNextPlayableTrackId(
+      ["one", "two", "three"],
+      "three",
+    ),
+    null,
+  );
+  assert.equal(
+    getNextPlayableTrackId(
+      ["one", "two", "three"],
+      "missing",
+    ),
+    null,
   );
 });
 

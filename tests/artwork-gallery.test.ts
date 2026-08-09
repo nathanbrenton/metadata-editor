@@ -7,6 +7,7 @@ import {
   isBrowserPreviewableArtwork,
   requiresTranscodedArtworkPreview,
   selectPreferredReleaseArtwork,
+  selectReleaseFrontArtwork,
   type ArtworkAssetLike,
 } from "../src/artwork-gallery.js";
 
@@ -89,6 +90,30 @@ test("tracks without local artwork inherit release front artwork only", () => {
   assert.equal(
     gallery.every((item) => item.source === "inherited-release"),
     true,
+  );
+});
+
+
+test("release header artwork requires an explicit release-scoped front asset", () => {
+  const releaseFront = asset(
+    "releases/demo/artwork/front/artwork-master.tif",
+    ".tif",
+  );
+  const releaseBack = asset(
+    "releases/demo/artwork/back/artwork-master.png",
+  );
+  const trackFront = asset(
+    "releases/demo/tracks/artist_01_track/artwork/front/artwork-master.png",
+  );
+
+  assert.equal(
+    selectReleaseFrontArtwork([trackFront, releaseBack, releaseFront])
+      ?.relativePath,
+    releaseFront.relativePath,
+  );
+  assert.equal(
+    selectReleaseFrontArtwork([trackFront, releaseBack]),
+    null,
   );
 });
 

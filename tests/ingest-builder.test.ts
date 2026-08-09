@@ -860,7 +860,7 @@ test(
 );
 
 test(
-  "copies one artwork source once while assigning it to the release and a track",
+  "copies artwork into release and track-local destinations from assignments",
   async (t) => {
     const fixture = await createFixture();
 
@@ -879,6 +879,8 @@ test(
           ? {
               ...asset,
               include: true,
+              destinationRelativePath:
+                "artwork/supplemental/manually-assigned.jpg",
               artworkAssignments: [
                 {
                   id: "release-front",
@@ -925,12 +927,23 @@ test(
         item.mediaKind === "image",
     );
 
-    assert.equal(artworkCopies.length, 1);
+    assert.equal(artworkCopies.length, 2);
     assert.deepEqual(
-      artworkCopies[0].logicalRoles,
+      artworkCopies.map(
+        (item) => item.destinationRelativePath,
+      ),
       [
-        "release-artwork:front_cover",
-        "track-artwork:track_artwork:1-tracks",
+        "releases/2016-07-26_pixels/artwork/front/artwork-master.jpg",
+        "releases/2016-07-26_pixels/tracks/nathan-brenton_01_pixels-v0/artwork/front/artwork-master.jpg",
+      ],
+    );
+    assert.deepEqual(
+      artworkCopies.map((item) => item.logicalRoles),
+      [
+        ["release-artwork:front_cover"],
+        [
+          `track-artwork:track_artwork:${trackSource}`,
+        ],
       ],
     );
 
@@ -949,6 +962,28 @@ test(
       releaseRoot,
       "tracks",
       "nathan-brenton_01_pixels-v0",
+    );
+    assert.equal(
+      (await stat(
+        path.join(
+          releaseRoot,
+          "artwork",
+          "front",
+          "artwork-master.jpg",
+        ),
+      )).isFile(),
+      true,
+    );
+    assert.equal(
+      (await stat(
+        path.join(
+          trackRoot,
+          "artwork",
+          "front",
+          "artwork-master.jpg",
+        ),
+      )).isFile(),
+      true,
     );
     const releaseToml = parse(
       await readFile(
@@ -1002,11 +1037,11 @@ test(
     assert.equal(
       trackToml.track?.artwork?.[0]
         ?.master_path,
-      "../../artwork/front/artwork-master.jpg",
+      "artwork/front/artwork-master.jpg",
     );
     assert.equal(
       trackToml.track?.assets?.artwork?.master,
-      "../../artwork/front/artwork-master.jpg",
+      "artwork/front/artwork-master.jpg",
     );
   },
 );

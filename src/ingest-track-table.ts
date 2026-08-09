@@ -55,3 +55,30 @@ export function sourceDateIsAfterReleaseDate(
     sourceDate > releaseDate
   );
 }
+
+/*
+ * Keep the bulk Source Date aligned with the release date until the user
+ * intentionally chooses a different bulk value. This also handles drafts
+ * whose release date arrives after the track table first mounts.
+ */
+export function synchronizeBulkSourceDate(
+  currentBulkSourceDate: string,
+  previousReleaseDate: string,
+  releaseDate: string,
+): string {
+  const isoDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+  if (!isoDatePattern.test(releaseDate)) {
+    return currentBulkSourceDate;
+  }
+
+  if (
+    currentBulkSourceDate === "" ||
+    (previousReleaseDate !== "" &&
+      currentBulkSourceDate === previousReleaseDate)
+  ) {
+    return releaseDate;
+  }
+
+  return currentBulkSourceDate;
+}

@@ -32,6 +32,30 @@ export function getPlayableTrackIds(
     .map((track) => track.id);
 }
 
+export function getNextPlayableTrackId(
+  playableTrackIds: readonly string[],
+  currentTrackId: string | null,
+): string | null {
+  if (
+    playableTrackIds.length === 0 ||
+    currentTrackId === null
+  ) {
+    return null;
+  }
+
+  const currentIndex =
+    playableTrackIds.indexOf(currentTrackId);
+
+  if (
+    currentIndex < 0 ||
+    currentIndex >= playableTrackIds.length - 1
+  ) {
+    return null;
+  }
+
+  return playableTrackIds[currentIndex + 1] ?? null;
+}
+
 export function getAdjacentPlayableTrackId(
   playableTrackIds: readonly string[],
   currentTrackId: string | null,

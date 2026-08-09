@@ -252,6 +252,34 @@ function buildGalleryItems(
     .map(({ sourceIndex: _sourceIndex, ...item }) => item);
 }
 
+function isReleaseScopedArtworkAsset(
+  asset: ArtworkAssetLike,
+): boolean {
+  const normalizedPath =
+    `/${asset.relativePath.replaceAll("\\", "/").toLowerCase()}/`;
+
+  return (
+    normalizedPath.includes("/artwork/") &&
+    !normalizedPath.includes("/tracks/")
+  );
+}
+
+/**
+ * Select only an explicit release-scoped front image. Release headers must
+ * never fall back to a track image or to another release artwork role.
+ */
+export function selectReleaseFrontArtwork(
+  assets: readonly ArtworkAssetLike[],
+): ArtworkAssetLike | null {
+  const frontArtwork = deduplicateArtworkAssets(assets).filter(
+    (asset) =>
+      isReleaseScopedArtworkAsset(asset) &&
+      inferArtworkRole(asset) === "front",
+  );
+
+  return selectPreferredArtworkCandidate(frontArtwork);
+}
+
 export function selectPreferredReleaseArtwork(
   assets: readonly ArtworkAssetLike[],
 ): ArtworkAssetLike | null {
