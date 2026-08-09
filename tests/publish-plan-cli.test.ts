@@ -11,7 +11,7 @@ test("parses publish plan and strict preflight options", () => {
       "2026-08-01_release",
       "--json",
       "--media-root",
-      "../demo-media",
+      "../media-library",
       "--publish-root",
       "../published-media",
     ]),
@@ -19,7 +19,7 @@ test("parses publish plan and strict preflight options", () => {
       releaseId: "2026-08-01_release",
       json: true,
       strict: false,
-      mediaRoot: "../demo-media",
+      mediaRoot: "../media-library",
       publishRoot: "../published-media",
     },
   );

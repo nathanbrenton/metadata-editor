@@ -369,7 +369,9 @@ type PublishPlanItem = {
     | "release-metadata"
     | "track-metadata"
     | "release-artwork"
-    | "track-playback"
+    | "track-stream-manifest"
+    | "track-stream-init"
+    | "track-stream-segment"
     | "track-waveform";
   action:
     | "create"
@@ -408,6 +410,20 @@ type PublishPlan = {
     replaceCount: number;
     blockedCount: number;
   };
+  webStreams: {
+    trackCount: number;
+    currentCount: number;
+    createCount: number;
+    replaceCount: number;
+    blockedCount: number;
+  };
+  waveforms: {
+    trackCount: number;
+    currentCount: number;
+    createCount: number;
+    replaceCount: number;
+    blockedCount: number;
+  };
   summary: {
     itemCount: number;
     createCount: number;
@@ -421,8 +437,36 @@ type PublishPlan = {
     version: number;
     catalogSchemaVersion: number;
     mediaBaseUrl: string;
+    trackResources: {
+      stream: {
+        hrefField: string;
+        protocol: "hls";
+        manifestRelativePath: string;
+        codec: "aac";
+        bitrateKbps: number;
+        segmentDurationSeconds: number;
+        segmentType: "fmp4";
+      };
+      waveform: {
+        hrefField: string;
+        filename: string;
+        schemaVersion: number;
+      };
+    };
     privateContentExcluded: readonly string[];
   };
+};
+
+type MediaPreparationReceipt = {
+  releaseId: string;
+  operationId: string;
+  operationRelativePath: string;
+  createdCount: number;
+  replacedCount: number;
+  playbackCount: number;
+  streamCount: number;
+  waveformCount: number;
+  completedAt: string;
 };
 
 type InferredValue<T> = {
@@ -1628,9 +1672,9 @@ export function App() {
 
     if (applicationView === "publish") {
       const publishCounts = {
-        needsWork: 0,
-        reviewCandidate: 0,
-        preflightCandidate: 0,
+        needsSourceWork: 0,
+        needsPreparation: 0,
+        readyToPreflight: 0,
       };
 
       for (const release of scan?.releases ?? []) {
@@ -1639,12 +1683,12 @@ export function App() {
             release,
           ).preflightLabel;
 
-        if (label === "Needs work") {
-          publishCounts.needsWork += 1;
-        } else if (label === "Review candidate") {
-          publishCounts.reviewCandidate += 1;
+        if (label === "Needs source work") {
+          publishCounts.needsSourceWork += 1;
+        } else if (label === "Needs preparation") {
+          publishCounts.needsPreparation += 1;
         } else {
-          publishCounts.preflightCandidate += 1;
+          publishCounts.readyToPreflight += 1;
         }
       }
 
@@ -1654,20 +1698,21 @@ export function App() {
           scan?.releases.length ?? 0,
           "release",
         ),
-        `${publishCounts.needsWork} ${
-          publishCounts.needsWork === 1
+        `${publishCounts.needsSourceWork} ${
+          publishCounts.needsSourceWork === 1
             ? "needs"
             : "need"
-        } work`,
+        } source work`,
+        `${publishCounts.needsPreparation} ${
+          publishCounts.needsPreparation === 1
+            ? "needs"
+            : "need"
+        } preparation`,
         formatCount(
-          publishCounts.reviewCandidate,
-          "review candidate",
+          publishCounts.readyToPreflight,
+          "ready to preflight",
         ),
-        formatCount(
-          publishCounts.preflightCandidate,
-          "preflight candidate",
-        ),
-        "preflight planning enabled · writes disabled",
+        "preflight planning enabled · preparation writes enabled · public-package writes disabled",
       ].join(" · ");
     }
 
@@ -2076,9 +2121,6 @@ export function App() {
               error={error}
               onRefresh={() =>
                 void refreshLibrary(true)
-              }
-              onOpenRelease={(releaseId) =>
-                void openReleaseInLibrary(releaseId)
               }
               onOpenWorkflowHelp={
                 openWorkflowHelp
@@ -4292,18 +4334,16 @@ function assessPublishReadiness(
   metadataLabel: string;
   metadataTone: string;
   masterLabel: string;
-  playbackLabel: string;
+  streamLabel: string;
   artworkLabel: string;
   preflightLabel: string;
   preflightTone: string;
   note: string;
 } {
   const metadata = summarizeReleaseScanReadiness(release);
+  const trackCount = release.tracks.length;
   const readyMasters = release.tracks.filter(
     (track) => track.audioMasters.length === 1,
-  ).length;
-  const playbackCount = release.tracks.filter(
-    (track) => track.playbackAudio?.length === 1,
   ).length;
   const artworkCount =
     release.artworkMasters.length +
@@ -4314,66 +4354,130 @@ function assessPublishReadiness(
     );
   const metadataBlockers = metadata.core + metadata.credits;
   const masterBlockers =
-    release.tracks.length === 0 ||
-    readyMasters !== release.tracks.length;
+    trackCount === 0 || readyMasters !== trackCount;
+
+  const base = {
+    metadataLabel: readinessBadgeLabel(metadata),
+    metadataTone: readinessTone(metadata),
+    masterLabel: `${readyMasters}/${trackCount}`,
+    streamLabel: "Checked in preflight",
+    artworkLabel: `${artworkCount}`,
+  };
 
   if (metadataBlockers > 0 || masterBlockers) {
+    const blockers: string[] = [];
+
+    if (metadataBlockers > 0) {
+      blockers.push(
+        `${metadataBlockers} required metadata ${
+          metadataBlockers === 1 ? "item" : "items"
+        }`,
+      );
+    }
+
+    if (trackCount === 0) {
+      blockers.push("no tracks");
+    } else if (readyMasters !== trackCount) {
+      const missingMasters = trackCount - readyMasters;
+      blockers.push(
+        `${missingMasters} master ${
+          missingMasters === 1 ? "source" : "sources"
+        } unresolved`,
+      );
+    }
+
     return {
-      metadataLabel: readinessBadgeLabel(metadata),
-      metadataTone: readinessTone(metadata),
-      masterLabel: `${readyMasters}/${release.tracks.length}`,
-      playbackLabel: `${playbackCount}/${release.tracks.length}`,
-      artworkLabel: `${artworkCount}`,
-      preflightLabel: "Needs work",
+      ...base,
+      preflightLabel: "Needs source work",
       preflightTone: "missing",
-      note:
-        "Resolve core/credit metadata gaps and ensure exactly one audio master per track before release-wide preflight.",
+      note: blockers.join(" · "),
     };
   }
 
   if (
-    playbackCount !== release.tracks.length ||
     artworkCount === 0 ||
     metadata.supplemental > 0
   ) {
+    const preparation: string[] = [];
+
+    if (artworkCount === 0) {
+      preparation.push("artwork source missing");
+    }
+
+    if (metadata.supplemental > 0) {
+      preparation.push(
+        `${metadata.supplemental} optional metadata ${
+          metadata.supplemental === 1 ? "item" : "items"
+        } to review`,
+      );
+    }
+
     return {
-      metadataLabel: readinessBadgeLabel(metadata),
-      metadataTone: readinessTone(metadata),
-      masterLabel: `${readyMasters}/${release.tracks.length}`,
-      playbackLabel: `${playbackCount}/${release.tracks.length}`,
-      artworkLabel: `${artworkCount}`,
-      preflightLabel: "Review candidate",
+      ...base,
+      preflightLabel: "Needs preparation",
       preflightTone: "warning",
-      note:
-        "Core sources are present. Prepare missing playback media, review optional metadata, and confirm artwork before publishing.",
+      note: preparation.join(" · "),
     };
   }
 
   return {
-    metadataLabel: readinessBadgeLabel(metadata),
-    metadataTone: readinessTone(metadata),
-    masterLabel: `${readyMasters}/${release.tracks.length}`,
-    playbackLabel: `${playbackCount}/${release.tracks.length}`,
-    artworkLabel: `${artworkCount}`,
-    preflightLabel: "Preflight candidate",
+    ...base,
+    preflightLabel: "Ready to preflight",
     preflightTone: "preview",
     note:
-      "Visible prerequisites look complete, but consolidated preflight and deployment writes are not enabled yet.",
+      "Canonical sources are present. HLS web streams, waveforms, and exact destinations are checked by preflight.",
   };
 }
 
-function publishPlanTone(
-  status: PublishPlan["status"],
-): string {
-  if (status === "blocked") {
-    return "missing";
+function hasNonDerivativePublishBlockers(
+  plan: PublishPlan,
+): boolean {
+  return plan.issues.some(
+    (issue) =>
+      issue.severity === "blocked" &&
+      issue.code !== "playback-not-current" &&
+      issue.code !== "web-stream-not-current" &&
+      issue.code !== "waveform-not-current",
+  );
+}
+
+function publishPreflightStatus(
+  plan: PublishPlan,
+): { label: string; tone: string } {
+  if (
+    plan.validation.blockedCount > 0 ||
+    plan.derivatives.blockedCount > 0 ||
+    hasNonDerivativePublishBlockers(plan)
+  ) {
+    return { label: "Blocked", tone: "missing" };
   }
 
-  if (status === "warning") {
-    return "warning";
+  if (
+    plan.derivatives.createCount > 0 ||
+    plan.derivatives.replaceCount > 0
+  ) {
+    return { label: "Needs preparation", tone: "warning" };
   }
 
-  return "preview";
+  if (plan.status === "warning") {
+    return { label: "Review warnings", tone: "warning" };
+  }
+
+  return { label: "Ready", tone: "preview" };
+}
+
+function canPreparePublishPlan(
+  plan: PublishPlan,
+): boolean {
+  return (
+    plan.validation.blockedCount === 0 &&
+    plan.derivatives.blockedCount === 0 &&
+    !hasNonDerivativePublishBlockers(plan) &&
+    (
+      plan.derivatives.createCount > 0 ||
+      plan.derivatives.replaceCount > 0
+    )
+  );
 }
 
 function publishPlanActionTone(
@@ -4401,13 +4505,83 @@ function formatPublishPlanKind(
     .join(" ");
 }
 
+function publishPreflightHeadline(
+  plan: PublishPlan,
+): string {
+  if (
+    plan.validation.blockedCount > 0 ||
+    plan.derivatives.blockedCount > 0 ||
+    hasNonDerivativePublishBlockers(plan)
+  ) {
+    return "Resolve blockers before continuing";
+  }
+
+  if (
+    plan.derivatives.createCount > 0 ||
+    plan.derivatives.replaceCount > 0
+  ) {
+    return "Web media needs preparation";
+  }
+
+  if (plan.status === "warning") {
+    return "Review warnings before continuing";
+  }
+
+  return "Preflight passed";
+}
+
+function publishPreflightGuidance(
+  plan: PublishPlan,
+): string {
+  if (
+    plan.validation.blockedCount > 0 ||
+    plan.derivatives.blockedCount > 0 ||
+    hasNonDerivativePublishBlockers(plan)
+  ) {
+    return "Preflight found blocking issues. Resolve them before a public package can be built.";
+  }
+
+  if (
+    plan.derivatives.createCount > 0 ||
+    plan.derivatives.replaceCount > 0
+  ) {
+    return "The canonical release can continue, but its segmented HLS web stream or waveform derivatives must be prepared first.";
+  }
+
+  if (plan.status === "warning") {
+    return "No blocking issue was found, but the remaining warnings should be reviewed before building the public package.";
+  }
+
+  return "The release passed preflight and is ready for the host-ready audio-player stream package.";
+}
+
+function publishNextStepLabel(
+  plan: PublishPlan,
+): string {
+  if (
+    plan.validation.blockedCount > 0 ||
+    plan.derivatives.blockedCount > 0 ||
+    hasNonDerivativePublishBlockers(plan)
+  ) {
+    return "Resolve blockers";
+  }
+
+  if (
+    plan.derivatives.createCount > 0 ||
+    plan.derivatives.replaceCount > 0
+  ) {
+    return "Prepare release";
+  }
+
+  return "Build public package";
+}
+
 function PublishWorkspace({
   releases,
   workflowLocations,
   loading,
   error,
   onRefresh,
-  onOpenRelease,
   onOpenWorkflowHelp,
 }: {
   releases: ReleaseScanResult[];
@@ -4415,7 +4589,6 @@ function PublishWorkspace({
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
-  onOpenRelease: (releaseId: string) => void;
   onOpenWorkflowHelp: () => void;
 }) {
   const [selectedPlan, setSelectedPlan] =
@@ -4424,12 +4597,17 @@ function PublishWorkspace({
     useState<string | null>(null);
   const [planError, setPlanError] =
     useState<string | null>(null);
+  const [prepareLoading, setPrepareLoading] =
+    useState(false);
+  const [prepareMessage, setPrepareMessage] =
+    useState<string | null>(null);
 
   const loadPublishPlan = useCallback(async (
     releaseId: string,
   ) => {
     setPlanLoadingReleaseId(releaseId);
     setPlanError(null);
+    setPrepareMessage(null);
 
     try {
       const response = await fetch(
@@ -4459,6 +4637,56 @@ function PublishWorkspace({
     }
   }, []);
 
+  const prepareRelease = useCallback(async (
+    plan: PublishPlan,
+  ) => {
+    setPrepareLoading(true);
+    setPlanError(null);
+    setPrepareMessage(null);
+
+    try {
+      const response = await fetch(
+        "/api/publish/prepare",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: plan.releaseId,
+            planFingerprint: plan.planFingerprint,
+            planGeneratedAt: plan.generatedAt,
+          }),
+        },
+      );
+      const payload = await response.json() as
+        | MediaPreparationReceipt
+        | { error?: string };
+
+      if (!response.ok || !("operationId" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to prepare release media.",
+        );
+      }
+
+      await loadPublishPlan(plan.releaseId);
+      await Promise.resolve(onRefresh());
+      setPrepareMessage(
+        `Prepared ${payload.streamCount} HLS web ${payload.streamCount === 1 ? "stream" : "streams"} and ${payload.waveformCount} waveform derivatives. Preflight refreshed.`,
+      );
+    } catch (prepareError) {
+      setPlanError(
+        prepareError instanceof Error
+          ? prepareError.message
+          : "Unable to prepare release media.",
+      );
+    } finally {
+      setPrepareLoading(false);
+    }
+  }, [loadPublishPlan, onRefresh]);
+
   return (
     <section className="workflow-workspace publish-workspace">
       <header className="workflow-workspace-header">
@@ -4468,8 +4696,9 @@ function PublishWorkspace({
           <p>
             Validate one private canonical release and review
             the exact sanitized package intended for
-            audio-player. Preflight and dry-run planning are
-            enabled; filesystem publication remains disabled.
+            audio-player. Preflight is read-only; Prepare release
+            can generate private HLS web-stream and waveform derivatives.
+            Public-package writes remain disabled.
           </p>
         </div>
         <div className="workflow-workspace-actions">
@@ -4492,11 +4721,14 @@ function PublishWorkspace({
       <div className="workflow-workspace-notice planned">
         <strong>Preflight planning is read-only</strong>
         <span>
-          Review validates the canonical release, requires
-          current playback MP3 and waveform derivatives,
+          Choose a release and use Continue to preflight.
+          Preflight validates the canonical release, requires
+          current segmented HLS web-stream and waveform derivatives,
           selects browser-compatible front artwork, and lists
           every public asset and generated JSON destination.
-          Nothing is copied or replaced yet.
+          Preflight itself writes nothing. After review, Prepare
+          release may create or replace only reproducible HLS stream
+          and waveform derivatives inside the private Library.
         </span>
       </div>
 
@@ -4523,15 +4755,19 @@ function PublishWorkspace({
       {planError && (
         <p className="message error">{planError}</p>
       )}
+      {prepareMessage && (
+        <p className="message success">{prepareMessage}</p>
+      )}
 
       <section className="workflow-table-panel">
         <header>
           <div>
             <h3>Release readiness overview</h3>
             <p>
-              Review exact preflight before publication. Open
-              Library to resolve metadata, derivative, artwork,
-              or filesystem blockers.
+              Compare canonical sources with the lightweight
+              media audio-player needs. Review preflight checks
+              waveform freshness and exact destinations without
+              writing files.
             </p>
           </div>
           <strong>{releases.length} releases</strong>
@@ -4542,20 +4778,16 @@ function PublishWorkspace({
             <thead>
               <tr>
                 <th scope="col">Release</th>
-                <th scope="col">Metadata</th>
-                <th scope="col">Audio masters</th>
-                <th scope="col">Playback media</th>
-                <th scope="col">Artwork Sources</th>
-                <th scope="col">Preflight</th>
-                <th scope="col">Current guidance</th>
-                <th scope="col">Publication</th>
-                <th scope="col" className="action-column">Action</th>
+                <th scope="col">Sources</th>
+                <th scope="col">Public media</th>
+                <th scope="col">Status</th>
+                <th scope="col" className="action-column">Next step</th>
               </tr>
             </thead>
             <tbody>
               {releases.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="workflow-empty-cell">
+                  <td colSpan={5} className="workflow-empty-cell">
                     No releases are available for readiness review.
                   </td>
                 </tr>
@@ -4565,48 +4797,98 @@ function PublishWorkspace({
                     assessPublishReadiness(release);
                   const loadingPlan =
                     planLoadingReleaseId === release.id;
+                  const selected =
+                    selectedPlan?.releaseId === release.id;
+                  const releaseArtwork =
+                    selectReleaseFrontArtwork(
+                      release.artworkMasters,
+                    ) ??
+                    selectPreferredReleaseArtwork(
+                      release.artworkMasters,
+                    );
 
                   return (
-                    <tr key={release.id}>
+                    <tr
+                      key={release.id}
+                      className={selected ? "selected" : undefined}
+                    >
                       <th scope="row">
-                        <strong>{release.releaseTitle ?? formatReleaseTitle(release.id)}</strong>
-                        {release.primaryArtistName && (
-                          <span>{release.primaryArtistName}</span>
-                        )}
-                        <code>{release.relativePath}</code>
+                        <div className="publish-release-cell">
+                          <span
+                            className="publish-release-thumbnail"
+                            aria-hidden="true"
+                          >
+                            {releaseArtwork ? (
+                              <img
+                                src={artworkPreviewUrl(
+                                  releaseArtwork.relativePath,
+                                )}
+                                alt=""
+                                loading="lazy"
+                              />
+                            ) : (
+                              <span className="publish-release-thumbnail-placeholder">
+                                No art
+                              </span>
+                            )}
+                          </span>
+
+                          <span className="publish-release-identity">
+                            <strong>
+                              {release.releaseTitle ??
+                                formatReleaseTitle(release.id)}
+                            </strong>
+                            {release.primaryArtistName && (
+                              <span>{release.primaryArtistName}</span>
+                            )}
+                            <code>{release.relativePath}</code>
+                          </span>
+                        </div>
                       </th>
                       <td>
-                        <span className={`badge ${assessment.metadataTone}`}>
-                          {assessment.metadataLabel}
-                        </span>
+                        <div className="publish-readiness-stack">
+                          <div>
+                            <span>Metadata</span>
+                            <span className={`badge ${assessment.metadataTone}`}>
+                              {assessment.metadataLabel}
+                            </span>
+                          </div>
+                          <div>
+                            <span>Masters</span>
+                            <strong>{assessment.masterLabel}</strong>
+                          </div>
+                          <div>
+                            <span>Artwork</span>
+                            <strong>{assessment.artworkLabel}</strong>
+                          </div>
+                        </div>
                       </td>
-                      <td>{assessment.masterLabel}</td>
-                      <td>{assessment.playbackLabel}</td>
-                      <td>{assessment.artworkLabel}</td>
                       <td>
+                        <div className="publish-readiness-stack">
+                          <div>
+                            <span>Web stream</span>
+                            <small>{assessment.streamLabel}</small>
+                          </div>
+                          <div>
+                            <span>Waveforms</span>
+                            <small>Checked in preflight</small>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="publish-status-cell">
                         <span className={`badge ${assessment.preflightTone}`}>
                           {assessment.preflightLabel}
                         </span>
+                        <span>{assessment.note}</span>
                       </td>
-                      <td>{assessment.note}</td>
-                      <td>
-                        <span className="badge planned">
-                          Dry-run only
-                        </span>
-                      </td>
-                      <td className="action-column publish-row-actions">
+                      <td className="action-column publish-next-step-action">
                         <button
                           type="button"
+                          className="primary-button"
                           disabled={loadingPlan}
                           onClick={() => void loadPublishPlan(release.id)}
                         >
-                          {loadingPlan ? "Planning…" : "Review preflight"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onOpenRelease(release.id)}
-                        >
-                          Open Library
+                          {loadingPlan ? "Planning…" : "Continue to preflight"}
                         </button>
                       </td>
                     </tr>
@@ -4619,38 +4901,98 @@ function PublishWorkspace({
       </section>
 
       {selectedPlan && (
-        <section className="publish-plan-panel" aria-label="Publish preflight plan">
+        <section className="publish-plan-panel" aria-label="Publish preflight result">
           <header>
             <div>
-              <p className="eyebrow">Exact publish preflight</p>
-              <h3>{selectedPlan.releaseId}</h3>
+              <p className="eyebrow">Preflight result</p>
+              <h3>
+                {releases.find((release) =>
+                  release.id === selectedPlan.releaseId
+                )?.releaseTitle ?? selectedPlan.releaseId}
+              </h3>
               <p>
-                Package contract: {selectedPlan.contract.name} v{selectedPlan.contract.version}
-                {" · "}catalog schema v{selectedPlan.contract.catalogSchemaVersion}
+                {publishPreflightGuidance(selectedPlan)}
               </p>
             </div>
-            <span className={`badge ${publishPlanTone(selectedPlan.status)}`}>
-              {selectedPlan.status}
+            <span
+              className={`badge ${publishPreflightStatus(selectedPlan).tone}`}
+            >
+              {publishPreflightStatus(selectedPlan).label}
             </span>
           </header>
+
+          <section className="publish-preflight-primary" aria-label="Publish next step">
+            <div className="publish-preflight-result-copy">
+              <span className="eyebrow">Result</span>
+              <strong>{publishPreflightHeadline(selectedPlan)}</strong>
+              <span>
+                {selectedPlan.validation.blockedCount} blocked · {selectedPlan.validation.warningCount} warnings
+                {" · "}
+                {selectedPlan.derivatives.createCount} missing derivatives · {selectedPlan.derivatives.replaceCount} stale
+              </span>
+            </div>
+
+            <div className="publish-preflight-next-step">
+              <span className="eyebrow">Next step</span>
+              <button
+                type="button"
+                className={prepareLoading
+                  ? "primary-button is-loading"
+                  : "primary-button"}
+                disabled={
+                  prepareLoading ||
+                  !canPreparePublishPlan(selectedPlan)
+                }
+                onClick={() =>
+                  void prepareRelease(selectedPlan)
+                }
+                title={
+                  canPreparePublishPlan(selectedPlan)
+                    ? "Generate reviewed segmented AAC-LC HLS streams and waveform derivatives in the private Library."
+                    : publishNextStepLabel(selectedPlan) === "Build public package"
+                      ? "Public-package writes are the next milestone."
+                      : "Resolve the blocking preflight issues first."
+                }
+              >
+                {prepareLoading
+                  ? "Preparing…"
+                  : publishNextStepLabel(selectedPlan)}
+              </button>
+              <small>
+                {canPreparePublishPlan(selectedPlan)
+                  ? "Creates only reproducible HLS stream and waveform derivatives. Canonical masters are never modified; replacements are backed up and the operation is recorded before promotion."
+                  : publishNextStepLabel(selectedPlan) === "Build public package"
+                    ? "Web media is ready. Building the sanitized public package is the next implementation milestone."
+                    : "Resolve the blocking issues shown in preflight before preparing derivatives."}
+              </small>
+            </div>
+          </section>
 
           <dl className="publish-plan-summary">
             <div>
               <dt>Validation</dt>
               <dd>
-                {selectedPlan.validation.blockedCount} blocked · {selectedPlan.validation.warningCount} warnings
+                {selectedPlan.validation.blockedCount === 0
+                  ? "No blockers"
+                  : `${selectedPlan.validation.blockedCount} blocked`}
               </dd>
             </div>
             <div>
-              <dt>Derivatives</dt>
+              <dt>Web stream</dt>
               <dd>
-                {selectedPlan.derivatives.currentCount} current · {selectedPlan.derivatives.createCount} missing · {selectedPlan.derivatives.replaceCount} stale
+                {selectedPlan.webStreams.currentCount} current · {selectedPlan.webStreams.createCount} missing · {selectedPlan.webStreams.replaceCount} stale
               </dd>
             </div>
             <div>
-              <dt>Package</dt>
+              <dt>Waveform</dt>
               <dd>
-                {selectedPlan.summary.itemCount} items · {selectedPlan.summary.blockedCount} blocked
+                {selectedPlan.waveforms.currentCount} current · {selectedPlan.waveforms.createCount} missing · {selectedPlan.waveforms.replaceCount} stale
+              </dd>
+            </div>
+            <div>
+              <dt>Public package</dt>
+              <dd>
+                {selectedPlan.summary.itemCount} planned items
               </dd>
             </div>
             <div>
@@ -4660,39 +5002,49 @@ function PublishWorkspace({
           </dl>
 
           {selectedPlan.issues.length > 0 && (
-            <div className="publish-plan-issues">
-              <h4>Preflight issues</h4>
-              <table>
-                <thead>
-                  <tr>
-                    <th scope="col">Status</th>
-                    <th scope="col">Path</th>
-                    <th scope="col">Issue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedPlan.issues.map((item, index) => (
-                    <tr key={`${item.code}-${item.relativePath}-${index}`}>
-                      <td>
-                        <span className={`badge ${item.severity === "blocked" ? "missing" : "warning"}`}>
-                          {item.severity}
-                        </span>
-                      </td>
-                      <td><code>{item.relativePath}</code></td>
-                      <td>
-                        <strong>{item.message}</strong>
-                        {item.suggestion && <span>{item.suggestion}</span>}
-                      </td>
+            <details className="publish-plan-disclosure publish-plan-issues">
+              <summary>
+                <span>Problems and warnings</span>
+                <span className="badge warning">
+                  {selectedPlan.issues.length}
+                </span>
+              </summary>
+              <div className="publish-plan-disclosure-content">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Status</th>
+                      <th scope="col">Path</th>
+                      <th scope="col">Issue</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {selectedPlan.issues.map((item, index) => (
+                      <tr key={`${item.code}-${item.relativePath}-${index}`}>
+                        <td>
+                          <span className={`badge ${item.severity === "blocked" ? "missing" : "warning"}`}>
+                            {item.severity}
+                          </span>
+                        </td>
+                        <td><code>{item.relativePath}</code></td>
+                        <td>
+                          <strong>{item.message}</strong>
+                          {item.suggestion && <span>{item.suggestion}</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
           )}
 
-          <div className="publish-plan-items">
-            <h4>Player-facing package plan</h4>
-            <div className="workflow-table-scroll">
+          <details className="publish-plan-disclosure publish-plan-items">
+            <summary>
+              <span>Technical package plan</span>
+              <span>{selectedPlan.items.length} items</span>
+            </summary>
+            <div className="publish-plan-disclosure-content workflow-table-scroll">
               <table>
                 <thead>
                   <tr>
@@ -4722,16 +5074,39 @@ function PublishWorkspace({
                 </tbody>
               </table>
             </div>
-          </div>
+          </details>
 
-          <footer>
-            <span>
-              Private content excluded: {selectedPlan.contract.privateContentExcluded.join(", ")}.
-            </span>
-            <code title="Plan fingerprint">
-              {selectedPlan.planFingerprint}
-            </code>
-          </footer>
+          <details className="publish-plan-disclosure publish-plan-contract">
+            <summary>
+              <span>Technical contract</span>
+              <span>{selectedPlan.contract.name} v{selectedPlan.contract.version}</span>
+            </summary>
+            <div className="publish-plan-contract-content">
+              <p>
+                Catalog schema v{selectedPlan.contract.catalogSchemaVersion}
+                {" · "}media base {selectedPlan.contract.mediaBaseUrl}
+              </p>
+              <p>
+                Stream: {selectedPlan.contract.trackResources.stream.protocol.toUpperCase()}
+                {" · "}{selectedPlan.contract.trackResources.stream.codec.toUpperCase()}
+                {" · "}{selectedPlan.contract.trackResources.stream.bitrateKbps} kbps
+                {" · "}{selectedPlan.contract.trackResources.stream.segmentDurationSeconds}s target segments
+                {" · "}{selectedPlan.contract.trackResources.stream.segmentType}
+              </p>
+              <p>
+                Player resources: {selectedPlan.contract.trackResources.stream.hrefField}
+                {" → "}{selectedPlan.contract.trackResources.stream.manifestRelativePath}
+                {" · "}{selectedPlan.contract.trackResources.waveform.hrefField}
+                {" → "}{selectedPlan.contract.trackResources.waveform.filename}
+              </p>
+              <p>
+                Private content excluded: {selectedPlan.contract.privateContentExcluded.join(", ")}.
+              </p>
+              <code title="Plan fingerprint">
+                {selectedPlan.planFingerprint}
+              </code>
+            </div>
+          </details>
         </section>
       )}
     </section>
@@ -5112,6 +5487,31 @@ function IngestSourcePreview({
   );
 }
 
+function getNextIngestAudioFile(
+  files: IngestFileInspection[],
+  currentRelativePath: string | null,
+): IngestFileInspection | null {
+  if (!currentRelativePath) {
+    return null;
+  }
+
+  const currentIndex = files.findIndex(
+    (file) =>
+      file.relativePath === currentRelativePath,
+  );
+
+  if (currentIndex < 0) {
+    return null;
+  }
+
+  return (
+    files
+      .slice(currentIndex + 1)
+      .find((file) => file.mediaKind === "audio") ??
+    null
+  );
+}
+
 function IngestCandidateInspectionView({
   inspection,
   onBack,
@@ -5163,6 +5563,37 @@ function IngestCandidateInspectionView({
   const [sourceAudioPreviewError, setSourceAudioPreviewError] =
     useState<string | null>(null);
 
+  const startSourceAudioPreview = useCallback(
+    (
+      audio: HTMLAudioElement,
+      file: IngestFileInspection,
+    ) => {
+      setSourceAudioPreviewError(null);
+      audio.src = buildIngestAudioPreviewUrl(
+        file.relativePath,
+        file.modifiedAt,
+      );
+      audio.dataset.ingestSourcePath =
+        file.relativePath;
+      audio.load();
+      setSourceAudioPreviewPath(file.relativePath);
+      setSourceAudioPreviewLoading(true);
+
+      void audio.play().catch(
+        (previewError: unknown) => {
+          setSourceAudioPreviewPlaying(false);
+          setSourceAudioPreviewLoading(false);
+          setSourceAudioPreviewError(
+            previewError instanceof Error
+              ? previewError.message
+              : "Audio preview could not start.",
+          );
+        },
+      );
+    },
+    [],
+  );
+
   useEffect(() => {
     const audio = new Audio();
     audio.preload = "metadata";
@@ -5174,6 +5605,19 @@ function IngestCandidateInspectionView({
     const handlePause = () => {
       setSourceAudioPreviewPlaying(false);
       setSourceAudioPreviewLoading(false);
+    };
+    const handleEnded = () => {
+      const nextFile = getNextIngestAudioFile(
+        inspection.files,
+        audio.dataset.ingestSourcePath ?? null,
+      );
+
+      if (!nextFile) {
+        handlePause();
+        return;
+      }
+
+      startSourceAudioPreview(audio, nextFile);
     };
     const handleWaiting = () => {
       setSourceAudioPreviewLoading(true);
@@ -5191,7 +5635,7 @@ function IngestCandidateInspectionView({
 
     audio.addEventListener("play", handlePlay);
     audio.addEventListener("pause", handlePause);
-    audio.addEventListener("ended", handlePause);
+    audio.addEventListener("ended", handleEnded);
     audio.addEventListener("waiting", handleWaiting);
     audio.addEventListener("canplay", handleCanPlay);
     audio.addEventListener("error", handleError);
@@ -5200,16 +5644,17 @@ function IngestCandidateInspectionView({
     return () => {
       audio.pause();
       audio.removeAttribute("src");
+      delete audio.dataset.ingestSourcePath;
       audio.load();
       audio.removeEventListener("play", handlePlay);
       audio.removeEventListener("pause", handlePause);
-      audio.removeEventListener("ended", handlePause);
+      audio.removeEventListener("ended", handleEnded);
       audio.removeEventListener("waiting", handleWaiting);
       audio.removeEventListener("canplay", handleCanPlay);
       audio.removeEventListener("error", handleError);
       sourceAudioPreviewRef.current = null;
     };
-  }, []);
+  }, [inspection.files, startSourceAudioPreview]);
 
   const toggleSourceAudioPreview = (
     file: IngestFileInspection,
@@ -5232,13 +5677,8 @@ function IngestCandidateInspectionView({
 
     if (sourceAudioPreviewPath !== file.relativePath) {
       audio.pause();
-      audio.src = buildIngestAudioPreviewUrl(
-        file.relativePath,
-        file.modifiedAt,
-      );
-      audio.load();
-      setSourceAudioPreviewPath(file.relativePath);
-      setSourceAudioPreviewLoading(true);
+      startSourceAudioPreview(audio, file);
+      return;
     }
 
     void audio.play().catch((previewError: unknown) => {
@@ -5455,17 +5895,8 @@ function IngestCandidateInspectionView({
                 >
                   Filename
                 </th>
-                <th scope="col">Type</th>
-                <th scope="col">Container</th>
-                <th scope="col">Codec</th>
                 <th scope="col" className="numeric">
                   Duration
-                </th>
-                <th scope="col" className="numeric">
-                  Sample rate
-                </th>
-                <th scope="col" className="numeric">
-                  Channels
                 </th>
                 <th scope="col" className="numeric">
                   Size
@@ -5507,13 +5938,6 @@ function IngestCandidateInspectionView({
                         </span>
                       )}
                     </th>
-                    <td>{file.mediaKind}</td>
-                    <td>
-                      {file.technical.container ?? "—"}
-                    </td>
-                    <td>
-                      {file.technical.codec ?? "—"}
-                    </td>
                     <td className="numeric">
                       {file.mediaKind === "audio" &&
                       file.technical.durationSeconds !==
@@ -5523,15 +5947,6 @@ function IngestCandidateInspectionView({
                               .durationSeconds,
                           )
                         : "—"}
-                    </td>
-                    <td className="numeric">
-                      {file.technical.sampleRateHz !==
-                      undefined
-                        ? `${file.technical.sampleRateHz.toLocaleString()} Hz`
-                        : "—"}
-                    </td>
-                    <td className="numeric">
-                      {file.technical.channels ?? "—"}
                     </td>
                     <td className="numeric">
                       {formatByteSize(file.sizeBytes)}
@@ -5553,7 +5968,7 @@ function IngestCandidateInspectionView({
 
                   {expanded && (
                     <tr className="ingest-detail-row">
-                      <td colSpan={10}>
+                      <td colSpan={5}>
                         <IngestFileInspectionDetail
                           file={file}
                         />
@@ -5644,6 +6059,14 @@ function IngestFileInspectionDetail({
           <h4>Technical properties</h4>
           <table className="ingest-property-table">
             <tbody>
+              <tr>
+                <th scope="row">Type</th>
+                <td>{file.mediaKind}</td>
+              </tr>
+              <tr>
+                <th scope="row">Size</th>
+                <td>{formatByteSize(file.sizeBytes)}</td>
+              </tr>
               <tr>
                 <th scope="row">Probe</th>
                 <td>{file.detectedBy}</td>

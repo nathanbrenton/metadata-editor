@@ -156,6 +156,9 @@ function parseStoredArtworkAssignment(
             `Asset ${assetIndex + 1} artwork assignment ${assignmentIndex + 1} track ${trackIndex + 1}`,
           ),
       ),
+    ...(record.replaceExisting === true
+      ? { replaceExisting: true }
+      : {}),
   };
 }
 

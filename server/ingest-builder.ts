@@ -60,6 +60,7 @@ import type {
 } from "../shared/ingest-types.js";
 import {
   assertPathWithinRoot,
+  defaultMediaLibraryRoot,
 } from "./media-root.js";
 import {
   assertPathWithinIngestRoot,
@@ -82,7 +83,7 @@ const projectRoot = path.resolve(
 );
 
 export const defaultIngestOutputRoot =
-  "../demo-media";
+  defaultMediaLibraryRoot;
 
 export async function resolveIngestOutputRoot(
   configuredRoot =
@@ -99,6 +100,8 @@ export async function resolveIngestOutputRoot(
 
 type PreparedCopy = {
   sourceRelativePath: string;
+  writeAction: "create" | "replace";
+  replacementOfDestinationRelativePath?: string;
   sourcePath: string;
   embeddedArtwork?: {
     streamIndex: number;
@@ -119,6 +122,12 @@ type PreparedDocument = GeneratedMetadataDocument & {
   writeAction: "create" | "replace";
 };
 
+type PreparedRemoval = {
+  destinationRelativePath: string;
+  destinationWithinRelease: string;
+  reason: string;
+};
+
 type PreparedIngestBuild = {
   preview: IngestBuildPreview;
   operation: IngestBuildOperation;
@@ -126,6 +135,7 @@ type PreparedIngestBuild = {
   releaseRelativePath: string;
   documents: PreparedDocument[];
   copies: PreparedCopy[];
+  removals: PreparedRemoval[];
   preservedFiles: string[];
   receiptContent: string;
 };
@@ -389,6 +399,9 @@ function parseArtworkAssignmentDraft(
             1000,
           ),
       ),
+    ...(value.replaceExisting === true
+      ? { replaceExisting: true }
+      : {}),
   };
 }
 
@@ -658,7 +671,13 @@ type PreparedIngestTrack = {
   id: string;
   relativePath: string;
   audioDestination: string;
+  file?: IngestFileInspection;
   existingTrack?: ExistingReceiptTrack;
+  preserveOnly?: boolean;
+  replacement?: {
+    previousSourceRelativePath: string;
+    previousDestinationRelativePath: string;
+  };
 };
 
 type PreparedArtworkPlacement = {
@@ -1009,6 +1028,102 @@ function artworkRecord(
   };
 }
 
+function artworkDestinationStem(
+  destinationRelativePath: string,
+): string {
+  const extension = path.posix.extname(
+    destinationRelativePath,
+  );
+
+  return extension
+    ? destinationRelativePath.slice(0, -extension.length)
+    : destinationRelativePath;
+}
+
+function artworkRolesShareCanonicalTarget(
+  left: unknown,
+  right: string,
+): boolean {
+  if (typeof left !== "string") {
+    return false;
+  }
+
+  if (
+    (left === "front_cover" || left === "track_artwork") &&
+    (right === "front_cover" || right === "track_artwork")
+  ) {
+    return true;
+  }
+
+  return (
+    left === right &&
+    [
+      "back_cover",
+      "liner_notes",
+      "disc",
+      "thumbnail",
+    ].includes(right)
+  );
+}
+
+function mergeArtworkRecord(
+  currentValue: unknown,
+  assignment: IngestArtworkAssignmentDraft,
+  masterPath: string,
+  primary: boolean,
+): { value: unknown[]; changed: boolean } {
+  const current = Array.isArray(currentValue)
+    ? currentValue.slice()
+    : [];
+  const before = JSON.stringify(current);
+  const index = current.findIndex((item) =>
+    isRecord(item) &&
+    (item.id === assignment.id ||
+      artworkRolesShareCanonicalTarget(
+        item.role,
+        assignment.role,
+      )),
+  );
+  const previous =
+    index >= 0 && isRecord(current[index])
+      ? current[index]
+      : {};
+  const previousId =
+    typeof previous.id === "string" && previous.id.trim()
+      ? previous.id
+      : assignment.id;
+  const next = {
+    ...previous,
+    id: previousId,
+    role: assignment.role,
+    primary,
+    master_path: masterPath,
+  };
+
+  if (primary) {
+    for (let itemIndex = 0; itemIndex < current.length; itemIndex += 1) {
+      const item = current[itemIndex];
+      if (itemIndex !== index && isRecord(item) && item.primary === true) {
+        current[itemIndex] = {
+          ...item,
+          primary: false,
+        };
+      }
+    }
+  }
+
+  if (index >= 0) {
+    current[index] = next;
+  } else {
+    current.push(next);
+  }
+
+  return {
+    value: current,
+    changed: JSON.stringify(current) !== before,
+  };
+}
+
 function customizeGeneratedDocuments(
   documents: GeneratedMetadataDocument[],
   draft: IngestBuildDraft,
@@ -1270,11 +1385,100 @@ export async function inspectIngestStagingTarget(
     }
   }
 
+  let existingReceipt: ExistingIngestReceipt | null = null;
+
+  if (exists) {
+    const receiptPath = assertPathWithinRoot(
+      releasePath,
+      path.join(releasePath, "ingest-receipt.json"),
+    );
+
+    if (await pathExists(receiptPath)) {
+      existingReceipt =
+        await readExistingIngestReceipt(
+          releasePath,
+          releaseId,
+        );
+    }
+  }
+
+  const existingTracks =
+    existingReceipt?.tracks ?? [];
+  const existingTrackById = new Map(
+    existingTracks.map((track) => [track.id, track]),
+  );
+  const existingArtwork: IngestStagingTargetStatus["existingArtwork"] =
+    (existingReceipt?.copies ?? []).flatMap<
+      IngestStagingTargetStatus["existingArtwork"][number]
+    >((copy) => {
+      if (copy.mediaKind !== "image") {
+        return [];
+      }
+
+      const logicalRole = copy.logicalRoles.find(
+        (role) =>
+          role.startsWith("release-artwork:") ||
+          role.startsWith("track-artwork:"),
+      );
+      if (!logicalRole) {
+        return [];
+      }
+
+      if (logicalRole.startsWith("release-artwork:")) {
+        return [{
+          sourceRelativePath: copy.sourceRelativePath,
+          destinationRelativePath: copy.destinationRelativePath,
+          scope: "release" as const,
+          role: logicalRole.slice("release-artwork:".length),
+        }];
+      }
+
+      const trackId = existingTracks.find((track) =>
+        copy.destinationRelativePath.startsWith(
+          `${releaseRelativePath}/tracks/${track.id}/`,
+        ),
+      )?.id;
+      const track = trackId
+        ? existingTrackById.get(trackId)
+        : undefined;
+      if (!track) {
+        return [];
+      }
+
+      const roleAndSource = logicalRole.slice(
+        "track-artwork:".length,
+      );
+      const separatorIndex = roleAndSource.indexOf(":");
+      const role = separatorIndex >= 0
+        ? roleAndSource.slice(0, separatorIndex)
+        : roleAndSource;
+
+      return [{
+        sourceRelativePath: copy.sourceRelativePath,
+        destinationRelativePath: copy.destinationRelativePath,
+        scope: "track" as const,
+        role,
+        trackId: track.id,
+        trackSourceRelativePath: track.sourceRelativePath,
+      }];
+    });
+
   return {
     releaseId,
     exists,
     operation: exists ? "update" : "create",
     releaseRelativePath,
+    existingTracks: existingTracks.map((track) => ({
+      id: track.id,
+      number: track.number,
+      title: track.title,
+      version: track.version,
+      artist: track.artist,
+      sourceDate: track.sourceDate,
+      sourceRelativePath: track.sourceRelativePath,
+      destinationRelativePath: track.destinationRelativePath,
+    })),
+    existingArtwork,
   };
 }
 
@@ -1595,6 +1799,7 @@ async function prepareCopy(
 
   return {
     sourceRelativePath: file.relativePath,
+    writeAction: "create",
     sourcePath: canonicalSource,
     destinationRelativePath,
     destinationWithinRelease,
@@ -1661,6 +1866,7 @@ async function prepareEmbeddedArtworkCopy(
 
   return {
     sourceRelativePath: virtualSourceRelativePath,
+    writeAction: "create",
     sourcePath: canonicalSource,
     embeddedArtwork: {
       streamIndex: embedded.streamIndex,
@@ -1886,6 +2092,7 @@ function buildUpdatedReceiptContent(
   releaseRelativePath: string,
   tracks: PreparedIngestTrack[],
   newCopies: PreparedCopy[],
+  replacedDestinationPaths: Set<string>,
 ): string {
   const previousUpdates = Array.isArray(
     existingReceipt.raw.updates,
@@ -1893,16 +2100,23 @@ function buildUpdatedReceiptContent(
     ? existingReceipt.raw.updates
     : [];
   const copies = [
-    ...existingReceipt.copies.map((copy) => ({
-      sourceRelativePath:
-        copy.sourceRelativePath,
-      destinationRelativePath:
-        copy.destinationRelativePath,
-      mediaKind: copy.mediaKind,
-      logicalRoles: copy.logicalRoles,
-      bytes: copy.bytes,
-      sourceSha256: copy.sourceSha256,
-    })),
+    ...existingReceipt.copies
+      .filter(
+        (copy) =>
+          !replacedDestinationPaths.has(
+            copy.destinationRelativePath,
+          ),
+      )
+      .map((copy) => ({
+        sourceRelativePath:
+          copy.sourceRelativePath,
+        destinationRelativePath:
+          copy.destinationRelativePath,
+        mediaKind: copy.mediaKind,
+        logicalRoles: copy.logicalRoles,
+        bytes: copy.bytes,
+        sourceSha256: copy.sourceSha256,
+      })),
     ...newCopies.map((copy) => ({
       sourceRelativePath:
         copy.sourceRelativePath,
@@ -1957,6 +2171,23 @@ function buildUpdatedReceiptContent(
           addedTrackIds: tracks
             .filter((track) => !track.existingTrack)
             .map((track) => track.id),
+          replacedTrackIds: tracks
+            .filter((track) => Boolean(track.replacement))
+            .map((track) => track.id),
+          addedArtworkDestinations: newCopies
+            .filter(
+              (copy) =>
+                copy.mediaKind === "image" &&
+                copy.writeAction !== "replace",
+            )
+            .map((copy) => copy.destinationRelativePath),
+          replacedArtworkDestinations: newCopies
+            .filter(
+              (copy) =>
+                copy.mediaKind === "image" &&
+                copy.writeAction === "replace",
+            )
+            .map((copy) => copy.destinationRelativePath),
           trackOrder: tracks.map((track) => ({
             id: track.id,
             number: track.draft.trackNumber,
@@ -2040,40 +2271,13 @@ export async function prepareIngestReleaseBuild(
         right.trackNumber,
     );
 
-  if (includedTracks.length === 0) {
+  if (includedTracks.length === 0 && !existingReceipt) {
     throw new Error(
-      "At least one audio track must be included.",
+      "At least one audio track must be included when creating a release.",
     );
   }
 
   validateUniqueTrackInputs(includedTracks);
-
-  if (existingReceipt) {
-    const includedSourcePaths = new Set(
-      includedTracks.map(
-        (track) => track.sourceRelativePath,
-      ),
-    );
-    const omittedExistingTracks =
-      existingReceipt.tracks.filter(
-        (track) =>
-          !includedSourcePaths.has(
-            track.sourceRelativePath,
-          ),
-      );
-
-    if (omittedExistingTracks.length > 0) {
-      throw new Error(
-        [
-          "Incremental staging updates do not remove existing tracks.",
-          "Include every currently staged track, then add or reorder tracks as needed.",
-          `Missing from this draft: ${omittedExistingTracks
-            .map((track) => track.sourceRelativePath)
-            .join(", ")}`,
-        ].join(" "),
-      );
-    }
-  }
 
   const existingTrackBySource = new Map(
     (existingReceipt?.tracks ?? []).map(
@@ -2083,14 +2287,20 @@ export async function prepareIngestReleaseBuild(
       ],
     ),
   );
+  const existingTrackById = new Map(
+    (existingReceipt?.tracks ?? []).map(
+      (track) => [track.id, track],
+    ),
+  );
   const usedTrackIds = new Set(
     existingReceipt?.tracks.map(
       (track) => track.id,
     ) ?? [],
   );
+  const claimedExistingTrackIds = new Set<string>();
 
-  const tracks = includedTracks.map(
-    (track) => {
+  const candidateTracks = includedTracks.map(
+    (track): PreparedIngestTrack => {
       const file = fileMap.get(
         track.sourceRelativePath,
       );
@@ -2119,10 +2329,42 @@ export async function prepareIngestReleaseBuild(
         );
       }
 
+      const replacementTrackId =
+        track.replacementTrackId?.trim();
+      if (replacementTrackId && !existingReceipt) {
+        throw new Error(
+          `${track.sourceRelativePath}: canonical-audio replacement requires an existing Library release.`,
+        );
+      }
+
+      const replacementTarget = replacementTrackId
+        ? existingTrackById.get(replacementTrackId)
+        : undefined;
+
+      if (replacementTrackId && !replacementTarget) {
+        throw new Error(
+          `${track.sourceRelativePath}: replacement target ${replacementTrackId} is not present in the existing ingest receipt.`,
+        );
+      }
+
       const existingTrack =
+        replacementTarget ??
         existingTrackBySource.get(
           track.sourceRelativePath,
         );
+
+      if (
+        existingTrack &&
+        claimedExistingTrackIds.has(existingTrack.id)
+      ) {
+        throw new Error(
+          `${track.sourceRelativePath}: existing track ${existingTrack.id} is already claimed by another source in this update.`,
+        );
+      }
+      if (existingTrack) {
+        claimedExistingTrackIds.add(existingTrack.id);
+      }
+
       const id = existingTrack
         ? existingTrack.id
         : uniqueTrackIdFor(
@@ -2134,20 +2376,28 @@ export async function prepareIngestReleaseBuild(
             existingTrack.destinationRelativePath,
           )
         : `${releaseRelativePath}/tracks/${id}`;
-      const audioDestination = existingTrack
-        ? path.posix.basename(
-            existingTrack.destinationRelativePath,
-          )
-        : expectedDestination;
+      const audioDestination = replacementTarget
+        ? expectedDestination
+        : existingTrack
+          ? path.posix.basename(
+              existingTrack.destinationRelativePath,
+            )
+          : expectedDestination;
 
       if (
         existingTrack &&
-        (
-          relativePath !==
-            `${releaseRelativePath}/tracks/${id}` ||
-          audioDestination !==
-            expectedDestination
-        )
+        relativePath !==
+          `${releaseRelativePath}/tracks/${id}`
+      ) {
+        throw new Error(
+          `Existing receipt has an unsupported track destination for ${track.sourceRelativePath}.`,
+        );
+      }
+
+      if (
+        existingTrack &&
+        !replacementTarget &&
+        audioDestination !== expectedDestination
       ) {
         throw new Error(
           `Existing receipt has an unsupported track destination for ${track.sourceRelativePath}.`,
@@ -2163,11 +2413,63 @@ export async function prepareIngestReleaseBuild(
         ...(existingTrack
           ? { existingTrack }
           : {}),
+        ...(replacementTarget
+          ? {
+              replacement: {
+                previousSourceRelativePath:
+                  replacementTarget.sourceRelativePath,
+                previousDestinationRelativePath:
+                  replacementTarget.destinationRelativePath,
+              },
+            }
+          : {}),
       };
     },
   );
 
+  const preservedExistingTracks: PreparedIngestTrack[] =
+    (existingReceipt?.tracks ?? [])
+      .filter(
+        (track) =>
+          !claimedExistingTrackIds.has(track.id),
+      )
+      .map((track) => ({
+        draft: {
+          sourceRelativePath: track.sourceRelativePath,
+          include: true,
+          trackNumber: track.number,
+          title: track.title,
+          version: track.version,
+          artist: track.artist,
+          date: track.sourceDate,
+          destinationFilename:
+            path.posix.basename(
+              track.destinationRelativePath,
+            ),
+        },
+        id: track.id,
+        relativePath: path.posix.dirname(
+          track.destinationRelativePath,
+        ),
+        audioDestination: path.posix.basename(
+          track.destinationRelativePath,
+        ),
+        existingTrack: track,
+        preserveOnly: true,
+      }));
+
+  const tracks = [
+    ...candidateTracks,
+    ...preservedExistingTracks,
+  ].sort(
+    (left, right) =>
+      left.draft.trackNumber -
+        right.draft.trackNumber ||
+      left.id.localeCompare(right.id),
+  );
+
   const trackIds = new Set<string>();
+  const trackNumbers = new Map<number, string>();
 
   for (const track of tracks) {
     if (trackIds.has(track.id)) {
@@ -2176,6 +2478,18 @@ export async function prepareIngestReleaseBuild(
       );
     }
     trackIds.add(track.id);
+
+    const existingNumberOwner =
+      trackNumbers.get(track.draft.trackNumber);
+    if (existingNumberOwner) {
+      throw new Error(
+        `Track number ${track.draft.trackNumber} is already used by ${existingNumberOwner}. Choose another number or explicitly replace that existing track.`,
+      );
+    }
+    trackNumbers.set(
+      track.draft.trackNumber,
+      track.id,
+    );
   }
 
   const includedAssets = draft.assets.filter(
@@ -2327,22 +2641,49 @@ export async function prepareIngestReleaseBuild(
       (copy) => copy.sourceRelativePath,
     ),
   );
+  const existingCopyByDestination = new Map(
+    (existingReceipt?.copies ?? []).map(
+      (copy) => [
+        copy.destinationRelativePath,
+        copy,
+      ],
+    ),
+  );
+  const existingArtworkByStem = new Map<
+    string,
+    ExistingReceiptCopy
+  >();
+  for (const copy of existingReceipt?.copies ?? []) {
+    if (copy.mediaKind !== "image") {
+      continue;
+    }
+
+    const stem = artworkDestinationStem(
+      copy.destinationRelativePath,
+    );
+    if (existingArtworkByStem.has(stem)) {
+      throw new Error(
+        `The existing ingest receipt contains more than one artwork copy for target ${stem}. Resolve the duplicate receipt entries before updating artwork.`,
+      );
+    }
+    existingArtworkByStem.set(stem, copy);
+  }
 
   if (existingReceipt) {
-    const newlyIncludedAssets =
+    const newTextSidecars =
       normalizedAssets.filter(
         (asset) =>
+          asset.draft.mediaKind === "text" &&
           !existingCopySourcePaths.has(
             asset.draft.sourceRelativePath,
           ),
       );
 
-    if (newlyIncludedAssets.length > 0) {
+    if (newTextSidecars.length > 0) {
       throw new Error(
         [
-          "This staging-update milestone adds audio tracks and preserves existing sidecars.",
-          "Add new artwork or text sidecars in a separate future asset-update workflow.",
-          `New sidecars: ${newlyIncludedAssets
+          "Incremental artwork revision is available, but general text-sidecar addition remains a separate future workflow.",
+          `New text sidecars: ${newTextSidecars
             .map((asset) => asset.draft.sourceRelativePath)
             .join(", ")}`,
         ].join(" "),
@@ -2384,9 +2725,115 @@ export async function prepareIngestReleaseBuild(
     );
   const copies: PreparedCopy[] = [];
   const preservedCopies: PreparedCopy[] = [];
+  const preservedCopyItems: IngestBuildPlanItem[] = [];
+  const removals: PreparedRemoval[] = [];
   const blockedItems: IngestBuildPlanItem[] = [];
 
+  const verifyExistingCopy = async (
+    receiptCopy: ExistingReceiptCopy,
+  ): Promise<boolean> => {
+    const stagedDestination = assertPathWithinRoot(
+      releasePath,
+      path.join(
+        releasePath,
+        ...withinReleasePath(
+          releaseRelativePath,
+          receiptCopy.destinationRelativePath,
+        ).split("/"),
+      ),
+    );
+
+    return (
+      (await pathExists(stagedDestination)) &&
+      (await sha256File(stagedDestination)) ===
+        receiptCopy.sourceSha256
+    );
+  };
+
+  const scheduleRemovalIfPresent = async (
+    destinationRelativePath: string,
+    reason: string,
+  ) => {
+    const destinationWithinRelease =
+      withinReleasePath(
+        releaseRelativePath,
+        destinationRelativePath,
+      );
+    const target = assertPathWithinRoot(
+      releasePath,
+      path.join(
+        releasePath,
+        ...destinationWithinRelease.split("/"),
+      ),
+    );
+
+    if (!(await pathExists(target))) {
+      return;
+    }
+
+    const stats = await lstat(target);
+    if (stats.isSymbolicLink()) {
+      throw new Error(
+        `Refusing to revise a symlinked Library asset: ${destinationRelativePath}`,
+      );
+    }
+
+    removals.push({
+      destinationRelativePath,
+      destinationWithinRelease,
+      reason,
+    });
+  };
+
   for (const track of tracks) {
+    if (track.preserveOnly) {
+      const receiptCopy = existingCopyByDestination.get(
+        track.existingTrack!.destinationRelativePath,
+      );
+
+      if (
+        !receiptCopy ||
+        !(await verifyExistingCopy(receiptCopy))
+      ) {
+        blockedItems.push({
+          kind: "copy",
+          sourceRelativePath:
+            track.existingTrack!.sourceRelativePath,
+          destinationRelativePath:
+            track.existingTrack!.destinationRelativePath,
+          mediaKind: receiptCopy?.mediaKind ?? "audio",
+          sizeBytes: receiptCopy?.bytes,
+          sha256: receiptCopy?.sourceSha256,
+          logicalRoles: receiptCopy?.logicalRoles,
+          action: "blocked",
+          reason:
+            "An untouched existing track no longer matches its ingest receipt. Resolve the Library copy before applying this update.",
+        });
+        continue;
+      }
+
+      preservedCopyItems.push({
+        kind: "copy",
+        sourceRelativePath: receiptCopy.sourceRelativePath,
+        destinationRelativePath: receiptCopy.destinationRelativePath,
+        mediaKind: receiptCopy.mediaKind,
+        sizeBytes: receiptCopy.bytes,
+        sha256: receiptCopy.sourceSha256,
+        logicalRoles: receiptCopy.logicalRoles,
+        action: "preserve",
+        adjustment: `Stable ID: ${track.id}`,
+        reason:
+          "This existing Library track is not part of the current ingest candidate and will be preserved unchanged.",
+      });
+      continue;
+    }
+
+    if (!track.file) {
+      throw new Error(
+        `Included track is missing its inspected source: ${track.draft.sourceRelativePath}`,
+      );
+    }
+
     const preparedCopy = await prepareCopy(
       canonicalIngestRoot,
       track.file,
@@ -2400,6 +2847,97 @@ export async function prepareIngestReleaseBuild(
 
     if (!track.existingTrack) {
       copies.push(preparedCopy);
+      continue;
+    }
+
+    if (track.replacement) {
+      const previousCopy = existingCopyByDestination.get(
+        track.replacement.previousDestinationRelativePath,
+      );
+
+      if (
+        !previousCopy ||
+        !(await verifyExistingCopy(previousCopy))
+      ) {
+        blockedItems.push({
+          kind: "copy",
+          sourceRelativePath:
+            track.replacement.previousSourceRelativePath,
+          destinationRelativePath:
+            track.replacement.previousDestinationRelativePath,
+          mediaKind: previousCopy?.mediaKind ?? "audio",
+          sizeBytes: previousCopy?.bytes,
+          sha256: previousCopy?.sourceSha256,
+          logicalRoles: previousCopy?.logicalRoles,
+          action: "blocked",
+          reason:
+            "Canonical-audio replacement requires the current Library master to match its ingest receipt before it can be superseded.",
+        });
+        continue;
+      }
+
+      if (
+        previousCopy.destinationRelativePath !==
+        preparedCopy.destinationRelativePath
+      ) {
+        const replacementDestination = assertPathWithinRoot(
+          releasePath,
+          path.join(
+            releasePath,
+            ...withinReleasePath(
+              releaseRelativePath,
+              preparedCopy.destinationRelativePath,
+            ).split("/"),
+          ),
+        );
+        if (await pathExists(replacementDestination)) {
+          blockedItems.push({
+            kind: "copy",
+            sourceRelativePath: preparedCopy.sourceRelativePath,
+            destinationRelativePath: preparedCopy.destinationRelativePath,
+            mediaKind: preparedCopy.mediaKind,
+            sizeBytes: preparedCopy.bytes,
+            sha256: preparedCopy.sha256,
+            logicalRoles: preparedCopy.logicalRoles,
+            action: "blocked",
+            reason:
+              "The replacement canonical-audio destination already exists and is not the currently verified master. Resolve that collision before applying the revision.",
+          });
+          continue;
+        }
+      }
+
+      preparedCopy.writeAction = "replace";
+      preparedCopy.replacementOfDestinationRelativePath =
+        previousCopy.destinationRelativePath;
+      copies.push(preparedCopy);
+
+      if (
+        previousCopy.destinationRelativePath !==
+        preparedCopy.destinationRelativePath
+      ) {
+        await scheduleRemovalIfPresent(
+          previousCopy.destinationRelativePath,
+          "The superseded canonical audio master will be removed after its replacement is staged and verified.",
+        );
+      }
+
+      for (const derivative of [
+        `${track.relativePath}/audio-playback.mp3`,
+        `${track.relativePath}/waveform-peaks.json`,
+        `${track.relativePath}/stream`,
+      ]) {
+        if (
+          derivative ===
+          preparedCopy.destinationRelativePath
+        ) {
+          continue;
+        }
+        await scheduleRemovalIfPresent(
+          derivative,
+          "This generated derivative depends on the previous canonical audio and must be regenerated by Prepare release.",
+        );
+      }
       continue;
     }
 
@@ -2447,27 +2985,12 @@ export async function prepareIngestReleaseBuild(
           preparedCopy.logicalRoles,
         action: "blocked",
         reason:
-          "The source bytes changed after the original staging build. Incremental updates do not silently replace an existing audio master.",
+          "The source bytes changed after the original staging build. Choose Replace canonical audio for this track instead of silently overwriting the Library master.",
       });
       continue;
     }
 
-    const stagedDestination = assertPathWithinRoot(
-      releasePath,
-      path.join(
-        releasePath,
-        ...withinReleasePath(
-          releaseRelativePath,
-          preparedCopy.destinationRelativePath,
-        ).split("/"),
-      ),
-    );
-
-    if (
-      !(await pathExists(stagedDestination)) ||
-      (await sha256File(stagedDestination)) !==
-        receiptCopy.sourceSha256
-    ) {
+    if (!(await verifyExistingCopy(receiptCopy))) {
       blockedItems.push({
         kind: "copy",
         sourceRelativePath:
@@ -2505,12 +3028,14 @@ export async function prepareIngestReleaseBuild(
                   ? `track-artwork:${placement.assignment.role}:${placement.trackSourceRelativePath}`
                   : `release-artwork:${placement.assignment.role}`,
               ],
+              assignment: placement.assignment,
             }))
         : [
             {
               destinationRelativePath:
                 asset.destinationRelativePath,
               logicalRoles: ["imported-text-sidecar"],
+              assignment: undefined,
             },
           ];
 
@@ -2546,28 +3071,237 @@ export async function prepareIngestReleaseBuild(
       );
 
       if (
-        !receiptCopy ||
-        receiptCopy.sourceSha256 !== preparedCopy.sha256
+        receiptCopy &&
+        receiptCopy.sourceSha256 === preparedCopy.sha256
       ) {
+        if (!(await verifyExistingCopy(receiptCopy))) {
+          blockedItems.push({
+            kind: "copy",
+            sourceRelativePath:
+              receiptCopy.sourceRelativePath,
+            destinationRelativePath:
+              receiptCopy.destinationRelativePath,
+            mediaKind: receiptCopy.mediaKind,
+            sizeBytes: receiptCopy.bytes,
+            sha256: receiptCopy.sourceSha256,
+            logicalRoles: receiptCopy.logicalRoles,
+            action: "blocked",
+            reason:
+              "The existing Library artwork no longer matches its ingest receipt. Resolve the modified or missing destination before applying the revision.",
+          });
+          continue;
+        }
+
+        preservedCopies.push(preparedCopy);
+        continue;
+      }
+
+      if (asset.draft.mediaKind === "image") {
+        const existingArtwork = existingArtworkByStem.get(
+          artworkDestinationStem(
+            preparedCopy.destinationRelativePath,
+          ),
+        );
+
+        if (existingArtwork) {
+          if (destination.assignment?.replaceExisting !== true) {
+            blockedItems.push({
+              kind: "copy",
+              sourceRelativePath:
+                preparedCopy.sourceRelativePath,
+              destinationRelativePath:
+                preparedCopy.destinationRelativePath,
+              mediaKind: preparedCopy.mediaKind,
+              sizeBytes: preparedCopy.bytes,
+              sha256: preparedCopy.sha256,
+              logicalRoles: preparedCopy.logicalRoles,
+              action: "blocked",
+              reason:
+                "This artwork assignment targets existing canonical Library artwork. Confirm the replacement in Artwork & files before applying the update.",
+            });
+            continue;
+          }
+
+          if (!(await verifyExistingCopy(existingArtwork))) {
+            blockedItems.push({
+              kind: "copy",
+              sourceRelativePath:
+                existingArtwork.sourceRelativePath,
+              destinationRelativePath:
+                existingArtwork.destinationRelativePath,
+              mediaKind: existingArtwork.mediaKind,
+              sizeBytes: existingArtwork.bytes,
+              sha256: existingArtwork.sourceSha256,
+              logicalRoles: existingArtwork.logicalRoles,
+              action: "blocked",
+              reason:
+                "Artwork replacement requires the current Library artwork to match its ingest receipt before it can be superseded.",
+            });
+            continue;
+          }
+
+          if (
+            existingArtwork.destinationRelativePath !==
+              preparedCopy.destinationRelativePath
+          ) {
+            const replacementDestination =
+              assertPathWithinRoot(
+                releasePath,
+                path.join(
+                  releasePath,
+                  ...withinReleasePath(
+                    releaseRelativePath,
+                    preparedCopy.destinationRelativePath,
+                  ).split("/"),
+                ),
+              );
+            if (await pathExists(replacementDestination)) {
+              blockedItems.push({
+                kind: "copy",
+                sourceRelativePath:
+                  preparedCopy.sourceRelativePath,
+                destinationRelativePath:
+                  preparedCopy.destinationRelativePath,
+                mediaKind: preparedCopy.mediaKind,
+                sizeBytes: preparedCopy.bytes,
+                sha256: preparedCopy.sha256,
+                logicalRoles: preparedCopy.logicalRoles,
+                action: "blocked",
+                reason:
+                  "The replacement artwork destination already exists independently of the verified current artwork. Resolve that collision before applying the revision.",
+              });
+              continue;
+            }
+          }
+
+          preparedCopy.writeAction = "replace";
+          preparedCopy.replacementOfDestinationRelativePath =
+            existingArtwork.destinationRelativePath;
+          copies.push(preparedCopy);
+
+          if (
+            existingArtwork.destinationRelativePath !==
+              preparedCopy.destinationRelativePath
+          ) {
+            await scheduleRemovalIfPresent(
+              existingArtwork.destinationRelativePath,
+              "The superseded canonical artwork will be removed after its reviewed replacement is staged and verified.",
+            );
+          }
+          continue;
+        }
+
+        const untrackedDestination = assertPathWithinRoot(
+          releasePath,
+          path.join(
+            releasePath,
+            ...withinReleasePath(
+              releaseRelativePath,
+              preparedCopy.destinationRelativePath,
+            ).split("/"),
+          ),
+        );
+        if (await pathExists(untrackedDestination)) {
+          blockedItems.push({
+            kind: "copy",
+            sourceRelativePath:
+              preparedCopy.sourceRelativePath,
+            destinationRelativePath:
+              preparedCopy.destinationRelativePath,
+            mediaKind: preparedCopy.mediaKind,
+            sizeBytes: preparedCopy.bytes,
+            sha256: preparedCopy.sha256,
+            logicalRoles: preparedCopy.logicalRoles,
+            action: "blocked",
+            reason:
+              "The requested artwork destination already exists but is not represented by the current ingest receipt. Refusing to overwrite an untracked Library asset.",
+          });
+          continue;
+        }
+
+        copies.push(preparedCopy);
+        continue;
+      }
+
+      blockedItems.push({
+        kind: "copy",
+        sourceRelativePath:
+          preparedCopy.sourceRelativePath,
+        destinationRelativePath:
+          preparedCopy.destinationRelativePath,
+        mediaKind: preparedCopy.mediaKind,
+        sizeBytes: preparedCopy.bytes,
+        sha256: preparedCopy.sha256,
+        logicalRoles:
+          preparedCopy.logicalRoles,
+        action: "blocked",
+        reason:
+          "Existing text sidecars are preserved only when their source mapping and bytes still match the ingest receipt. General sidecar replacement remains a separate future workflow.",
+      });
+    }
+  }
+
+  if (existingReceipt) {
+    const replacedDestinations = new Set(
+      copies.flatMap((copy) =>
+        copy.replacementOfDestinationRelativePath
+          ? [copy.replacementOfDestinationRelativePath]
+          : [],
+      ),
+    );
+    const accountedDestinations = new Set([
+      ...copies.map((copy) => copy.destinationRelativePath),
+      ...preservedCopies.map(
+        (copy) => copy.destinationRelativePath,
+      ),
+      ...preservedCopyItems.map(
+        (item) => item.destinationRelativePath,
+      ),
+    ]);
+
+    for (const receiptCopy of existingReceipt.copies) {
+      if (
+        replacedDestinations.has(
+          receiptCopy.destinationRelativePath,
+        ) ||
+        accountedDestinations.has(
+          receiptCopy.destinationRelativePath,
+        )
+      ) {
+        continue;
+      }
+
+      if (!(await verifyExistingCopy(receiptCopy))) {
         blockedItems.push({
           kind: "copy",
-          sourceRelativePath:
-            preparedCopy.sourceRelativePath,
-          destinationRelativePath:
-            preparedCopy.destinationRelativePath,
-          mediaKind: preparedCopy.mediaKind,
-          sizeBytes: preparedCopy.bytes,
-          sha256: preparedCopy.sha256,
-          logicalRoles:
-            preparedCopy.logicalRoles,
+          sourceRelativePath: receiptCopy.sourceRelativePath,
+          destinationRelativePath: receiptCopy.destinationRelativePath,
+          mediaKind: receiptCopy.mediaKind,
+          sizeBytes: receiptCopy.bytes,
+          sha256: receiptCopy.sourceSha256,
+          logicalRoles: receiptCopy.logicalRoles,
           action: "blocked",
           reason:
-            "Existing staging sidecars are preserved only when their source mapping and bytes still match the ingest receipt. Assignment-driven artwork relocation requires a fresh rebuild or a future reviewed asset-migration workflow.",
+            "An existing Library asset that is outside this ingest candidate no longer matches its ingest receipt.",
         });
         continue;
       }
 
-      preservedCopies.push(preparedCopy);
+      preservedCopyItems.push({
+        kind: "copy",
+        sourceRelativePath: receiptCopy.sourceRelativePath,
+        destinationRelativePath: receiptCopy.destinationRelativePath,
+        mediaKind: receiptCopy.mediaKind,
+        sizeBytes: receiptCopy.bytes,
+        sha256: receiptCopy.sourceSha256,
+        logicalRoles: receiptCopy.logicalRoles,
+        action: "preserve",
+        reason:
+          "This verified existing Library asset is outside the current ingest candidate and will be preserved unchanged.",
+      });
+      accountedDestinations.add(
+        receiptCopy.destinationRelativePath,
+      );
     }
   }
 
@@ -2641,6 +3375,14 @@ export async function prepareIngestReleaseBuild(
           "track_total",
         ],
       );
+    const releaseArtworkUpdates =
+      releaseArtworkAssignments(artworkPlacements);
+    const releaseFrontArtwork =
+      releaseArtworkUpdates.find(
+        ({ assignment }) => assignment.role === "front_cover",
+      );
+    let releaseTomlChanged = false;
+    const releaseTomlAdjustments: string[] = [];
 
     if (previousTrackTotal !== tracks.length) {
       setNestedRecordValue(
@@ -2649,6 +3391,57 @@ export async function prepareIngestReleaseBuild(
         "track_total",
         tracks.length,
       );
+      releaseTomlChanged = true;
+      releaseTomlAdjustments.push(
+        `Track total ${String(previousTrackTotal ?? "unknown")} → ${tracks.length}`,
+      );
+    }
+
+    if (releaseArtworkUpdates.length > 0) {
+      let artworkRecords = readNestedRecordValue(
+        releaseToml.data,
+        ["release", "artwork"],
+      );
+      let artworkRecordsChanged = false;
+      let hasPrimaryArtwork =
+        Array.isArray(artworkRecords) &&
+        artworkRecords.some(
+          (item) => isRecord(item) && item.primary === true,
+        );
+
+      for (const { placement, assignment } of releaseArtworkUpdates) {
+        const primary =
+          assignment.role === "front_cover" ||
+          (!hasPrimaryArtwork && !releaseFrontArtwork);
+        const mergedArtwork = mergeArtworkRecord(
+          artworkRecords,
+          assignment,
+          placement.destinationRelativePath,
+          primary,
+        );
+        artworkRecords = mergedArtwork.value;
+        artworkRecordsChanged ||= mergedArtwork.changed;
+        hasPrimaryArtwork ||= primary;
+
+        if (mergedArtwork.changed) {
+          releaseTomlAdjustments.push(
+            `${assignment.role} artwork → ${placement.destinationRelativePath}`,
+          );
+        }
+      }
+
+      if (artworkRecordsChanged) {
+        setNestedRecordValue(
+          releaseToml.data,
+          ["release"],
+          "artwork",
+          artworkRecords,
+        );
+        releaseTomlChanged = true;
+      }
+    }
+
+    if (releaseTomlChanged) {
       documents.push({
         storageRole: "release",
         filename: "release.toml",
@@ -2664,15 +3457,72 @@ export async function prepareIngestReleaseBuild(
         destinationRelativePath:
           releaseTomlPath,
         action: "update",
-        adjustment:
-          `Track total ${String(previousTrackTotal ?? "unknown")} → ${tracks.length}`,
+        adjustment: releaseTomlAdjustments.join(" · "),
         reason:
-          "The release track total will be synchronized while all other authored values are retained.",
+          "Only reviewed release numbering/artwork references are synchronized; unrelated authored release metadata is retained.",
       });
     } else {
       preservedDocumentPaths.add(
         releaseTomlPath,
       );
+    }
+
+    const releaseSettingsPath =
+      `${releaseRelativePath}/release-settings.toml`;
+    const releaseSettingsTarget = assertPathWithinRoot(
+      releasePath,
+      path.join(releasePath, "release-settings.toml"),
+    );
+    if (await pathExists(releaseSettingsTarget)) {
+      if (releaseFrontArtwork) {
+        const releaseSettings =
+          await readTomlRecordForUpdate(
+            releasePath,
+            releaseRelativePath,
+            releaseSettingsPath,
+          );
+        const previousFallback = readNestedRecordValue(
+          releaseSettings.data,
+          [
+            "settings",
+            "inheritance",
+            "release_artwork_fallback_path",
+          ],
+        );
+        const nextFallback =
+          releaseFrontArtwork.placement.destinationRelativePath;
+
+        if (previousFallback !== nextFallback) {
+          setNestedRecordValue(
+            releaseSettings.data,
+            ["settings", "inheritance"],
+            "release_artwork_fallback_path",
+            nextFallback,
+          );
+          documents.push({
+            storageRole: "release",
+            filename: "release-settings.toml",
+            relativePath: releaseSettingsPath,
+            content: stringifyValidatedToml(
+              releaseSettings.data,
+            ),
+            validated: true,
+            writeAction: "replace",
+          });
+          documentItems.push({
+            kind: "toml",
+            destinationRelativePath: releaseSettingsPath,
+            action: "update",
+            adjustment: `Release artwork fallback → ${nextFallback}`,
+            reason:
+              "The release artwork fallback follows the reviewed canonical front-artwork revision while unrelated settings remain authored and intact.",
+          });
+        } else {
+          preservedDocumentPaths.add(releaseSettingsPath);
+        }
+      } else {
+        preservedDocumentPaths.add(releaseSettingsPath);
+      }
     }
 
     for (const track of tracks.filter(
@@ -2710,8 +3560,110 @@ export async function prepareIngestReleaseBuild(
       const totalChanged =
         previousTrackTotalValue !==
           tracks.length;
+      const previousAudioDestination =
+        path.posix.basename(
+          track.existingTrack!.destinationRelativePath,
+        );
+      const audioDestinationChanged =
+        Boolean(track.replacement) &&
+        previousAudioDestination !==
+          track.audioDestination;
+      const trackArtworkUpdates =
+        trackArtworkAssignments(
+          artworkPlacements,
+          track.draft.sourceRelativePath,
+        );
+      const trackFrontArtwork =
+        trackArtworkUpdates.find(
+          ({ assignment }) =>
+            assignment.role === "front_cover" ||
+            assignment.role === "track_artwork",
+        );
+      let artworkChanged = false;
+      let nextArtworkMasterPath = "";
 
-      if (numberChanged || totalChanged) {
+      if (trackFrontArtwork) {
+        nextArtworkMasterPath =
+          relativeArtworkPathForTrack(
+            track,
+            releaseRelativePath,
+            trackFrontArtwork.placement.destinationRelativePath,
+          );
+        const previousArtworkAsset =
+          readNestedRecordValue(
+            trackToml.data,
+            ["track", "assets", "artwork"],
+          );
+        const previousArtworkMaster =
+          isRecord(previousArtworkAsset)
+            ? previousArtworkAsset.master
+            : undefined;
+
+        if (previousArtworkMaster !== nextArtworkMasterPath) {
+          setNestedRecordValue(
+            trackToml.data,
+            ["track", "assets"],
+            "artwork",
+            {
+              ...(isRecord(previousArtworkAsset)
+                ? previousArtworkAsset
+                : {}),
+              master: nextArtworkMasterPath,
+            },
+          );
+          artworkChanged = true;
+        }
+
+      }
+
+      if (trackArtworkUpdates.length > 0) {
+        let artworkRecords = readNestedRecordValue(
+          trackToml.data,
+          ["track", "artwork"],
+        );
+        let hasPrimaryArtwork =
+          Array.isArray(artworkRecords) &&
+          artworkRecords.some(
+            (item) => isRecord(item) && item.primary === true,
+          );
+
+        for (const { placement, assignment } of trackArtworkUpdates) {
+          const masterPath = relativeArtworkPathForTrack(
+            track,
+            releaseRelativePath,
+            placement.destinationRelativePath,
+          );
+          const primary =
+            assignment.role === "front_cover" ||
+            assignment.role === "track_artwork" ||
+            (!hasPrimaryArtwork && !trackFrontArtwork);
+          const mergedArtwork = mergeArtworkRecord(
+            artworkRecords,
+            assignment,
+            masterPath,
+            primary,
+          );
+          artworkRecords = mergedArtwork.value;
+          artworkChanged ||= mergedArtwork.changed;
+          hasPrimaryArtwork ||= primary;
+        }
+
+        if (artworkChanged) {
+          setNestedRecordValue(
+            trackToml.data,
+            ["track"],
+            "artwork",
+            artworkRecords,
+          );
+        }
+      }
+
+      if (
+        numberChanged ||
+        totalChanged ||
+        audioDestinationChanged ||
+        artworkChanged
+      ) {
         setNestedRecordValue(
           trackToml.data,
           ["track", "numbering"],
@@ -2724,6 +3676,14 @@ export async function prepareIngestReleaseBuild(
           "track_total",
           tracks.length,
         );
+        if (audioDestinationChanged) {
+          setNestedRecordValue(
+            trackToml.data,
+            ["track", "assets"],
+            "audio_playback",
+            track.audioDestination,
+          );
+        }
         documents.push({
           storageRole: "track",
           filename: "track.toml",
@@ -2743,9 +3703,18 @@ export async function prepareIngestReleaseBuild(
             : "update",
           adjustment: numberChanged
             ? `Track ${String(previousTrackNumber ?? track.existingTrack?.number ?? "?")} → ${track.draft.trackNumber}`
-            : `Track total ${String(previousTrackTotalValue ?? "unknown")} → ${tracks.length}`,
-          reason:
-            "Only track numbering fields will change; the track directory ID and all other authored metadata are retained.",
+            : audioDestinationChanged
+              ? `Canonical audio ${previousAudioDestination} → ${track.audioDestination}`
+              : artworkChanged
+                ? nextArtworkMasterPath
+                  ? `Front artwork → ${nextArtworkMasterPath}`
+                  : "Artwork assignments updated"
+                : `Track total ${String(previousTrackTotalValue ?? "unknown")} → ${tracks.length}`,
+          reason: audioDestinationChanged
+            ? "The canonical-audio path will follow the reviewed replacement while all unrelated authored track metadata is retained."
+            : artworkChanged
+              ? "The reviewed canonical track-artwork reference will be synchronized while unrelated authored track metadata is retained."
+              : "Only track numbering fields will change; the track directory ID and all other authored metadata are retained.",
         });
       } else {
         preservedDocumentPaths.add(
@@ -2779,7 +3748,6 @@ export async function prepareIngestReleaseBuild(
     }
 
     for (const filename of [
-      "release-settings.toml",
       "release-production-notes.toml",
     ]) {
       const relativePath =
@@ -2864,6 +3832,7 @@ export async function prepareIngestReleaseBuild(
           : "A new track directory will be added.",
       }),
     ),
+    ...preservedCopyItems,
     ...preservedCopies.map(
       (copy): IngestBuildPlanItem => ({
         kind: "copy",
@@ -2895,9 +3864,28 @@ export async function prepareIngestReleaseBuild(
           copy.logicalRoles,
         action: operation === "create"
           ? "create"
-          : "add",
-        reason:
-          "Source bytes will be copied and hash-verified without changing the ingest source.",
+          : copy.writeAction === "replace"
+            ? "update"
+            : "add",
+        adjustment: copy.writeAction === "replace"
+          ? copy.mediaKind === "image"
+            ? "Explicit canonical-artwork replacement"
+            : "Explicit canonical-audio replacement"
+          : undefined,
+        reason: copy.writeAction === "replace"
+          ? copy.mediaKind === "image"
+            ? "The reviewed ingest artwork will replace the verified canonical Library artwork target after explicit confirmation."
+            : "The reviewed ingest source will replace the verified canonical Library master while preserving the stable track identity."
+          : "Source bytes will be copied and hash-verified without changing the ingest source.",
+      }),
+    ),
+    ...removals.map(
+      (removal): IngestBuildPlanItem => ({
+        kind: "copy",
+        destinationRelativePath:
+          removal.destinationRelativePath,
+        action: "remove",
+        reason: removal.reason,
       }),
     ),
     ...documentItems,
@@ -2926,6 +3914,13 @@ export async function prepareIngestReleaseBuild(
         releaseRelativePath,
         tracks,
         copies,
+        new Set(
+          copies.flatMap((copy) =>
+            copy.replacementOfDestinationRelativePath
+              ? [copy.replacementOfDestinationRelativePath]
+              : [],
+          ),
+        ),
       )
     : createReceiptContent(
         inspection,
@@ -2968,6 +3963,9 @@ export async function prepareIngestReleaseBuild(
     addedTrackCount: tracks.filter(
       (track) => !track.existingTrack,
     ).length,
+    replacedTrackCount: tracks.filter(
+      (track) => Boolean(track.replacement),
+    ).length,
     reorderedTrackCount: tracks.filter(
       (track) =>
         track.existingTrack &&
@@ -2982,7 +3980,7 @@ export async function prepareIngestReleaseBuild(
     preservedFileCount: items.filter(
       (item) => item.action === "preserve",
     ).length,
-    removedFileCount: 0,
+    removedFileCount: removals.length,
   };
 
   return {
@@ -3003,10 +4001,11 @@ export async function prepareIngestReleaseBuild(
             "The copied audio master is also referenced as the initial audio-player source; no duplicate derivative is created.",
           ]
         : [
-            "Existing authored metadata is preserved; the update changes only release/track numbering plus starter files for newly added tracks.",
-            "Track directory IDs remain stable when the displayed track order changes.",
-            "No existing track or file is removed by an incremental staging update.",
-            "Playback audio, embedded tags, waveform data, and catalog output may require regeneration after the update.",
+            "Existing authored metadata and stable track IDs are preserved. Existing Library tracks omitted from the current ingest candidate remain untouched automatically.",
+            "An explicit Replace canonical audio choice may supersede one verified master; generated playback, HLS, and waveform derivatives for that track are removed so Prepare release can regenerate them from the new canonical audio.",
+            "Track directory IDs remain stable when the displayed track order changes or canonical audio is replaced.",
+            "New artwork can be added from a later ingest candidate. Replacing an occupied canonical front-artwork target requires explicit confirmation in Artwork & files; unrelated existing artwork is preserved automatically.",
+            "Track removal and general text-sidecar replacement remain separate future workflows.",
           ],
       confirmationPhrase:
         operation === "create"
@@ -3018,6 +4017,7 @@ export async function prepareIngestReleaseBuild(
     releaseRelativePath,
     documents,
     copies,
+    removals,
     preservedFiles,
     receiptContent,
   };
@@ -3104,6 +4104,24 @@ async function executePreparedCopy(
         ),
       ),
     );
+  if (
+    copy.writeAction === "replace" &&
+    await pathExists(destinationPath)
+  ) {
+    const destinationStats = await lstat(
+      destinationPath,
+    );
+    if (
+      destinationStats.isSymbolicLink() ||
+      !destinationStats.isFile()
+    ) {
+      throw new Error(
+        `Refusing to replace a non-regular Library file: ${copy.destinationRelativePath}`,
+      );
+    }
+    await unlink(destinationPath);
+  }
+
   const sourceBefore = await lstat(
     copy.sourcePath,
   );
@@ -3338,6 +4356,7 @@ export async function executeIngestReleaseBuild(
       stagingCreated = true;
     }
 
+    const removedFiles: string[] = [];
     const receipts: IngestBuildCopyReceipt[] =
       [];
 
@@ -3347,6 +4366,35 @@ export async function executeIngestReleaseBuild(
           stagingPath,
           copy,
         ),
+      );
+    }
+
+    for (const removal of prepared.removals) {
+      const target = assertPathWithinRoot(
+        stagingPath,
+        path.join(
+          stagingPath,
+          ...removal.destinationWithinRelease.split("/"),
+        ),
+      );
+
+      if (!(await pathExists(target))) {
+        continue;
+      }
+
+      const stats = await lstat(target);
+      if (stats.isSymbolicLink()) {
+        throw new Error(
+          `Refusing to remove a symlinked Library asset: ${removal.destinationRelativePath}`,
+        );
+      }
+
+      await rm(target, {
+        recursive: stats.isDirectory(),
+        force: false,
+      });
+      removedFiles.push(
+        removal.destinationRelativePath,
       );
     }
 
@@ -3482,10 +4530,12 @@ export async function executeIngestReleaseBuild(
     }
 
     const createdFiles = [
-      ...prepared.copies.map(
-        (copy) =>
-          copy.destinationRelativePath,
-      ),
+      ...prepared.copies
+        .filter((copy) => copy.writeAction === "create")
+        .map(
+          (copy) =>
+            copy.destinationRelativePath,
+        ),
       ...prepared.documents
         .filter(
           (document) =>
@@ -3502,6 +4552,11 @@ export async function executeIngestReleaseBuild(
         : []),
     ];
     const updatedFiles = [
+      ...prepared.copies
+        .filter((copy) => copy.writeAction === "replace")
+        .map(
+          (copy) => copy.destinationRelativePath,
+        ),
       ...prepared.documents
         .filter(
           (document) =>
@@ -3528,6 +4583,7 @@ export async function executeIngestReleaseBuild(
       updatedFiles,
       preservedFiles:
         prepared.preservedFiles,
+      removedFiles,
       receipts,
       completedAt:
         String(receipt.completedAt),

@@ -90,7 +90,7 @@ test(
     );
     assert.match(
       builderSource,
-      /window\.confirm\(\s*`Replace the current front artwork for/s,
+      /window\.confirm\([\s\S]*?`Replace the current front artwork for/s,
     );
     assert.match(
       builderSource,

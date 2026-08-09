@@ -8,9 +8,12 @@ const projectRoot = path.resolve(
   "..",
 );
 
+export const defaultMediaLibraryRoot =
+  "../media-library";
+
 export async function resolveMediaRoot(
   configuredRoot =
-    process.env.MEDIA_LIBRARY_ROOT ?? "../demo-media",
+    process.env.MEDIA_LIBRARY_ROOT ?? defaultMediaLibraryRoot,
 ): Promise<string> {
   const candidate = path.resolve(projectRoot, configuredRoot);
 

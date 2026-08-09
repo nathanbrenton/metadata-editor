@@ -62,7 +62,7 @@ test("renders desktop-first staging and publish workspaces", () => {
   );
   assert.match(
     styleSource,
-    /\.publish-readiness-table\s*\{[\s\S]*min-width:\s*104rem/,
+    /\.publish-readiness-table\s*\{[^}]*min-width:\s*68rem;[^}]*table-layout:\s*fixed;/s,
   );
 });
 
@@ -72,7 +72,7 @@ test("moves tab-specific summaries into the sticky footer", () => {
   assert.match(appSource, /Drop point \$\{ingestScan\.configuredRoot\}/);
   assert.match(appSource, /ffprobe \$\{/);
   assert.match(appSource, /MediaInfo \$\{/);
-  assert.match(appSource, /preflight planning enabled · writes disabled/);
+  assert.match(appSource, /preflight planning enabled · preparation writes enabled · public-package writes disabled/);
   assert.match(appSource, /className="footer-summary"/);
   assert.doesNotMatch(appSource, />\s*Drop summary\s*</);
   assert.doesNotMatch(appSource, /ingest-safety-banner/);

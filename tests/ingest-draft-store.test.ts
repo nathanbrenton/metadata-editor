@@ -172,3 +172,58 @@ test(
     );
   },
 );
+
+test(
+  "preserves explicit artwork replacement confirmation in stored drafts",
+  () => {
+    const parsed = parseStoredIngestDraft({
+      schemaVersion: 1,
+      candidateId: "artwork-revision",
+      updatedAt: "2026-08-09T18:00:00.000Z",
+      draft: {
+        candidateId: "artwork-revision",
+        releaseId: "2026-07-20_session",
+        releaseTitle: "Session",
+        releaseArtist: "Artist",
+        releaseDate: "2026-07-20",
+        releaseType: "album",
+        tracks: [],
+        assets: [
+          {
+            sourceRelativePath: "artwork-revision/cover.png",
+            include: true,
+            mediaKind: "image",
+            destinationRelativePath:
+              "artwork/front/artwork-master.png",
+            artworkAssignments: [
+              {
+                id: "release-front-cover",
+                scope: "release",
+                role: "front_cover",
+                trackSourceRelativePaths: [],
+                replaceExisting: true,
+              },
+            ],
+          },
+        ],
+      },
+      sourceStatuses: [
+        {
+          sourceRelativePath: "artwork-revision/cover.png",
+          state: "unchanged",
+          mediaKind: "image",
+          sizeBytes: 12,
+          modifiedAt: "2026-08-09T18:00:00.000Z",
+          reviewed: true,
+          attached: false,
+        },
+      ],
+    });
+
+    assert.equal(
+      parsed.draft.assets[0].artworkAssignments[0]
+        ?.replaceExisting,
+      true,
+    );
+  },
+);

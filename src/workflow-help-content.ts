@@ -48,7 +48,7 @@ export const workflowStages: readonly WorkflowStage[] = [
       "Find source candidates and inspect the audio, artwork, sidecars, inferred identity, and technical evidence without changing source files.",
     steps: [
       "Place an audio file or release folder in the configured ingest drop and refresh the source scan.",
-      "Inspect each candidate's file inventory, dates, titles, artists, technical properties, warnings, and possible artwork. The Source files table puts a media-preview column first: image rows show clickable thumbnails and audio rows provide play/pause preview controls, while probe provenance remains in Details instead of occupying a dedicated table column. Numbered track folders such as 01, 02, track-03, or 04_title are treated as high-confidence structural hints: one audio file in that scope seeds the track number, one image paired with that audio seeds track-level front artwork, and one image at the release root seeds release-level front artwork. Filename disagreement does not override the stronger folder association. Source counts and total size are condensed into the Source files header without adding another summary table.",
+      "Inspect each candidate's file inventory, dates, titles, artists, technical properties, warnings, and possible artwork. The Source files table keeps the visible columns compact—Preview, Filename, Duration, Size, and Details. Image rows show clickable thumbnails, and audio rows provide play/pause preview controls that continue to the next available audio source when a track ends and stop after the final audio source. Type, container, codec, sample rate, channels, bit depth, probe provenance, and other technical properties remain available in Details instead of occupying dedicated table columns. Inspection warnings name the affected source path, and the corresponding Source files row carries its own warning indicator so the problem file can be found immediately. Numbered track folders such as 01, 02, track-03, or 04_title are treated as high-confidence structural hints: one audio file in that scope seeds the track number, one image paired with that audio seeds track-level front artwork, and one image at the release root seeds release-level front artwork. Filename disagreement does not override the stronger folder association. Source counts and total size are condensed into the Source files header without adding another summary table.",
       "Choose release artist and release title sources independently from folder-field ranges or embedded album and artist tags. Continuing to Staging explicitly carries those selected values into the release draft, including over an older locally saved inferred identity, while keeping both fields editable. Detailed inference evidence is available in a collapsed disclosure beneath the identity controls.",
       "Choose the candidate that should become a new release or update an existing release.",
       "Continue to Staging only after the candidate evidence has been reviewed.",
@@ -70,7 +70,7 @@ export const workflowStages: readonly WorkflowStage[] = [
       "Preserve existing authored metadata and never infer that an omitted source should delete an existing track.",
     ],
     currentNote:
-      "New staging-release creation, incremental audio-track updates, track-number ordering, bulk title selection, bulk source-date application, read-only source-audio and artwork preview, stable-ID preservation, dry-run plans, explicit confirmation, copy verification, and rollback-safe promotion are available now. Artwork destinations are assignment-driven: release front artwork is staged under the release artwork tree, while track-level artwork is copied into each selected track's own artwork directory and referenced locally from track.toml. The track table shows source paths relative to the selected candidate and flags source dates later than the release date as non-blocking advisories. Intentional removals and general sidecar replacement remain future workflows.",
+      "New staging-release creation, incremental audio-track updates, explicit canonical-audio replacement, artwork-only revision candidates, reviewed canonical artwork replacement, track reordering by track number, bulk title selection, bulk source-date application, read-only source-audio and artwork preview, stable-ID preservation, dry-run plans, explicit confirmation, copy verification, and rollback-safe promotion are available now. When an existing Library release is selected, tracks that are absent from the current ingest candidate are preserved automatically, along with their verified canonical assets. A candidate audio source can explicitly Replace canonical audio for one existing stable track; the verified old master is superseded while authored metadata and the stable track ID remain intact, and generated playback/HLS/waveform derivatives for that track are removed so Prepare release can regenerate them. Artwork & files shows current canonical Library front artwork on the same release/track destination rows, including existing tracks whose original audio is not in the new candidate. New artwork can be added from a later candidate; replacing an occupied front-artwork target requires explicit confirmation, verifies the old Library copy against the ingest receipt, and synchronizes the affected artwork path in authored TOML without changing unrelated metadata. Intentional track removal and general text-sidecar replacement remain future workflows.",
   },
   {
     id: "library",
@@ -84,11 +84,11 @@ export const workflowStages: readonly WorkflowStage[] = [
       "When saved track numbers change, save the metadata first, then load and confirm the server's exact artist_number_title dry-run plan; guarded synchronization updates track IDs and reference TOMLs without overwriting an existing target.",
       "When a release title or generated directory identity changes, use Release identity & directory from the release menu. Review the server plan before updating release.id, release.title, release_reference.release_id values, the staging receipt, and the OS-level release folder. Existing targets are never overwritten; an operation manifest, backups, stale-plan detection, and rollback protect the move.",
       "Preview tracks from the sidebar or transport while reviewing titles, sequence, and track-specific values. When a Library preview reaches the end of a track, playback automatically continues to the next playable track in the displayed release order and stops after the final playable track. The release header displays only explicit release-scoped front artwork; it never substitutes the selected track's image. Track rows show compact local track-artwork thumbnails when available, omit the repeated word Track, and present the saved number directly before the display title in one compact line; multi-disc releases use disc.track numbering. On desktop, the long release/track sidebar remains sticky with its own bounded scroll region, while metadata and credits follow the page's native vertical scroll. The sidebar scrolls independently while it has room, then continued wheel or trackpad movement at its top or bottom edge hands off to the page so the release header, tabs, and footer remain reachable. Outside editable fields, Arrow Up and Arrow Down move through the sidebar's Release row and displayed track order. Only the sidebar scrolls for keyboard navigation, and it moves only when the destination crosses a visible edge, preventing whole-page jumps and unnecessary re-centering.",
-      "Inspect missing, stale, current, or blocked playback and waveform derivatives under Files & Sources.",
-      "Generate playback audio, waveform peaks, analysis, and web artwork from canonical masters when write-enabled media preparation is implemented.",
+      "Inspect missing, stale, current, or blocked private playback and waveform derivatives under Files & Sources. The private playback MP3 remains useful for local Library preview but is not the website listening asset.",
+      "From Publish preflight, use Prepare release to generate or refresh the hosted-listening derivatives: an AAC-LC HLS web stream with short fMP4 segments plus waveform JSON. Stream generation always starts from the canonical audio source and never copies masters into website output; waveform analysis likewise starts from the canonical source, decoding non-WAV audio to temporary PCM when necessary. Browser-artwork derivative generation remains a later media-preparation step.",
     ],
     currentNote:
-      "Metadata editing, release-to-track inheritance, controlled TOML saving, track-number-driven sidebar ordering, guarded track- and release-directory synchronization, readiness guidance, and broad-format browser audio preview are available. Directory changes use temporary names, operation manifests, collision checks, backups, stale-plan detection, and rollback protection. Media-processing status planning and waveform-generation code exist, but derivative-generation UI writes are not enabled yet.",
+      "Metadata editing, release-to-track inheritance, controlled TOML saving, track-number-driven sidebar ordering, guarded track- and release-directory synchronization, readiness guidance, broad-format browser audio preview, and reviewed HLS-stream/waveform preparation are available. Prepare release stages derivatives in an isolated operation workspace, verifies the HLS playlist, initialization segment, referenced media segments, and waveform before promotion, rejects stale preflight state, backs up replacements, and records a manifest for rollback. Public-package writes remain disabled.",
   },
   {
     id: "publish",
@@ -97,14 +97,14 @@ export const workflowStages: readonly WorkflowStage[] = [
     summary:
       "Run consolidated preflight and build a sanitized public deployment snapshot from the private canonical release.",
     steps: [
-      "Run the release-scoped Library validator, then review the exact Publish preflight for required metadata, numbering, dates, masters, browser artwork, playback audio, waveforms, and public catalog destinations.",
-      "Block publication when files are missing, ambiguous, invalid, stale, outside configured roots, or unsuitable for browser playback.",
-      "Preview the exact player-facing package under published-media while excluding archival masters, TOML source documents, ingest receipts, backups, production notes, and editor-only administration.",
+      "Run the release-scoped Library validator, then review the exact Publish preflight for required metadata, numbering, dates, canonical audio, browser artwork, HLS web streams, waveforms, and public catalog destinations.",
+      "Block publication when source files are missing or ambiguous, an HLS playlist or referenced segment is missing/unsafe, waveform data is stale, paths escape configured roots, or another required public resource cannot be resolved.",
+      "Preview the exact player-facing package under published-media: sanitized metadata, browser artwork, precomputed waveform data, and per-track HLS manifests/segments. Exclude masters, private playback MP3s, TOML source documents, ingest receipts, backups, production notes, and editor-only administration.",
       "Build in a temporary output directory, verify the completed snapshot, and atomically promote the public deployment.",
       "Record publish history and support later republish, withdrawal, and rollback without deleting the private canonical release.",
     ],
     currentNote:
-      "The Publish tab now builds an exact read-only preflight and public-package plan for one release. It combines Library validation with derivative freshness, browser-artwork requirements, destination inspection, the audio-player catalog contract, and an itemized list of copied or generated public files. The CLI commands publish:plan and preflight:publish expose the same plan in human or JSON form. Nothing is copied to published-media yet; temporary builds, atomic promotion, republish history, withdrawal, and rollback remain the next write-enabled milestone.",
+      "The Publish tab starts with a compact five-column readiness overview: Release, Sources, Public media, Status, and Next step. Each release row includes a release-artwork thumbnail and one primary Continue to preflight button. After preflight, the default view is deliberately concise: one plain-language result, separate Web stream and Waveform readiness, and one clearly labeled next action—Resolve blockers, Prepare release, or Build public package. Problems/warnings, the itemized package plan, and the technical contract/fingerprint remain collapsed until opened. Preflight itself is read-only. Prepare release generates the website-listening derivative as AAC-LC HLS with roughly three-second fMP4 segments plus independent waveform-peaks.json data; it never exposes the canonical master or requires the private audio-playback.mp3 to enter the website package. The HLS playlist uses relative segment references so future private storage/CDN authorization can be added without cloud-provider coupling. Build public package remains disabled until sanitized published-media promotion is implemented. The CLI commands publish:plan and preflight:publish remain read-only. Nothing is copied to published-media yet.",
   },
 ] as const;
 
@@ -189,7 +189,7 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
   {
     question: "Where is the summary for the current workflow tab?",
     answer:
-      "The left side of the sticky footer shows context for the active tab. Ingest displays the drop point, candidate and file totals, and probe availability; Staging displays the selected candidate or release-workspace count; Library displays release, track, master, artwork, and metadata totals; Publish displays readiness counts and indicates that exact preflight planning is enabled while filesystem publishing remains disabled.",
+      "The left side of the sticky footer shows context for the active tab. Ingest displays the drop point, candidate and file totals, and probe availability; Staging displays the selected candidate or release-workspace count; Library displays release, track, master, artwork, and metadata totals; Publish displays readiness counts and indicates that preflight plus private derivative preparation are enabled while public-package writes remain disabled.",
   },
   {
     question: "Why are Developer / Admin Tools disabled after a reload?",
@@ -214,12 +214,17 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
   {
     question: "Where should the canonical release live?",
     answer:
-      "The editor should retain one private canonical release workspace containing the masters, editable metadata, and source assets. Public deployment output should be generated from that workspace rather than becoming the new source of truth.",
+      "Keep the long-term private canonical release in the configured media-library root. It contains the release masters, editable TOML metadata, artwork, ingest receipt, and reproducible prepared derivatives such as HLS streams and waveform peaks. Staging creates or updates that same canonical Library; published-media is generated output and never becomes the source of truth.",
   },
   {
     question: "How do I add a track to a release that was already staged?",
     answer:
-      "Return to Ingest, open the original candidate, add the audio source, rescan, and continue to Staging. Include the new track and arrange the complete sequence. When the release ID already exists, Staging changes to Update mode, previews a delta, preserves existing authored metadata and stable track IDs, and applies the update through an isolated temporary copy. Existing tracks are never removed merely because they are absent from a new selection.",
+      "Place the new source material in ingest-drop, scan that candidate, and continue to Staging using the existing release ID. The original ingest-drop candidate does not need to remain available after a successful build. When the release ID already exists, Staging changes to Update mode, loads the existing stable-track targets from the Library receipt, previews a delta, and applies the update through an isolated temporary copy. Existing tracks and verified assets that are absent from the new candidate are preserved automatically. To replace a revised mix, choose Replace Track N in the candidate row's Revision action; Staging preserves that track's stable ID and authored TOML, verifies the old canonical master before superseding it, and invalidates generated audio/HLS/waveform derivatives so Publish → Prepare release can rebuild them.",
+  },
+  {
+    question: "How do I add or replace artwork on an existing release?",
+    answer:
+      "Place the newly obtained image files in a new ingest-drop candidate, continue to Staging with the existing release ID, and open Artwork & files. No original audio needs to be resupplied: existing Library tracks remain available as artwork destinations and their current canonical front artwork is shown in place. Drag or assign new artwork normally. Adding an unused artwork destination is a reviewed add; assigning candidate front artwork over an occupied Library front-artwork target requires Confirm artwork replacement before the update plan can proceed. The old Library artwork must still match its ingest receipt, unrelated artwork remains preserved, and affected release/track TOML artwork paths are synchronized when the replacement extension or destination changes.",
   },
   {
     question: "Should I move or copy a release when going live today?",
@@ -247,19 +252,19 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
       "Transcoding and waveform generation can take time and write large files. Keeping those actions explicit prevents an ordinary metadata save from silently launching media jobs.",
   },
   {
-    question: "What makes an MP3 or waveform stale?",
+    question: "What makes a web stream or waveform stale?",
     answer:
-      "A derivative may be stale when the source master is newer, the generation profile changed, the file is invalid, or its embedded metadata no longer matches the edited release. The planner should report the specific reason.",
+      "A publish derivative may be stale when the canonical audio source changed, the HLS or waveform generation profile changed, the playlist or referenced stream segments are incomplete, or waveform data no longer matches its active analysis profile. Private audio-playback.mp3 freshness is tracked separately for local Library playback and is not a website-package requirement.",
   },
   {
     question: "Which file should be used to generate a waveform?",
     answer:
-      "Generate waveforms directly from the lossless audio master. Do not use the playback MP3 as an intermediate source.",
+      "Generate waveforms from the canonical audio source directly. Prefer a lossless master when one exists, but an MP3- or M4A-only canonical source is valid: FFmpeg decodes that source to temporary PCM for the same waveform analyzer. Never use audio-playback.mp3 as an intermediate when a distinct canonical master exists.",
   },
   {
     question: "Where do files live during each workflow stage?",
     answer:
-      "The runtime location strip beneath the workflow tabs shows the configured roots. Ingest reads the source drop without modifying it. Staging copies into the private release workspace. Library authors that canonical private workspace. Publish is planned to build a sanitized copy in the configured published-media root alongside the applications; it does not move or expose the only canonical release.",
+      "The runtime location strip beneath the workflow tabs shows the configured roots. Ingest reads the disposable source drop without modifying it. After a reviewed build succeeds, that ingest candidate can be deleted. Staging creates or updates releases directly in the private canonical media-library root, and Library authors that same long-term source of truth. Publish preflight may prepare reproducible stream/index.m3u8 + fMP4 segment assets and waveform-peaks.json inside that private release after explicit review. Building the sanitized copy in the configured published-media root remains a separate step; canonical masters and private playback MP3s are never moved or exposed as the public server root.",
   },
   {
     question: "How do I check whether manual folder, filename, or TOML changes left the Library inconsistent?",
@@ -292,7 +297,7 @@ export const workflowTroubleshootingItems: readonly WorkflowTroubleshootingItem[
   {
     title: "FFmpeg or MP3 support is unavailable",
     description:
-      "Check the Files & Sources capability information and confirm that FFmpeg is installed with an available MP3 encoder. Planning remains read-only when required capabilities are missing.",
+      "Check the Files & Sources capability information and confirm that FFmpeg is installed. Non-MP3 sources require an available MP3 encoder for playback generation; MP3 canonical sources can use sanitized stream copy without re-encoding, but still require FFmpeg. Non-WAV waveform sources also require FFmpeg decoding. Prepare release stays disabled or fails safely when a required capability is unavailable.",
   },
   {
     title: "An existing release cannot be updated",

@@ -16,6 +16,7 @@ import {
   resolveIngestRoot,
 } from "./ingest-root.js";
 import {
+  defaultMediaLibraryRoot,
   resolveMediaRoot,
 } from "./media-root.js";
 
@@ -94,7 +95,7 @@ export async function readWorkflowLocations(): Promise<WorkflowLocations> {
   const stagingConfigured =
     process.env.INGEST_OUTPUT_ROOT ?? defaultIngestOutputRoot;
   const libraryConfigured =
-    process.env.MEDIA_LIBRARY_ROOT ?? "../demo-media";
+    process.env.MEDIA_LIBRARY_ROOT ?? defaultMediaLibraryRoot;
   const publishConfigured =
     process.env.PUBLISHED_MEDIA_ROOT ?? defaultPublishRoot;
 
@@ -125,8 +126,8 @@ export async function readWorkflowLocations(): Promise<WorkflowLocations> {
       },
       {
         id: "staging",
-        label: "Release workspace",
-        purpose: "Reviewed copies and staging updates",
+        label: "Canonical library target",
+        purpose: "Reviewed creates and updates into the private Library",
         configuredPath: stagingConfigured,
         absolutePath: stagingAbsolute,
         displayPath: displayPathFor(stagingAbsolute),
@@ -136,7 +137,7 @@ export async function readWorkflowLocations(): Promise<WorkflowLocations> {
       {
         id: "library",
         label: "Canonical library",
-        purpose: "Private metadata and media authoring",
+        purpose: "Long-term private release source of truth",
         configuredPath: libraryConfigured,
         absolutePath: libraryAbsolute,
         displayPath: displayPathFor(libraryAbsolute),

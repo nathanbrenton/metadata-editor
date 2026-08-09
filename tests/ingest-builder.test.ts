@@ -860,6 +860,701 @@ test(
 );
 
 test(
+  "preserves existing Library tracks when a later ingest candidate only adds new audio",
+  async (t) => {
+    const fixture = await createFixture();
+
+    t.after(async () => {
+      await rm(fixture.root, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    const created = await executeIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      fixture.inspection,
+      fixture.draft,
+      INGEST_BUILD_CONFIRMATION_PHRASE,
+    );
+    const releaseRoot = path.join(
+      fixture.outputRoot,
+      created.releaseRelativePath,
+    );
+    const initialReceipt = JSON.parse(
+      await readFile(
+        path.join(releaseRoot, "ingest-receipt.json"),
+        "utf8",
+      ),
+    ) as {
+      tracks: Array<{
+        id: string;
+        sourceRelativePath: string;
+        destinationRelativePath: string;
+      }>;
+    };
+    const originalTrack = initialReceipt.tracks[0];
+
+    const candidateId = "later-addition";
+    const candidateRoot = path.join(fixture.ingestRoot, candidateId);
+    const filename = "new-track.m4a";
+    const source = path.join(candidateRoot, filename);
+    await mkdir(candidateRoot, { recursive: true });
+    await writeFile(source, "new-track-bytes", "utf8");
+    const stats = await stat(source);
+    const originalAudio = fixture.inspection.files.find(
+      (file) => file.mediaKind === "audio",
+    );
+    assert.ok(originalAudio);
+
+    const newFile: IngestFileInspection = {
+      ...originalAudio,
+      relativePath: `${candidateId}/${filename}`,
+      filename,
+      sizeBytes: stats.size,
+      modifiedAt: stats.mtime.toISOString(),
+      embeddedMetadata: { title: "New Track" },
+      evidence: [],
+    };
+    const updateInspection: IngestCandidateInspection = {
+      ...fixture.inspection,
+      candidate: {
+        ...fixture.inspection.candidate,
+        id: candidateId,
+        name: candidateId,
+        relativePath: candidateId,
+        fileCount: 1,
+        audioCount: 1,
+        imageCount: 0,
+        textCount: 0,
+        totalSizeBytes: stats.size,
+        extensions: [".m4a"],
+      },
+      files: [newFile],
+    };
+    const updateDraft = createDefaultIngestBuildDraft(updateInspection);
+    updateDraft.releaseId = created.releaseId;
+    updateDraft.releaseTitle = fixture.draft.releaseTitle;
+    updateDraft.releaseArtist = fixture.draft.releaseArtist;
+    updateDraft.releaseDate = fixture.draft.releaseDate;
+    updateDraft.releaseType = fixture.draft.releaseType;
+    updateDraft.tracks = updateDraft.tracks.map((track) => ({
+      ...track,
+      trackNumber: 2,
+      title: "New Track",
+      artist: fixture.draft.releaseArtist,
+    }));
+
+    const prepared = await prepareIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      updateInspection,
+      updateDraft,
+    );
+    assert.equal(prepared.preview.summary.trackCount, 2);
+    assert.equal(prepared.preview.summary.addedTrackCount, 1);
+    assert.equal(prepared.preview.summary.replacedTrackCount, 0);
+    assert.equal(prepared.preview.summary.blockedCount, 0);
+    assert.ok(
+      prepared.preview.items.some(
+        (item) =>
+          item.action === "preserve" &&
+          item.destinationRelativePath ===
+            originalTrack.destinationRelativePath,
+      ),
+    );
+
+    await executeIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      updateInspection,
+      updateDraft,
+      INGEST_UPDATE_CONFIRMATION_PHRASE,
+    );
+    const receipt = JSON.parse(
+      await readFile(
+        path.join(releaseRoot, "ingest-receipt.json"),
+        "utf8",
+      ),
+    ) as {
+      tracks: Array<{ id: string; sourceRelativePath: string }>;
+    };
+    assert.equal(receipt.tracks.length, 2);
+    assert.equal(
+      receipt.tracks.find(
+        (track) => track.sourceRelativePath === originalTrack.sourceRelativePath,
+      )?.id,
+      originalTrack.id,
+    );
+  },
+);
+
+test(
+  "explicitly replaces canonical audio from a new ingest candidate while preserving track identity and invalidating derivatives",
+  async (t) => {
+    const fixture = await createFixture();
+
+    t.after(async () => {
+      await rm(fixture.root, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    const created = await executeIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      fixture.inspection,
+      fixture.draft,
+      INGEST_BUILD_CONFIRMATION_PHRASE,
+    );
+    const releaseRoot = path.join(
+      fixture.outputRoot,
+      created.releaseRelativePath,
+    );
+    const initialReceipt = JSON.parse(
+      await readFile(
+        path.join(releaseRoot, "ingest-receipt.json"),
+        "utf8",
+      ),
+    ) as {
+      tracks: Array<{
+        id: string;
+        number: number;
+        title: string;
+        version: string;
+        artist: string;
+        sourceDate: string;
+        sourceRelativePath: string;
+        destinationRelativePath: string;
+      }>;
+    };
+    const originalTrack = initialReceipt.tracks[0];
+    const trackRoot = path.join(
+      fixture.outputRoot,
+      path.posix.dirname(originalTrack.destinationRelativePath),
+    );
+    const trackTomlPath = path.join(trackRoot, "track.toml");
+    await writeFile(
+      trackTomlPath,
+      `${await readFile(trackTomlPath, "utf8")}\n[editor]\ncustom_note = "preserve me"\n`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(trackRoot, "audio-playback.mp3"),
+      "old private playback",
+      "utf8",
+    );
+    await writeFile(
+      path.join(trackRoot, "waveform-peaks.json"),
+      "{}\n",
+      "utf8",
+    );
+    await mkdir(path.join(trackRoot, "stream"));
+    await writeFile(
+      path.join(trackRoot, "stream", "index.m3u8"),
+      "#EXTM3U\n",
+      "utf8",
+    );
+
+    const candidateId = "revision-candidate";
+    const candidateRoot = path.join(
+      fixture.ingestRoot,
+      candidateId,
+    );
+    const replacementFilename = "revised-master.wav";
+    const replacementSource = path.join(
+      candidateRoot,
+      replacementFilename,
+    );
+    await mkdir(candidateRoot, { recursive: true });
+    await writeFile(
+      replacementSource,
+      "replacement-wave-bytes",
+      "utf8",
+    );
+    const replacementStats = await stat(replacementSource);
+    const originalAudio = fixture.inspection.files.find(
+      (file) => file.mediaKind === "audio",
+    );
+    assert.ok(originalAudio);
+
+    const replacementFile: IngestFileInspection = {
+      ...originalAudio,
+      relativePath: `${candidateId}/${replacementFilename}`,
+      filename: replacementFilename,
+      extension: ".wav",
+      sizeBytes: replacementStats.size,
+      modifiedAt: replacementStats.mtime.toISOString(),
+      embeddedMetadata: {
+        artist: originalTrack.artist,
+        title: originalTrack.title,
+      },
+      evidence: [],
+    };
+    const replacementInspection: IngestCandidateInspection = {
+      ...fixture.inspection,
+      candidate: {
+        ...fixture.inspection.candidate,
+        id: candidateId,
+        name: candidateId,
+        relativePath: candidateId,
+        fileCount: 1,
+        audioCount: 1,
+        imageCount: 0,
+        textCount: 0,
+        totalSizeBytes: replacementStats.size,
+        extensions: [".wav"],
+      },
+      files: [replacementFile],
+    };
+    const replacementDraft = createDefaultIngestBuildDraft(
+      replacementInspection,
+    );
+    replacementDraft.releaseId = created.releaseId;
+    replacementDraft.releaseTitle = fixture.draft.releaseTitle;
+    replacementDraft.releaseArtist = fixture.draft.releaseArtist;
+    replacementDraft.releaseDate = fixture.draft.releaseDate;
+    replacementDraft.releaseType = fixture.draft.releaseType;
+    replacementDraft.tracks = replacementDraft.tracks.map(
+      (track) => ({
+        ...track,
+        trackNumber: originalTrack.number,
+        title: originalTrack.title,
+        version: originalTrack.version,
+        artist: originalTrack.artist,
+        date: originalTrack.sourceDate,
+        replacementTrackId: originalTrack.id,
+      }),
+    );
+
+    const status = await inspectIngestStagingTarget(
+      fixture.outputRoot,
+      created.releaseId,
+    );
+    assert.equal(status.existingTracks.length, 1);
+    assert.equal(status.existingTracks[0]?.id, originalTrack.id);
+
+    const prepared = await prepareIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      replacementInspection,
+      replacementDraft,
+    );
+    assert.equal(prepared.preview.operation, "update");
+    assert.equal(prepared.preview.summary.replacedTrackCount, 1);
+    assert.equal(prepared.preview.summary.addedTrackCount, 0);
+    assert.equal(prepared.preview.summary.blockedCount, 0);
+    assert.ok(prepared.preview.summary.removedFileCount >= 4);
+    assert.ok(
+      prepared.preview.items.some(
+        (item) =>
+          item.action === "update" &&
+          item.adjustment === "Explicit canonical-audio replacement",
+      ),
+    );
+    assert.ok(
+      prepared.preview.items.some(
+        (item) =>
+          item.action === "remove" &&
+          item.destinationRelativePath.endsWith("/stream"),
+      ),
+    );
+
+    const updated = await executeIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      replacementInspection,
+      replacementDraft,
+      INGEST_UPDATE_CONFIRMATION_PHRASE,
+    );
+    assert.equal(updated.operation, "update");
+    assert.ok(
+      updated.removedFiles.some((item) => item.endsWith("/stream")),
+    );
+
+    await assert.rejects(
+      stat(path.join(trackRoot, "audio-master.m4a")),
+    );
+    assert.equal(
+      await readFile(path.join(trackRoot, "audio-master.wav"), "utf8"),
+      "replacement-wave-bytes",
+    );
+    await assert.rejects(
+      stat(path.join(trackRoot, "audio-playback.mp3")),
+    );
+    await assert.rejects(
+      stat(path.join(trackRoot, "waveform-peaks.json")),
+    );
+    await assert.rejects(
+      stat(path.join(trackRoot, "stream")),
+    );
+
+    const trackToml = parse(
+      await readFile(trackTomlPath, "utf8"),
+    ) as {
+      track?: { assets?: { audio_playback?: string } };
+      editor?: { custom_note?: string };
+    };
+    assert.equal(
+      trackToml.track?.assets?.audio_playback,
+      "audio-master.wav",
+    );
+    assert.equal(trackToml.editor?.custom_note, "preserve me");
+
+    const updatedReceipt = JSON.parse(
+      await readFile(
+        path.join(releaseRoot, "ingest-receipt.json"),
+        "utf8",
+      ),
+    ) as {
+      tracks: Array<{
+        id: string;
+        sourceRelativePath: string;
+        destinationRelativePath: string;
+      }>;
+      copies: Array<{ destinationRelativePath: string }>;
+    };
+    assert.equal(updatedReceipt.tracks[0]?.id, originalTrack.id);
+    assert.equal(
+      updatedReceipt.tracks[0]?.sourceRelativePath,
+      replacementFile.relativePath,
+    );
+    assert.ok(
+      updatedReceipt.tracks[0]?.destinationRelativePath.endsWith(
+        "/audio-master.wav",
+      ),
+    );
+    assert.equal(
+      updatedReceipt.copies.some((copy) =>
+        copy.destinationRelativePath.endsWith("/audio-master.m4a")
+      ),
+      false,
+    );
+  },
+);
+
+test(
+  "updates canonical artwork from an artwork-only candidate while preserving existing tracks and authored metadata",
+  async (t) => {
+    const fixture = await createFixture();
+
+    t.after(async () => {
+      await rm(fixture.root, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    const created = await executeIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      fixture.inspection,
+      fixture.draft,
+      INGEST_BUILD_CONFIRMATION_PHRASE,
+    );
+    const releaseRoot = path.join(
+      fixture.outputRoot,
+      created.releaseRelativePath,
+    );
+    const releaseTomlPath = path.join(
+      releaseRoot,
+      "release.toml",
+    );
+    await writeFile(
+      releaseTomlPath,
+      `${await readFile(releaseTomlPath, "utf8")}\n[editor]\ncustom_note = "preserve release note"\n`,
+      "utf8",
+    );
+
+    const status = await inspectIngestStagingTarget(
+      fixture.outputRoot,
+      created.releaseId,
+    );
+    assert.equal(status.existingTracks.length, 1);
+    assert.equal(status.existingArtwork.length, 1);
+    assert.equal(status.existingArtwork[0]?.scope, "release");
+    assert.equal(status.existingArtwork[0]?.role, "front_cover");
+
+    const candidateId = "artwork-revision";
+    const candidateRoot = path.join(
+      fixture.ingestRoot,
+      candidateId,
+    );
+    const artworkFilename = "new-cover.png";
+    const artworkSource = path.join(
+      candidateRoot,
+      artworkFilename,
+    );
+    await mkdir(candidateRoot, { recursive: true });
+    await writeFile(
+      artworkSource,
+      "replacement-png-bytes",
+      "utf8",
+    );
+    const artworkStats = await stat(artworkSource);
+    const artworkFile: IngestFileInspection = {
+      relativePath: `${candidateId}/${artworkFilename}`,
+      filename: artworkFilename,
+      extension: ".png",
+      sizeBytes: artworkStats.size,
+      modifiedAt: artworkStats.mtime.toISOString(),
+      mediaKind: "image",
+      detectedBy: "extension",
+      technical: {},
+      embeddedMetadata: {},
+      evidence: [],
+      warnings: [],
+    };
+    const revisionInspection: IngestCandidateInspection = {
+      inspectedAt: "2026-08-09T18:00:00.000Z",
+      candidate: {
+        id: candidateId,
+        name: candidateId,
+        relativePath: candidateId,
+        kind: "folder",
+        displayTitle: "Artwork revision",
+        fileCount: 1,
+        audioCount: 0,
+        imageCount: 1,
+        textCount: 0,
+        unknownCount: 0,
+        totalSizeBytes: artworkStats.size,
+        extensions: [".png"],
+        dateCandidates: [],
+        evidence: [],
+        warnings: [],
+      },
+      files: [artworkFile],
+      capabilities: fixture.inspection.capabilities,
+      warnings: [],
+      readOnly: true,
+    };
+    const revisionDraft = createDefaultIngestBuildDraft(
+      revisionInspection,
+    );
+    revisionDraft.releaseId = created.releaseId;
+    revisionDraft.releaseTitle = fixture.draft.releaseTitle;
+    revisionDraft.releaseArtist = fixture.draft.releaseArtist;
+    revisionDraft.releaseDate = fixture.draft.releaseDate;
+    revisionDraft.releaseType = fixture.draft.releaseType;
+    revisionDraft.tracks = [];
+    revisionDraft.assets = revisionDraft.assets.map((asset) => ({
+      ...asset,
+      include: true,
+      destinationRelativePath: "artwork/revision/new-cover.png",
+      artworkAssignments: [
+        {
+          id: "release-front-revision",
+          scope: "release" as const,
+          role: "front_cover",
+          trackSourceRelativePaths: [],
+        },
+        {
+          id: "track-front-revision",
+          scope: "track" as const,
+          role: "front_cover",
+          trackSourceRelativePaths: [
+            status.existingTracks[0]!.sourceRelativePath,
+          ],
+        },
+      ],
+    }));
+
+    const unconfirmed = await prepareIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      revisionInspection,
+      revisionDraft,
+    );
+    assert.equal(unconfirmed.preview.operation, "update");
+    assert.equal(unconfirmed.preview.summary.trackCount, 1);
+    assert.equal(unconfirmed.preview.summary.blockedCount, 1);
+    assert.ok(
+      unconfirmed.preview.items.some(
+        (item) =>
+          item.action === "blocked" &&
+          item.reason?.includes("Confirm the replacement"),
+      ),
+    );
+
+    revisionDraft.assets[0]!.artworkAssignments[0]!.replaceExisting = true;
+
+    const prepared = await prepareIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      revisionInspection,
+      revisionDraft,
+    );
+    assert.equal(prepared.preview.summary.blockedCount, 0);
+    assert.equal(prepared.preview.summary.trackCount, 1);
+    assert.ok(
+      prepared.preview.items.some(
+        (item) =>
+          item.action === "update" &&
+          item.adjustment === "Explicit canonical-artwork replacement",
+      ),
+    );
+    assert.ok(
+      prepared.preview.items.some(
+        (item) =>
+          item.action === "add" &&
+          item.logicalRoles?.some((role) =>
+            role.startsWith("track-artwork:front_cover:"),
+          ),
+      ),
+    );
+    assert.ok(
+      prepared.preview.items.some(
+        (item) =>
+          item.action === "remove" &&
+          item.destinationRelativePath.endsWith(
+            "/artwork/front/artwork-master.jpg",
+          ),
+      ),
+    );
+
+    const updated = await executeIngestReleaseBuild(
+      fixture.ingestRoot,
+      fixture.outputRoot,
+      revisionInspection,
+      revisionDraft,
+      INGEST_UPDATE_CONFIRMATION_PHRASE,
+    );
+    assert.equal(updated.operation, "update");
+
+    await assert.rejects(
+      stat(
+        path.join(
+          releaseRoot,
+          "artwork",
+          "front",
+          "artwork-master.jpg",
+        ),
+      ),
+    );
+    assert.equal(
+      await readFile(
+        path.join(
+          releaseRoot,
+          "artwork",
+          "front",
+          "artwork-master.png",
+        ),
+        "utf8",
+      ),
+      "replacement-png-bytes",
+    );
+
+    const trackId = status.existingTracks[0]!.id;
+    assert.equal(
+      await readFile(
+        path.join(
+          releaseRoot,
+          "tracks",
+          trackId,
+          "artwork",
+          "front",
+          "artwork-master.png",
+        ),
+        "utf8",
+      ),
+      "replacement-png-bytes",
+    );
+
+    const releaseToml = parse(
+      await readFile(releaseTomlPath, "utf8"),
+    ) as {
+      release?: {
+        artwork?: Array<{
+          id?: string;
+          role?: string;
+          master_path?: string;
+        }>;
+      };
+      editor?: { custom_note?: string };
+    };
+    const releaseFrontArtwork =
+      releaseToml.release?.artwork?.find(
+        (artwork) => artwork.role === "front_cover",
+      );
+    assert.equal(
+      releaseFrontArtwork?.master_path,
+      "artwork/front/artwork-master.png",
+    );
+    assert.equal(
+      releaseFrontArtwork?.id,
+      "release-front-cover",
+      "replacing canonical artwork should preserve the existing authored artwork ID",
+    );
+    assert.equal(
+      releaseToml.editor?.custom_note,
+      "preserve release note",
+    );
+
+    const releaseSettings = parse(
+      await readFile(
+        path.join(releaseRoot, "release-settings.toml"),
+        "utf8",
+      ),
+    ) as {
+      settings?: {
+        inheritance?: {
+          release_artwork_fallback_path?: string;
+        };
+      };
+    };
+    assert.equal(
+      releaseSettings.settings?.inheritance
+        ?.release_artwork_fallback_path,
+      "artwork/front/artwork-master.png",
+    );
+
+    const trackToml = parse(
+      await readFile(
+        path.join(releaseRoot, "tracks", trackId, "track.toml"),
+        "utf8",
+      ),
+    ) as {
+      track?: {
+        assets?: { artwork?: { master?: string } };
+      };
+    };
+    assert.equal(
+      trackToml.track?.assets?.artwork?.master,
+      "artwork/front/artwork-master.png",
+    );
+
+    const receipt = JSON.parse(
+      await readFile(
+        path.join(releaseRoot, "ingest-receipt.json"),
+        "utf8",
+      ),
+    ) as {
+      tracks: Array<{ id: string }>;
+      copies: Array<{ destinationRelativePath: string }>;
+    };
+    assert.equal(receipt.tracks[0]?.id, trackId);
+    assert.equal(
+      receipt.copies.some((copy) =>
+        copy.destinationRelativePath.endsWith(
+          "/artwork/front/artwork-master.jpg",
+        ),
+      ),
+      false,
+    );
+    assert.ok(
+      receipt.copies.some((copy) =>
+        copy.destinationRelativePath.endsWith(
+          "/artwork/front/artwork-master.png",
+        ),
+      ),
+    );
+  },
+);
+
+test(
   "copies artwork into release and track-local destinations from assignments",
   async (t) => {
     const fixture = await createFixture();

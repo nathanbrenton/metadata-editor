@@ -260,6 +260,7 @@ async function buildCandidateSummary(
   };
   const extensions: string[] = [];
   const dateCandidates: string[] = [];
+  const unknownRelativePaths: string[] = [];
   let totalSizeBytes = 0;
 
   const candidateDate = evidenceValue(
@@ -285,6 +286,12 @@ async function buildCandidateSummary(
 
     totalSizeBytes += stats.size;
     incrementKindCount(mediaKind, counts);
+
+    if (mediaKind === "unknown") {
+      unknownRelativePaths.push(
+        toIngestRelativePath(ingestRoot, filePath),
+      );
+    }
 
     if (extension) {
       extensions.push(extension);
@@ -321,10 +328,21 @@ async function buildCandidateSummary(
   }
 
   if (counts.unknown > 0) {
+    const visibleUnknownPaths = unknownRelativePaths.slice(0, 5);
+    const hiddenUnknownCount = Math.max(
+      0,
+      unknownRelativePaths.length - visibleUnknownPaths.length,
+    );
     warnings.push(
       `${counts.unknown} file${
         counts.unknown === 1 ? "" : "s"
-      } could not be classified by extension without inspection.`,
+      } could not be classified by extension without inspection: ${
+        visibleUnknownPaths.join(", ")
+      }${
+        hiddenUnknownCount > 0
+          ? `, and ${hiddenUnknownCount} more`
+          : ""
+      }.`,
     );
   }
 
@@ -896,6 +914,15 @@ async function inspectFile(
         `MediaInfo could not inspect this file: ${result.stderr.trim() || "unknown error"}`,
       );
     }
+  }
+
+  if (fallbackKind === "unknown") {
+    const extensionLabel = extension || "(no extension)";
+    warnings.unshift(
+      mediaKind === "unknown"
+        ? `Extension ${JSON.stringify(extensionLabel)} is not recognized by the ingest classifier, and probing did not classify this file as supported audio, image, or text.`
+        : `Extension ${JSON.stringify(extensionLabel)} is not recognized by the ingest classifier; inspection classified this file as ${mediaKind}.`,
+    );
   }
 
   const evidence = inferFilenameEvidence(

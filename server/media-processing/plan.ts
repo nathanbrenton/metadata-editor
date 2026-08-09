@@ -609,9 +609,35 @@ async function buildPlaybackPlan(
     existing.exists,
     stale,
   );
+  const mp3Master =
+    master.extension?.toLowerCase() === ".mp3";
 
   if (
     state.action !== "none" &&
+    mp3Master &&
+    !capabilities.available
+  ) {
+    return buildBlockedDerivative(
+      "playback-mp3",
+      filename,
+      relativePath,
+      "FFmpeg is required to sanitize an MP3 master for public playback.",
+      existing,
+      [
+        {
+          code: "ffmpeg-mp3-remux-unavailable",
+          status: "blocked",
+          message:
+            capabilities.error ??
+            "FFmpeg is unavailable for sanitized MP3 stream copy.",
+        },
+      ],
+    );
+  }
+
+  if (
+    state.action !== "none" &&
+    !mp3Master &&
     !mp3EncoderReady(capabilities)
   ) {
     return buildBlockedDerivative(
@@ -661,6 +687,18 @@ async function buildPlaybackPlan(
       status: "pass",
       message:
         "The playback MP3 is at least as new as the audio master.",
+    });
+  }
+
+  if (
+    state.action !== "none" &&
+    mp3Master
+  ) {
+    checks.push({
+      code: "mp3-stream-copy",
+      status: "pass",
+      message:
+        "The MP3 master can be sanitized with FFmpeg stream copy without re-encoding audio.",
     });
   }
 

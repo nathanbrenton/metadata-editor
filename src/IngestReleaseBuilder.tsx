@@ -186,6 +186,14 @@ function artworkPreviewUrl(
   return `/api/ingest/artwork?${parameters.toString()}`;
 }
 
+function libraryArtworkPreviewUrl(
+  relativePath: string,
+): string {
+  return `/api/library/artwork-preview?${new URLSearchParams({
+    path: relativePath,
+  }).toString()}`;
+}
+
 function ArtworkPreview({
   sourceRelativePath,
   modifiedAt,
@@ -1169,30 +1177,41 @@ export function IngestReleaseBuilder({
           current,
         );
 
+      const nextReleaseId =
+        key === "releaseId"
+          ? value
+          : synchronizeReleaseId
+            ? buildReleaseDirectoryId(
+                nextReleaseDate,
+                nextReleaseTitle,
+              )
+            : current.releaseId;
+      let nextTracks = current.tracks;
+
+      if (key === "releaseArtist") {
+        nextTracks = nextTracks.map((track) => ({
+          ...track,
+          artist:
+            !track.artist ||
+            track.artist ===
+              current.releaseArtist
+              ? value
+              : track.artist,
+        }));
+      }
+
+      if (nextReleaseId !== current.releaseId) {
+        nextTracks = nextTracks.map((track) => ({
+          ...track,
+          replacementTrackId: undefined,
+        }));
+      }
+
       return {
         ...current,
         [key]: value,
-        releaseId:
-          key === "releaseId"
-            ? value
-            : synchronizeReleaseId
-              ? buildReleaseDirectoryId(
-                  nextReleaseDate,
-                  nextReleaseTitle,
-                )
-              : current.releaseId,
-        tracks:
-          key === "releaseArtist"
-            ? current.tracks.map((track) => ({
-                ...track,
-                artist:
-                  !track.artist ||
-                  track.artist ===
-                    current.releaseArtist
-                    ? value
-                    : track.artist,
-              }))
-            : current.tracks,
+        releaseId: nextReleaseId,
+        tracks: nextTracks,
       };
     });
   };
@@ -1551,7 +1570,7 @@ export function IngestReleaseBuilder({
         <div className="message success">
           <strong>
             {result.operation === "update"
-              ? `${result.createdFiles.length} files added, ${result.updatedFiles.length} files updated, and ${result.preservedFiles.length} existing files preserved.`
+              ? `${result.createdFiles.length} files added, ${result.updatedFiles.length} files updated, ${result.removedFiles.length} superseded/generated files removed, and ${result.preservedFiles.length} existing files preserved.`
               : `${result.createdFiles.length} files created and verified.`}
           </strong>
           <p>
@@ -1807,6 +1826,7 @@ export function IngestReleaseBuilder({
           buildLoading={buildLoading}
           confirmed={confirmed}
           operation={stagingOperation}
+          targetStatus={targetStatus}
           onStepChange={setGuidedStep}
           onReleaseChange={updateRelease}
           onTrackChange={updateTrack}
@@ -1848,6 +1868,7 @@ export function IngestReleaseBuilder({
           buildLoading={buildLoading}
           confirmed={confirmed}
           operation={stagingOperation}
+          targetStatus={targetStatus}
           onReleaseChange={updateRelease}
           onTrackChange={updateTrack}
           trackSourceFiles={trackSourceFiles}
@@ -1893,6 +1914,7 @@ function GuidedIngestBuilder({
   buildLoading,
   confirmed,
   operation,
+  targetStatus,
   onStepChange,
   onReleaseChange,
   onTrackChange,
@@ -1923,6 +1945,7 @@ function GuidedIngestBuilder({
   buildLoading: boolean;
   confirmed: boolean;
   operation: IngestBuildOperation;
+  targetStatus: IngestStagingTargetStatus | null;
   onStepChange: (step: GuidedStep) => void;
   onReleaseChange: (
     key: keyof Pick<
@@ -2065,6 +2088,7 @@ function GuidedIngestBuilder({
             trackSourceFiles={trackSourceFiles}
             releaseDate={draft.releaseDate}
             sourceStatuses={sourceStatuses}
+            existingTracks={targetStatus?.existingTracks ?? []}
             onChange={onTrackChange}
             onApplyTrackTitles={onApplyTrackTitles}
             onApplySourceDate={onApplySourceDate}
@@ -2095,6 +2119,9 @@ function GuidedIngestBuilder({
             releaseArtist={draft.releaseArtist}
             sourceStatuses={sourceStatuses}
             attachmentFiles={attachmentFiles}
+            existingTracks={targetStatus?.existingTracks ?? []}
+            existingArtwork={targetStatus?.existingArtwork ?? []}
+            releaseRelativePath={targetStatus?.releaseRelativePath ?? ""}
             onChange={onAssetChange}
             onSourceReviewed={onSourceReviewed}
             onAttachFile={onAttachFile}
@@ -2185,6 +2212,7 @@ function QuickIngestBuilder({
   buildLoading,
   confirmed,
   operation,
+  targetStatus,
   onReleaseChange,
   onTrackChange,
   trackSourceFiles,
@@ -2209,6 +2237,7 @@ function QuickIngestBuilder({
 }: {
   draft: IngestBuildDraft;
   operation: IngestBuildOperation;
+  targetStatus: IngestStagingTargetStatus | null;
   preview: IngestBuildPreview | null;
   previewLoading: boolean;
   buildLoading: boolean;
@@ -2295,6 +2324,7 @@ function QuickIngestBuilder({
           trackSourceFiles={trackSourceFiles}
           releaseDate={draft.releaseDate}
           sourceStatuses={sourceStatuses}
+          existingTracks={targetStatus?.existingTracks ?? []}
           onChange={onTrackChange}
           onApplyTrackTitles={onApplyTrackTitles}
           onApplySourceDate={onApplySourceDate}
@@ -2315,6 +2345,9 @@ function QuickIngestBuilder({
           releaseArtist={draft.releaseArtist}
           sourceStatuses={sourceStatuses}
           attachmentFiles={attachmentFiles}
+          existingTracks={targetStatus?.existingTracks ?? []}
+          existingArtwork={targetStatus?.existingArtwork ?? []}
+          releaseRelativePath={targetStatus?.releaseRelativePath ?? ""}
           onChange={onAssetChange}
           onSourceReviewed={onSourceReviewed}
           onAttachFile={onAttachFile}
@@ -2585,6 +2618,7 @@ function TrackDraftTable({
   trackSourceFiles,
   releaseDate,
   sourceStatuses,
+  existingTracks,
   onChange,
   onApplyTrackTitles,
   onApplySourceDate,
@@ -2596,6 +2630,7 @@ function TrackDraftTable({
   trackSourceFiles: IngestFileInspection[];
   releaseDate: string;
   sourceStatuses: IngestDraftSourceStatus[];
+  existingTracks: IngestStagingTargetStatus["existingTracks"];
   onChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildTrackDraft>,
@@ -2775,9 +2810,60 @@ function TrackDraftTable({
       sourceDate,
     );
   };
+  const replacementTargetById = new Map(
+    existingTracks.map((track) => [track.id, track]),
+  );
+  const replacementTargetBySource = new Map(
+    existingTracks.map((track) => [
+      track.sourceRelativePath,
+      track,
+    ]),
+  );
+  const replacementTargetOwners = new Map(
+    tracks
+      .filter((track) => Boolean(track.replacementTrackId))
+      .map((track) => [
+        track.replacementTrackId!,
+        track.sourceRelativePath,
+      ]),
+  );
 
   return (
     <div className="ingest-track-table-workflow">
+      {existingTracks.length > 0 && (
+        <section
+          className="ingest-track-revision-guidance"
+          aria-label="Existing Library track revision guidance"
+        >
+          <div>
+            <strong>Updating an existing Library release</strong>
+            <span>
+              Tracks not present in this ingest candidate are preserved automatically.
+              Use Revision action only when this source should completely replace an
+              existing track&apos;s canonical audio while keeping its stable track ID and
+              authored metadata.
+            </span>
+          </div>
+          <details>
+            <summary>
+              {existingTracks.length} existing Library track
+              {existingTracks.length === 1 ? "" : "s"}
+            </summary>
+            <ol>
+              {existingTracks
+                .slice()
+                .sort((left, right) => left.number - right.number)
+                .map((track) => (
+                  <li key={track.id}>
+                    <strong>{track.number}. {track.title || "Untitled"}</strong>
+                    <code>{track.id}</code>
+                  </li>
+                ))}
+            </ol>
+          </details>
+        </section>
+      )}
+
       <section
         className="ingest-track-title-tools"
         aria-label="Bulk track title tools"
@@ -2987,6 +3073,14 @@ function TrackDraftTable({
               >
                 Source state
               </th>
+              {existingTracks.length > 0 && (
+                <th
+                  scope="col"
+                  className="ingest-track-revision-column"
+                >
+                  Revision action
+                </th>
+              )}
               <th
                 scope="col"
                 className="ingest-track-number-column"
@@ -3035,6 +3129,10 @@ function TrackDraftTable({
               );
             const sourceDateWarningId =
               `source-date-warning-${displayIndex}`;
+            const matchedExistingTrack =
+              replacementTargetBySource.get(
+                track.sourceRelativePath,
+              );
 
             return (
               <tr
@@ -3103,6 +3201,79 @@ function TrackDraftTable({
                     }
                   />
                 </td>
+                {existingTracks.length > 0 && (
+                  <td className="ingest-track-revision-cell">
+                    <select
+                      value={track.replacementTrackId ?? ""}
+                      disabled={!track.include || sourceMissing}
+                      aria-label={`Revision action for ${track.sourceRelativePath}`}
+                      onChange={(event) => {
+                        const replacementTrackId =
+                          event.target.value;
+
+                        if (!replacementTrackId) {
+                          onChange(
+                            track.sourceRelativePath,
+                            { replacementTrackId: undefined },
+                          );
+                          return;
+                        }
+
+                        const target =
+                          replacementTargetById.get(
+                            replacementTrackId,
+                          );
+                        if (!target) {
+                          return;
+                        }
+
+                        onChange(
+                          track.sourceRelativePath,
+                          {
+                            replacementTrackId,
+                            trackNumber: target.number,
+                            title: target.title,
+                            version: target.version,
+                            artist: target.artist,
+                            date: target.sourceDate,
+                          },
+                        );
+                      }}
+                    >
+                      <option value="">
+                        {matchedExistingTrack
+                          ? "Keep existing track"
+                          : "Add as new track"}
+                      </option>
+                      {existingTracks
+                        .slice()
+                        .sort((left, right) => left.number - right.number)
+                        .map((target) => {
+                          const owner = replacementTargetOwners.get(
+                            target.id,
+                          );
+                          const claimedElsewhere =
+                            Boolean(owner) &&
+                            owner !== track.sourceRelativePath;
+
+                          return (
+                            <option
+                              key={target.id}
+                              value={target.id}
+                              disabled={claimedElsewhere}
+                            >
+                              Replace Track {target.number} · {target.title || "Untitled"}
+                            </option>
+                          );
+                        })}
+                    </select>
+                    {track.replacementTrackId && (
+                      <small>
+                        Stable ID and authored metadata will be preserved.
+                      </small>
+                    )}
+                  </td>
+                )}
                 <td className="ingest-track-number-cell">
                   <input
                     type="text"
@@ -3241,6 +3412,9 @@ function AssetDraftTable({
   releaseArtist,
   sourceStatuses,
   attachmentFiles,
+  existingTracks,
+  existingArtwork,
+  releaseRelativePath,
   onChange,
   onSourceReviewed,
   onAttachFile,
@@ -3254,6 +3428,9 @@ function AssetDraftTable({
   releaseArtist: string;
   sourceStatuses: IngestDraftSourceStatus[];
   attachmentFiles: IngestFileInspection[];
+  existingTracks: IngestStagingTargetStatus["existingTracks"];
+  existingArtwork: IngestStagingTargetStatus["existingArtwork"];
+  releaseRelativePath: string;
   onChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildAssetDraft>,
@@ -3278,6 +3455,31 @@ function AssetDraftTable({
   const includedTracks = tracks.filter(
     (track) => track.include,
   );
+  const existingTrackBySource = new Map(
+    existingTracks.map((track) => [
+      track.sourceRelativePath,
+      track,
+    ]),
+  );
+  const existingTrackById = new Map(
+    existingTracks.map((track) => [track.id, track]),
+  );
+  const representedExistingTrackIds = new Set(
+    includedTracks.flatMap((track) => {
+      if (track.replacementTrackId) {
+        return [track.replacementTrackId];
+      }
+
+      const existing = existingTrackBySource.get(
+        track.sourceRelativePath,
+      );
+      return existing ? [existing.id] : [];
+    }),
+  );
+  const preservedArtworkTrackTargets =
+    existingTracks.filter(
+      (track) => !representedExistingTrackIds.has(track.id),
+    );
   const attachedPaths = new Set(
     assets.map((asset) =>
       asset.sourceRelativePath,
@@ -3297,6 +3499,29 @@ function AssetDraftTable({
     return segments[segments.length - 1] ?? sourceRelativePath;
   };
 
+  const existingTrackForTarget = (
+    target: ArtworkAssignmentTarget,
+  ) => {
+    if (target.scope === "release") {
+      return undefined;
+    }
+
+    const candidateTrack = tracks.find(
+      (item) =>
+        item.sourceRelativePath ===
+        target.trackSourceRelativePath,
+    );
+    if (candidateTrack?.replacementTrackId) {
+      return existingTrackById.get(
+        candidateTrack.replacementTrackId,
+      );
+    }
+
+    return existingTrackBySource.get(
+      target.trackSourceRelativePath,
+    );
+  };
+
   const targetLabel = (target: ArtworkAssignmentTarget) => {
     if (target.scope === "release") {
       return `Release · ${releaseTitle || "Untitled release"}`;
@@ -3307,11 +3532,60 @@ function AssetDraftTable({
         item.sourceRelativePath ===
         target.trackSourceRelativePath,
     );
+    if (track) {
+      return trackLabel(track);
+    }
 
-    return track
-      ? trackLabel(track)
+    const existingTrack = existingTrackForTarget(target);
+    return existingTrack
+      ? `Track ${existingTrack.number} · ${existingTrack.title || "Untitled"}`
       : "Track artwork";
   };
+
+  const existingArtworkForTarget = (
+    target: ArtworkAssignmentTarget,
+  ) => {
+    if (target.scope === "release") {
+      return existingArtwork.find(
+        (artwork) =>
+          artwork.scope === "release" &&
+          artwork.role === "front_cover",
+      );
+    }
+
+    const existingTrack = existingTrackForTarget(target);
+    if (!existingTrack) {
+      return undefined;
+    }
+
+    return existingArtwork.find(
+      (artwork) =>
+        artwork.scope === "track" &&
+        artwork.trackId === existingTrack.id &&
+        (artwork.role === "front_cover" ||
+          artwork.role === "track_artwork"),
+    );
+  };
+
+  const frontAssignmentForTarget = (
+    asset: IngestBuildAssetDraft,
+    target: ArtworkAssignmentTarget,
+  ) => asset.artworkAssignments.find((assignment) => {
+    if (assignment.role !== "front_cover") {
+      return false;
+    }
+
+    if (target.scope === "release") {
+      return assignment.scope === "release";
+    }
+
+    return (
+      assignment.scope === "track" &&
+      assignment.trackSourceRelativePaths.includes(
+        target.trackSourceRelativePath,
+      )
+    );
+  });
 
   const assignedAssetsForTarget = (
     target: ArtworkAssignmentTarget,
@@ -3339,15 +3613,21 @@ function AssetDraftTable({
     }
 
     const existingAssets = assignedAssetsForTarget(target);
+    const existingLibraryArtwork =
+      existingArtworkForTarget(target);
     const replacingOtherArtwork = existingAssets.some(
       (asset) =>
         asset.sourceRelativePath !== sourceRelativePath,
     );
+    const replacingCanonicalArtwork =
+      Boolean(existingLibraryArtwork);
 
     if (
-      replacingOtherArtwork &&
+      (replacingOtherArtwork || replacingCanonicalArtwork) &&
       !window.confirm(
-        `Replace the current front artwork for ${targetLabel(target)}?`,
+        replacingCanonicalArtwork
+          ? `Replace the current canonical Library front artwork for ${targetLabel(target)}?`
+          : `Replace the current front artwork for ${targetLabel(target)}?`,
       )
     ) {
       return;
@@ -3362,7 +3642,76 @@ function AssetDraftTable({
     for (const update of updates) {
       onChange(update.sourceRelativePath, {
         include: update.include,
-        artworkAssignments: update.artworkAssignments,
+        artworkAssignments: update.artworkAssignments.map(
+          (assignment) => {
+            const matchesTarget =
+              assignment.role === "front_cover" &&
+              (target.scope === "release"
+                ? assignment.scope === "release"
+                : assignment.scope === "track" &&
+                  assignment.trackSourceRelativePaths.includes(
+                    target.trackSourceRelativePath,
+                  ));
+
+            if (!matchesTarget) {
+              return assignment;
+            }
+
+            return {
+              ...assignment,
+              ...(replacingCanonicalArtwork
+                ? { replaceExisting: true }
+                : { replaceExisting: undefined }),
+            };
+          },
+        ),
+      });
+    }
+  };
+
+  const confirmExistingArtworkReplacement = (
+    target: ArtworkAssignmentTarget,
+  ) => {
+    const existingLibraryArtwork =
+      existingArtworkForTarget(target);
+    if (!existingLibraryArtwork) {
+      return;
+    }
+
+    const assignedAssets = assignedAssetsForTarget(target);
+    if (assignedAssets.length === 0) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Replace the current canonical Library front artwork for ${targetLabel(target)} with the assigned candidate artwork?`,
+      )
+    ) {
+      return;
+    }
+
+    for (const asset of assignedAssets) {
+      onChange(asset.sourceRelativePath, {
+        artworkAssignments: asset.artworkAssignments.map(
+          (assignment) => {
+            const matchesTarget =
+              assignment.role === "front_cover" &&
+              (target.scope === "release"
+                ? assignment.scope === "release"
+                : assignment.scope === "track" &&
+                  assignment.trackSourceRelativePaths.includes(
+                    target.trackSourceRelativePath,
+                  ));
+
+            return matchesTarget
+              ? {
+                  ...assignment,
+                  replaceExisting: true,
+                }
+              : assignment;
+          },
+        ),
       });
     }
   };
@@ -3411,6 +3760,35 @@ function AssetDraftTable({
     target: ArtworkAssignmentTarget,
   ) => {
     const assignedAssets = assignedAssetsForTarget(target);
+    const existingLibraryArtwork =
+      existingArtworkForTarget(target);
+    const replacementConfirmed = assignedAssets.some(
+      (asset) =>
+        frontAssignmentForTarget(asset, target)?.replaceExisting === true,
+    );
+
+    if (assignedAssets.length === 0 && existingLibraryArtwork) {
+      return (
+        <div className="ingest-artwork-target-assets">
+          <div className="ingest-artwork-target-asset existing-library-artwork">
+            <span className="ingest-artwork-preview-stack">
+              <img
+                className="ingest-artwork-thumbnail"
+                src={libraryArtworkPreviewUrl(
+                  existingLibraryArtwork.destinationRelativePath,
+                )}
+                alt={`Current Library artwork for ${targetLabel(target)}`}
+                loading="lazy"
+              />
+            </span>
+            <span>
+              <strong>Current Library artwork</strong>
+              <small>Preserved unless you assign a replacement</small>
+            </span>
+          </div>
+        </div>
+      );
+    }
 
     if (assignedAssets.length === 0) {
       return (
@@ -3452,7 +3830,13 @@ function AssetDraftTable({
                 <strong>
                   {sourceFilename(asset.sourceRelativePath)}
                 </strong>
-                <small>front cover</small>
+                <small>
+                  {existingLibraryArtwork
+                    ? replacementConfirmed
+                      ? "Will replace current Library artwork"
+                      : "Replacement confirmation required"
+                    : "front cover"}
+                </small>
               </span>
               <button
                 type="button"
@@ -3471,6 +3855,17 @@ function AssetDraftTable({
             </div>
           );
         })}
+        {existingLibraryArtwork && !replacementConfirmed && (
+          <button
+            type="button"
+            className="ingest-artwork-confirm-replacement-button"
+            onClick={() =>
+              confirmExistingArtworkReplacement(target)
+            }
+          >
+            Confirm artwork replacement
+          </button>
+        )}
       </div>
     );
   };
@@ -3481,6 +3876,8 @@ function AssetDraftTable({
     subheading: string,
   ) => {
     const assignedAssets = assignedAssetsForTarget(target);
+    const existingLibraryArtwork =
+      existingArtworkForTarget(target);
 
     return (
       <div
@@ -3518,7 +3915,7 @@ function AssetDraftTable({
                 )
               }
             >
-              {assignedAssets.length > 0
+              {assignedAssets.length > 0 || existingLibraryArtwork
                 ? "Replace with selected"
                 : "Assign selected"}
             </button>
@@ -3529,7 +3926,10 @@ function AssetDraftTable({
   };
 
   return (
-    <div className="ingest-asset-workflow">
+    <div
+      className="ingest-asset-workflow"
+      data-library-release-path={releaseRelativePath || undefined}
+    >
       <section className="ingest-artwork-assignment-workspace">
         <header className="ingest-artwork-workspace-header">
           <div>
@@ -3644,7 +4044,9 @@ function AssetDraftTable({
               <p>
                 The release row assigns album artwork. Track rows assign
                 track-specific artwork using the track numbers and titles
-                confirmed in the previous step.
+                confirmed in the previous step. During an update, existing
+                Library tracks remain available here even when their original
+                audio is not present in this ingest candidate.
               </p>
             </div>
             {selectedArtworkPath && (
@@ -3673,6 +4075,20 @@ function AssetDraftTable({
               track.version.trim()
                 ? `Track · ${track.version.trim()}`
                 : "Track",
+            ),
+          )}
+
+          {preservedArtworkTrackTargets.map((track) =>
+            renderArtworkTarget(
+              {
+                scope: "track",
+                trackSourceRelativePath:
+                  track.sourceRelativePath,
+              },
+              `${String(track.number).padStart(2, "0")} · ${track.title || "Untitled"}`,
+              track.version.trim()
+                ? `Existing Library track · ${track.version.trim()}`
+                : "Existing Library track",
             ),
           )}
         </div>
@@ -4919,6 +5335,10 @@ function BuildReview({
                   <div>
                     <dt>Tracks added</dt>
                     <dd>{preview.summary.addedTrackCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Tracks replaced</dt>
+                    <dd>{preview.summary.replacedTrackCount}</dd>
                   </div>
                   <div>
                     <dt>Tracks reordered</dt>

@@ -47,16 +47,15 @@ Scalar edits are currently browser-local only. Persisting edits to existing TOML
 ├── audio-player/
 ├── metadata-editor/
 ├── ingest-drop/          # incoming read-only source candidates
-├── demo-media/           # private staging + canonical Library root by default
-├── media-library/        # optional private canonical root override
-└── published-media/      # planned sanitized public player output
+├── media-library/        # private canonical release Library; Staging writes here
+└── published-media/      # generated host-facing website media snapshot
 ```
 
 Repository boundaries:
 
 - `metadata-editor/` is its own Git repository.
 - `audio-player/` is a separate Git repository.
-- `ingest-drop/`, `demo-media/`, `media-library/`, and `published-media/` remain outside both application repositories.
+- `ingest-drop/`, `media-library/`, and `published-media/` remain outside both application repositories.
 - Private canonical roots and public deployment output must not be committed with either application source repository.
 - Do not initialize Git at `~/Desktop/record-label/`.
 
@@ -82,8 +81,8 @@ The backend binds only to localhost during development. The public audio player 
 - Library release rows show the authored release title and primary artist above the date and track count
 - Library audio preview automatically advances to the next playable track in release order when a track ends, and stops after the final playable track; manual previous/next transport navigation retains its existing wraparound behavior.
 - Developer / Admin Tools start disabled on every page load and remain session-only when enabled
-- The Staging track table shows source paths relative to the selected candidate, provides read-only play/pause preview for inspected audio, uses direct three-digit track-number entry for ordering, can populate selected titles from a chosen filename field or each file's embedded TITLE tag, supports applying one source date across all included non-missing sources, and reports source dates after the release date as non-blocking advisories.
-- Staging Artwork & files uses a compact thumbnail-only palette plus release/track destination rows for visual front-artwork assignment. The palette deliberately omits filenames, paths, status badges, assignment badges, and action buttons; thumbnails can be dragged to a destination or selected by click/keyboard for the non-drag fallback. Source review and detach/remove controls live with the collapsed advanced artwork editor. Folder-derived suggestions still appear on their inferred release or numbered track rows automatically, replacing occupied front artwork still requires confirmation, and TIFF/TIF previews are generated in memory through FFmpeg without modifying the ingest source.
+- The Staging track table shows source paths relative to the selected candidate, provides read-only play/pause preview for inspected audio, uses direct three-digit track-number entry for ordering, can populate selected titles from a chosen filename field or each file's embedded TITLE tag, supports applying one source date across all included non-missing sources, and reports source dates after the release date as non-blocking advisories. When the release ID already exists in `media-library/`, Staging also shows a Revision action column: existing Library tracks omitted from the new ingest candidate are preserved automatically, while an explicitly selected `Replace Track N` action replaces only that track's verified canonical audio, preserves its stable ID and authored metadata, and invalidates generated playback/HLS/waveform derivatives so they can be prepared again.
+- Staging Artwork & files uses a compact thumbnail-only palette plus release/track destination rows for visual front-artwork assignment. The palette deliberately omits filenames, paths, status badges, assignment badges, and action buttons; thumbnails can be dragged to a destination or selected by click/keyboard for the non-drag fallback. Source review and detach/remove controls live with the collapsed advanced artwork editor. Folder-derived suggestions still appear on their inferred release or numbered track rows automatically, and TIFF/TIF previews are generated in memory through FFmpeg without modifying the ingest source. During an existing-release update, current canonical Library artwork is shown on the same destination rows, existing tracks remain targetable even when no audio from those tracks is in the new candidate, new artwork roles can be added, and replacing an occupied front-artwork target requires an explicit confirmation before the verified Library copy and its TOML reference may be superseded.
 - MP3 and other audio sources with FFprobe attached-picture streams expose deduplicated embedded artwork in Staging Artwork & files. One unambiguous embedded cover is preassigned as the release-level `front_cover` and extracted only when the reviewed staging plan is applied; the audio source is never retagged or modified.
 - Artwork copy destinations follow their explicit assignment scope. Release-level front artwork is staged under `artwork/front/artwork-master.<ext>`. Track-level `front_cover` / `track_artwork` assignments are copied into each selected track under `tracks/<track-id>/artwork/front/artwork-master.<ext>` and track TOML uses a track-local `artwork/front/...` path. Assigning one source to both release and track scopes intentionally creates independent canonical copies.
 - Staging Review is release-oriented first: it shows release front artwork and identity, numbered track titles with source-audio preview and each track's effective front art (track override or inherited release cover), then a compact preflight summary before any write. Server-validated warnings remain visible; exact artwork placement, filesystem operations, and metadata/TOML changes are retained in collapsed technical-detail sections, where build-plan rows still use compact file-kind icons and green-check/red-x readiness indicators.
@@ -93,9 +92,10 @@ The backend binds only to localhost during development. The public audio player 
 - Browser-local scalar draft editing
 - Track-number-driven Library navigation and guarded artist_number_title directory synchronization
 - Runtime media-location strip showing the configured Ingest, Staging, Library, and planned Publish roots
+- Publish readiness uses a compact five-column overview with release-artwork thumbnails, separates canonical Sources from player-facing Public media, and gives each release one primary `Continue to preflight` next-step button. After preflight, the page shows one plain-language result and one clearly labeled next action (`Resolve blockers`, `Prepare release`, or `Build public package`); verbose issue, package-plan, contract, and fingerprint data stays collapsed by default. `Prepare release` generates HLS web-stream + waveform derivatives for hosting; sanitized public-package writes remain disabled.
 - Guarded release-title / release-directory synchronization with TOML-reference updates, staging-receipt updates, manifests, backups, collision detection, and rollback
-- Read-only playback-MP3 and waveform processing plans
-- In-memory multiband waveform generation for PCM WAV sources
+- Read-only private playback-MP3/waveform planning plus reviewed HLS web-stream/waveform execution from Publish
+- In-memory multiband waveform generation for native PCM WAV sources, with FFmpeg decode-to-PCM support for other canonical audio formats
 
 ### Backend
 
@@ -141,12 +141,19 @@ The application reads its configured roots from the backend and displays them di
 
 ```text
 Ingest    → INGEST_ROOT (default ../ingest-drop)
-Staging   → INGEST_OUTPUT_ROOT (default ../demo-media)
-Library   → MEDIA_LIBRARY_ROOT (default ../demo-media)
+Staging   → INGEST_OUTPUT_ROOT (default ../media-library)
+Library   → MEDIA_LIBRARY_ROOT (default ../media-library)
 Publish   → PUBLISHED_MEDIA_ROOT (default ../published-media; planned only)
 ```
 
-Ingest inspection never modifies the source drop. Staging creates reviewed copies in the private workspace. Library authors that canonical private workspace. Publish does not currently copy anything; the planned behavior is to build a sanitized player-facing snapshot in `published-media/` alongside the application repositories while retaining the private canonical release.
+Ingest inspection never modifies the source drop. After a reviewed create/update succeeds, the source candidate in `ingest-drop/` is disposable. A later revision can therefore arrive in a completely new ingest candidate: Staging resolves the existing release by release ID, preserves Library tracks and verified assets that are not represented in the new candidate, requires an explicit `Replace Track N` choice before revised source audio may supersede a canonical master, and also supports artwork-only revision candidates. New artwork can be assigned to release or existing-track destinations without resupplying the original audio; replacing occupied canonical front artwork requires explicit confirmation and preserves unrelated artwork/metadata. Staging creates or updates releases directly in the private canonical `media-library/`; Library authors that same long-term source of truth. Publish preflight can now prepare reproducible HLS web-stream/waveform derivatives inside that private workspace after explicit review, but it still does not copy anything to the public root. The planned public-package step will build a sanitized player-facing snapshot in `published-media/` containing only host-ready HLS, waveform, browser artwork, and sanitized metadata while retaining the private canonical release and private playback derivatives.
+
+
+### Migrating the legacy `demo-media/` root
+
+`demo-media/` was the proof-of-concept name for the private canonical Library. The production-facing default is now `media-library/`. Staging and Library intentionally point to the same root unless you explicitly override either environment variable. Existing installations should stop metadata-editor, rename the directory once, and then restart with both roots aligned. Do not copy only part of a release: prepared HLS streams, waveform data, TOMLs, artwork, receipts, and operation history all belong to the canonical release tree.
+
+A later public-package build or update is always derived from this canonical Library. `published-media/` is generated output and must never become the source of truth.
 
 ## Release Identity and Directory Synchronization
 
@@ -162,10 +169,10 @@ The reviewed plan rejects blank or unsafe IDs, path traversal, symbolic links, s
 
 ## Media Root
 
-The default development media root is:
+The default private canonical media root is:
 
 ```text
-../demo-media
+../media-library
 ```
 
 Override it with:
@@ -180,8 +187,8 @@ Example `.env` values:
 
 ```env
 INGEST_ROOT=../ingest-drop
-INGEST_OUTPUT_ROOT=../demo-media
-MEDIA_LIBRARY_ROOT=../demo-media
+INGEST_OUTPUT_ROOT=../media-library
+MEDIA_LIBRARY_ROOT=../media-library
 PUBLISHED_MEDIA_ROOT=../published-media
 METADATA_EDITOR_PORT=4174
 ```
@@ -355,18 +362,11 @@ Use JSON output for automation or plan inspection:
 npm run publish:plan -- 2008-10-24_yours --json;
 ```
 
-The plan requires current playback MP3 and waveform derivatives, selects one
-browser-compatible release artwork source, inspects existing public
-destinations, and lists every copied or generated path. It excludes audio
-masters, archival TIFF artwork, TOML source documents, ingest receipts,
-backups, production notes, and editor-only administration. `publish:plan`
+The plan requires a current segmented HLS web stream and waveform derivative for every publishable track, selects one browser-compatible release artwork source, inspects existing public destinations, and lists every copied or generated path. It excludes audio masters, distribution/full-quality derivatives, private `audio-playback.mp3`, archival TIFF artwork, TOML source documents, ingest receipts, backups, production notes, and editor-only administration. `publish:plan`
 reports the dry-run without writing; `preflight:publish` exits with status 1
 when the plan is blocked so it can gate later automation.
 
-The next write-enabled milestone will build the reviewed plan in an isolated
-temporary directory, validate hashes and catalog references, atomically promote
-it under `published-media/`, retain the previous public release for rollback,
-and refresh audio-player only after promotion succeeds.
+HLS-stream/waveform preparation is now the first write-enabled Publish action, but it writes only reproducible derivatives inside the private canonical release. The next write-enabled milestone is **Build public package**: construct the reviewed sanitized package in an isolated temporary directory, validate hashes and catalog references, atomically promote it under `published-media/`, retain the previous public release for rollback, and refresh audio-player only after promotion succeeds.
 
 ## Core Workflows
 
@@ -400,14 +400,24 @@ GET /api/library/scan
 
 ### Playback and Waveform Processing Plan
 
-The first media-processing milestone is intentionally read-only. It inspects each track's audio master, `audio-playback.mp3`, and `waveform-peaks.json`, then reports whether each derivative is current, missing, stale, or blocked. It does not create, replace, or delete files.
+The media-processing planner remains read-only. It continues to inspect each track's canonical audio source, private `audio-playback.mp3`, and `waveform-peaks.json` for Library/local-preview purposes. Publish adds a separate website-delivery profile: a reviewed **Prepare release** operation generates or refreshes the HLS web stream and waveform without making the private playback MP3 a publication prerequisite.
 
-The active profile preserves the audio-player conventions:
+The active profiles are intentionally distinct:
 
 ```text
-audio-playback.mp3   320 kbps MP3 target
-waveform-peaks.json  schema v2, 400 peaks/second, 1024-point Hann FFT
+Private/local playback
+  audio-playback.mp3   320 kbps MP3 (never copied into website package)
+
+Hosted web stream
+  stream/index.m3u8    HLS VOD, AAC-LC, 192 kbps stereo
+  stream/init.mp4      fMP4 initialization segment
+  stream/segment-*.m4s fMP4 media segments, ~3 second target
+
+Waveform
+  waveform-peaks.json  schema v2, 400 peaks/second, 1024-point Hann FFT
 ```
+
+The stream playlist contains relative references only. This keeps the package portable across private object storage, CDNs, signed-cookie/signed-URL deployments, or a custom HTTP service. Browser-visible waveform timing remains continuous and independent from HLS segment boundaries.
 
 API:
 
@@ -417,7 +427,36 @@ GET /api/media-processing/plan?release=<release-id>&track=<track-id>
 GET /api/media-processing/plan?release=<release-id>&peaksPerSecond=400
 ```
 
-The response includes `writesEnabled: false`, a profile SHA-256, per-track checks, and create/replace/block recommendations for a future confirmed executor. Native PCM WAV waveform analysis is implemented in memory; non-WAV masters are planned as requiring FFmpeg decoding before analysis.
+Reviewed Publish preparation API:
+
+```text
+POST /api/publish/prepare
+{ releaseId, planFingerprint, planGeneratedAt }
+```
+
+The GET response includes `writesEnabled: false`, profile hashes, per-track checks, and create/replace/block recommendations. Execution is deliberately separate from planning: `POST /api/publish/prepare` requires the exact reviewed publish-plan fingerprint and generation timestamp. The server rebuilds that preflight before writing, stages every HLS directory and waveform under `.metadata-editor-operations/`, validates the playlist, initialization segment, referenced media segments, and waveform JSON, checks the source/profile state again for staleness, backs up replacement targets, then atomically promotes the complete prepared set with post-promotion SHA-256 verification and rollback protection. HLS is generated directly from the canonical source with FFmpeg AAC-LC; no master or monolithic playback MP3 enters the planned website package. Native supported WAV sources are analyzed in memory for waveform data; other canonical formats are decoded by FFmpeg to temporary PCM solely for waveform analysis.
+
+### Hosted Audio-Player Package Contract
+
+Publish contract v2 plans a host-ready track layout without deployment-domain URLs:
+
+```text
+releases/<release-id>/
+  release.json
+  publication-manifest.json
+  artwork/front/artwork.<browser-ext>
+  tracks/<track-id>/
+    track.json
+    waveform-peaks.json
+    stream/
+      index.m3u8
+      init.mp4
+      segment-00001.m4s
+      segment-00002.m4s
+      ...
+```
+
+Player-facing metadata should expose logical relative resources such as `stream.href -> stream/index.m3u8` and `waveform.href -> waveform-peaks.json`. The publication manifest records stable track identity, resource paths, generation profiles, and hashes. The website package must never contain canonical masters, distribution masters, full-quality downloads, or the private 320 kbps playback MP3 unless a separate explicit download/commerce workflow is introduced later.
 
 ### Inferred Metadata Preview
 

@@ -37,6 +37,12 @@ export type IngestBuildTrackDraft = {
   artist: string;
   date: string;
   destinationFilename: string;
+  /**
+   * Explicitly retarget this ingest source onto an existing stable track.
+   * The existing track identity and authored metadata are preserved while
+   * its canonical audio is replaced through the reviewed update workflow.
+   */
+  replacementTrackId?: string;
 };
 
 export type IngestArtworkAssignmentDraft = {
@@ -44,6 +50,12 @@ export type IngestArtworkAssignmentDraft = {
   scope: "release" | "track";
   role: string;
   trackSourceRelativePaths: string[];
+  /**
+   * Explicit confirmation that this assignment may supersede an existing
+   * canonical Library artwork target during an update. Inferred artwork
+   * assignments never set this automatically.
+   */
+  replaceExisting?: boolean;
 };
 
 export const ingestArtworkRoleOptions = [
@@ -167,6 +179,7 @@ export type IngestBuildPreview = {
     artworkSourceCount: number;
     artworkAssignmentCount: number;
     addedTrackCount: number;
+    replacedTrackCount: number;
     reorderedTrackCount: number;
     updatedFileCount: number;
     preservedFileCount: number;
@@ -178,11 +191,33 @@ export type IngestBuildPreview = {
     | typeof INGEST_UPDATE_CONFIRMATION_PHRASE;
 };
 
+export type IngestStagingTrackTarget = {
+  id: string;
+  number: number;
+  title: string;
+  version: string;
+  artist: string;
+  sourceDate: string;
+  sourceRelativePath: string;
+  destinationRelativePath: string;
+};
+
+export type IngestStagingArtworkTarget = {
+  sourceRelativePath: string;
+  destinationRelativePath: string;
+  scope: "release" | "track";
+  role: string;
+  trackId?: string;
+  trackSourceRelativePath?: string;
+};
+
 export type IngestStagingTargetStatus = {
   releaseId: string;
   exists: boolean;
   operation: IngestBuildOperation;
   releaseRelativePath: string;
+  existingTracks: IngestStagingTrackTarget[];
+  existingArtwork: IngestStagingArtworkTarget[];
 };
 
 export type IngestBuildCopyReceipt = {
@@ -203,6 +238,7 @@ export type IngestBuildResult = {
   createdFiles: string[];
   updatedFiles: string[];
   preservedFiles: string[];
+  removedFiles: string[];
   receipts: IngestBuildCopyReceipt[];
   completedAt: string;
 };

@@ -217,3 +217,99 @@ test("offers only loose image and text files as attachable sidecars", async () =
     ["front.png", "session-notes.md"],
   );
 });
+
+
+test("names files that are unknown by extension in candidate and file warnings", async () => {
+  const root = await createIngestFixture();
+  const candidateId =
+    "2016-07-26_CrazyEights_TravisBedroom_GuitarDrums";
+  const candidatePath = path.join(root, candidateId);
+  await writeFile(
+    path.join(candidatePath, "session-camera.mp4"),
+    "video",
+  );
+
+  const videoOnlyRunner: IngestCommandRunner = async (
+    command,
+    args,
+  ) => {
+    if (command === "ffprobe" && args[0] === "-version") {
+      return {
+        exitCode: 0,
+        stdout: "ffprobe version test\n",
+        stderr: "",
+      };
+    }
+
+    if (command === "mediainfo" && args[0] === "--Version") {
+      return {
+        exitCode: 0,
+        stdout: "MediaInfo Command line test\n",
+        stderr: "",
+      };
+    }
+
+    if (command === "ffprobe") {
+      const inputPath = args.at(-1) ?? "";
+      if (inputPath.endsWith("session-camera.mp4")) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            streams: [
+              {
+                codec_type: "video",
+                codec_name: "h264",
+              },
+            ],
+            format: {
+              format_name: "mov,mp4,m4a,3gp,3g2,mj2",
+            },
+          }),
+          stderr: "",
+        };
+      }
+
+      return {
+        exitCode: 0,
+        stdout: ffprobePayload,
+        stderr: "",
+      };
+    }
+
+    return {
+      exitCode: 0,
+      stdout: mediaInfoPayload,
+      stderr: "",
+    };
+  };
+
+  const scan = await scanIngestDrop(
+    root,
+    "../ingest-drop",
+    videoOnlyRunner,
+  );
+  const candidate = scan.candidates.find(
+    (item) => item.id === candidateId,
+  );
+  assert.ok(candidate);
+  assert.match(
+    candidate.warnings.join(" "),
+    /session-camera\.mp4/i,
+  );
+
+  const inspection = await inspectIngestCandidate(
+    root,
+    candidateId,
+    "../ingest-drop",
+    videoOnlyRunner,
+  );
+  const unknown = inspection.files.find(
+    (file) => file.filename === "session-camera.mp4",
+  );
+  assert.ok(unknown);
+  assert.equal(unknown.mediaKind, "unknown");
+  assert.match(
+    unknown.warnings.join(" "),
+    /not recognized by the ingest classifier/i,
+  );
+});

@@ -275,8 +275,14 @@ test("documents Ingest Source files media previews", () => {
     ...(ingest?.steps ?? []),
   ].join(" ");
 
-  assert.match(text, /media-preview column first/i);
+  assert.match(
+    text,
+    /visible columns compact.*Preview.*Filename.*Duration.*Size.*Details/i,
+  );
   assert.match(text, /image rows show clickable thumbnails/i);
-  assert.match(text, /audio rows provide play\/pause preview controls/i);
-  assert.match(text, /probe provenance remains in Details/i);
+  assert.match(
+    text,
+    /audio rows provide play\/pause preview controls.*continue to the next available audio source/i,
+  );
+  assert.match(text, /probe provenance.*remain.*Details/i);
 });

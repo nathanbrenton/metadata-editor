@@ -28,3 +28,75 @@ test("uses the first ingest source column for media preview instead of probe pro
   assert.match(appSource, /aria-pressed=\{playing\}/);
   assert.match(appSource, /<th scope="row">Probe<\/th>/);
 });
+
+test("keeps the ingest source table compact while retaining Size", () => {
+  const tableStart = appSource.indexOf(
+    'className="ingest-table ingest-source-table"',
+  );
+  const detailStart = appSource.indexOf(
+    "function IngestFileInspectionDetail",
+    tableStart,
+  );
+
+  assert.notEqual(tableStart, -1);
+  assert.notEqual(detailStart, -1);
+
+  const sourceTable = appSource.slice(
+    tableStart,
+    detailStart,
+  );
+
+  assert.match(
+    sourceTable,
+    /Preview[\s\S]*Filename[\s\S]*Duration[\s\S]*Size[\s\S]*Details/,
+  );
+
+  for (const label of [
+    "Type",
+    "Container",
+    "Codec",
+    "Sample rate",
+    "Channels",
+  ]) {
+    assert.doesNotMatch(
+      sourceTable,
+      new RegExp(
+        `<th[^>]*>\\s*${label}\\s*<\\/th>`,
+        "i",
+      ),
+    );
+  }
+
+  assert.match(sourceTable, /colSpan=\{5\}/);
+});
+
+test("keeps hidden source-table properties available in Details", () => {
+  const detailStart = appSource.indexOf(
+    "function IngestFileInspectionDetail",
+  );
+  assert.notEqual(detailStart, -1);
+  const detailSource = appSource.slice(detailStart);
+
+  assert.match(detailSource, />Type<\/th>[\s\S]*file\.mediaKind/);
+  assert.match(
+    detailSource,
+    />Size<\/th>[\s\S]*formatByteSize\(file\.sizeBytes\)/,
+  );
+  assert.match(detailSource, /Object\.entries\(\s*file\.technical/);
+});
+
+test("continues ingest source preview to the next available audio file", () => {
+  assert.match(appSource, /function getNextIngestAudioFile/);
+  assert.match(
+    appSource,
+    /files[\s\S]*slice\(currentIndex \+ 1\)[\s\S]*file\.mediaKind === "audio"/,
+  );
+  assert.match(
+    appSource,
+    /audio\.addEventListener\("ended", handleEnded\)/,
+  );
+  assert.match(
+    appSource,
+    /handleEnded[\s\S]*getNextIngestAudioFile\([\s\S]*inspection\.files[\s\S]*startSourceAudioPreview\(audio, nextFile\)/,
+  );
+});

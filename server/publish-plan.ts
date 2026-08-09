@@ -21,6 +21,10 @@ import {
   buildMediaProcessingPlan,
 } from "./media-processing/plan.js";
 import {
+  buildWebStreamPlan,
+  type WebStreamPlanSummary,
+} from "./media-processing/web-stream.js";
+import {
   scanReleaseById,
 } from "./scanner.js";
 import type {
@@ -49,7 +53,9 @@ export type PublishPlanItemKind =
   | "release-metadata"
   | "track-metadata"
   | "release-artwork"
-  | "track-playback"
+  | "track-stream-manifest"
+  | "track-stream-init"
+  | "track-stream-segment"
   | "track-waveform";
 
 export type PublishPlanIssue = {
@@ -77,9 +83,25 @@ export type PublishPlan = {
   };
   contract: {
     name: "audio-player-public-package";
-    version: 1;
+    version: 2;
     catalogSchemaVersion: 1;
     mediaBaseUrl: "/media";
+    trackResources: {
+      stream: {
+        hrefField: "stream.href";
+        protocol: "hls";
+        manifestRelativePath: "stream/index.m3u8";
+        codec: "aac";
+        bitrateKbps: number;
+        segmentDurationSeconds: number;
+        segmentType: "fmp4";
+      };
+      waveform: {
+        hrefField: "waveform.href";
+        filename: "waveform-peaks.json";
+        schemaVersion: number;
+      };
+    };
     privateContentExcluded: readonly string[];
   };
   releaseId: string;
@@ -99,6 +121,14 @@ export type PublishPlan = {
     blockedCount: number;
   };
   derivatives: {
+    trackCount: number;
+    currentCount: number;
+    createCount: number;
+    replaceCount: number;
+    blockedCount: number;
+  };
+  webStreams: WebStreamPlanSummary;
+  waveforms: {
     trackCount: number;
     currentCount: number;
     createCount: number;
@@ -131,6 +161,9 @@ const browserArtworkExtensions = new Set([
 
 const privateContentExcluded = [
   "audio masters",
+  "distribution masters and full-quality audio derivatives",
+  "private playback MP3 and other monolithic listening derivatives",
+  "private stream generation sidecars such as stream-info.json",
   "archival TIFF artwork masters",
   "TOML source documents",
   "ingest receipts",
@@ -228,6 +261,23 @@ async function destinationExists(
 
     throw error;
   }
+}
+
+function isPublishManagedDerivativeReferenceIssue(
+  issue: LibraryValidationIssue,
+): boolean {
+  if (issue.code !== "missing-or-unsafe-asset-reference") {
+    return false;
+  }
+
+  return (
+    issue.message.startsWith(
+      'track.assets.audio_playback points to "audio-playback.mp3",',
+    ) ||
+    issue.message.startsWith(
+      'track.assets.waveform_peaks points to "waveform-peaks.json",',
+    )
+  );
 }
 
 function issueFromValidation(
@@ -346,7 +396,9 @@ export function formatPublishPlan(
     `Read-only: yes`,
     `Writes enabled: no`,
     `Validation: ${plan.validation.blockedCount} blocked, ${plan.validation.warningCount} warnings`,
-    `Derivatives: ${plan.derivatives.currentCount} current, ${plan.derivatives.createCount} missing, ${plan.derivatives.replaceCount} stale, ${plan.derivatives.blockedCount} blocked`,
+    `Public derivatives: ${plan.derivatives.currentCount} current, ${plan.derivatives.createCount} missing, ${plan.derivatives.replaceCount} stale, ${plan.derivatives.blockedCount} blocked`,
+    `Web streams: ${plan.webStreams.currentCount}/${plan.webStreams.trackCount} current`,
+    `Waveforms: ${plan.waveforms.currentCount}/${plan.waveforms.trackCount} current`,
     "",
   ];
 
@@ -416,12 +468,50 @@ export async function buildPublishPlan(
     capabilities,
     { generatedAt },
   );
-  const issues: PublishPlanIssue[] = [
-    ...validationReport.issues.map(issueFromValidation),
-    ...validationReport.releases.flatMap((releaseResult) =>
-      releaseResult.issues.map(issueFromValidation),
+  const webStreams = await buildWebStreamPlan(
+    mediaRoot,
+    derivatives,
+    capabilities,
+  );
+  const waveformItems = derivatives.items.map(
+    (item) => item.waveform,
+  );
+  const waveforms = {
+    trackCount: waveformItems.length,
+    currentCount: waveformItems.filter(
+      (item) => item.action === "none",
+    ).length,
+    createCount: waveformItems.filter(
+      (item) => item.action === "create",
+    ).length,
+    replaceCount: waveformItems.filter(
+      (item) => item.action === "replace",
+    ).length,
+    blockedCount: waveformItems.filter(
+      (item) => item.action === "blocked",
+    ).length,
+  };
+  const publicDerivatives = {
+    trackCount: derivatives.items.length,
+    currentCount:
+      webStreams.summary.currentCount + waveforms.currentCount,
+    createCount:
+      webStreams.summary.createCount + waveforms.createCount,
+    replaceCount:
+      webStreams.summary.replaceCount + waveforms.replaceCount,
+    blockedCount:
+      webStreams.summary.blockedCount + waveforms.blockedCount,
+  };
+  const validationIssues = [
+    ...validationReport.issues,
+    ...validationReport.releases.flatMap(
+      (releaseResult) => releaseResult.issues,
     ),
-  ];
+  ].filter(
+    (issue) => !isPublishManagedDerivativeReferenceIssue(issue),
+  );
+  const issues: PublishPlanIssue[] =
+    validationIssues.map(issueFromValidation);
   const items: PublishPlanItem[] = [];
   const destinationReleaseRelativePath =
     path.posix.join("releases", releaseId);
@@ -503,80 +593,137 @@ export async function buildPublishPlan(
       "tracks",
       trackPlan.trackId,
     );
+    const webStream = webStreams.items.find(
+      (item) => item.trackId === trackPlan.trackId,
+    );
 
-    for (const derivative of [
-      trackPlan.playback,
-      trackPlan.waveform,
-    ]) {
-      const isPlayback = derivative.kind === "playback-mp3";
-      const destinationRelativePath = path.posix.join(
-        trackDestination,
-        derivative.filename,
+    if (!webStream) {
+      throw new Error(
+        `Web-stream plan is missing track ${trackPlan.trackId}.`,
       );
-      const kind: PublishPlanItemKind = isPlayback
-        ? "track-playback"
-        : "track-waveform";
+    }
 
-      if (
-        derivative.status !== "current" ||
-        derivative.action !== "none"
-      ) {
-        issues.push({
-          code: isPlayback
-            ? "playback-not-current"
-            : "waveform-not-current",
-          severity: "blocked",
-          relativePath: derivative.relativePath,
-          message:
-            `${isPlayback ? "Playback audio" : "Waveform data"} must be current before it can enter the public package. Current status: ${derivative.status}.`,
-          suggestion:
-            "Prepare the derivative in Library, refresh preflight, and publish only after the status is current.",
-        });
+    if (
+      webStream.status !== "current" ||
+      webStream.action !== "none"
+    ) {
+      issues.push({
+        code: "web-stream-not-current",
+        severity: "blocked",
+        relativePath: webStream.directoryRelativePath,
+        message:
+          `Web stream must be current before it can enter the hosted package. Current status: ${webStream.status}.`,
+        suggestion:
+          "Use Prepare release to generate the reviewed AAC-LC HLS derivative, then refresh preflight.",
+      });
+      items.push({
+        kind: "track-stream-manifest",
+        action: "blocked",
+        sourceRelativePath: webStream.manifestRelativePath,
+        destinationRelativePath: path.posix.join(
+          trackDestination,
+          "stream/index.m3u8",
+        ),
+        trackId: trackPlan.trackId,
+        reason: webStream.reason,
+      });
+    } else {
+      for (const streamFile of webStream.files) {
+        const streamKind: PublishPlanItemKind =
+          streamFile.kind === "manifest"
+            ? "track-stream-manifest"
+            : streamFile.kind === "initialization"
+              ? "track-stream-init"
+              : "track-stream-segment";
+        const destinationRelativePath = path.posix.join(
+          trackDestination,
+          "stream",
+          streamFile.filename,
+        );
+
         items.push({
-          kind,
-          action: "blocked",
-          sourceRelativePath: derivative.relativePath,
+          kind: streamKind,
+          action: await destinationExists(
+            publishRoot,
+            destinationRelativePath,
+          )
+            ? "replace"
+            : "create",
+          sourceRelativePath: streamFile.relativePath,
           destinationRelativePath,
           trackId: trackPlan.trackId,
-          reason: derivative.reason,
-          ...(derivative.sizeBytes === undefined
-            ? {}
-            : { sizeBytes: derivative.sizeBytes }),
+          reason:
+            streamFile.kind === "manifest"
+              ? "Copy the portable HLS media playlist used as the track stream resource."
+              : streamFile.kind === "initialization"
+                ? "Copy the HLS fMP4 initialization segment referenced by the playlist."
+                : "Copy one short AAC-LC HLS media segment referenced by the playlist.",
+          sizeBytes: streamFile.sizeBytes,
         });
-        continue;
       }
+    }
 
+    const waveform = trackPlan.waveform;
+    const waveformDestination = path.posix.join(
+      trackDestination,
+      waveform.filename,
+    );
+
+    if (
+      waveform.status !== "current" ||
+      waveform.action !== "none"
+    ) {
+      issues.push({
+        code: "waveform-not-current",
+        severity: "blocked",
+        relativePath: waveform.relativePath,
+        message:
+          `Waveform data must be current before it can enter the hosted package. Current status: ${waveform.status}.`,
+        suggestion:
+          "Use Prepare release to generate waveform data from the canonical source, then refresh preflight.",
+      });
+      items.push({
+        kind: "track-waveform",
+        action: "blocked",
+        sourceRelativePath: waveform.relativePath,
+        destinationRelativePath: waveformDestination,
+        trackId: trackPlan.trackId,
+        reason: waveform.reason,
+        ...(waveform.sizeBytes === undefined
+          ? {}
+          : { sizeBytes: waveform.sizeBytes }),
+      });
+    } else {
       const inspection = await inspectRegularFile(
         mediaRoot,
-        derivative.relativePath,
+        waveform.relativePath,
       );
 
       if (!inspection.exists) {
         issues.push({
           code: "current-derivative-missing",
           severity: "blocked",
-          relativePath: derivative.relativePath,
+          relativePath: waveform.relativePath,
           message:
-            "The derivative plan reported current media, but the source file is no longer present.",
-          suggestion: "Refresh the Library scan and rebuild the publish plan.",
+            "The waveform plan reported current media, but the source file is no longer present.",
+          suggestion:
+            "Refresh the Library scan and rebuild the publish plan.",
         });
       }
 
       items.push({
-        kind,
+        kind: "track-waveform",
         action: await destinationExists(
           publishRoot,
-          destinationRelativePath,
+          waveformDestination,
         )
           ? "replace"
           : "create",
-        sourceRelativePath: derivative.relativePath,
-        destinationRelativePath,
+        sourceRelativePath: waveform.relativePath,
+        destinationRelativePath: waveformDestination,
         trackId: trackPlan.trackId,
         reason:
-          isPlayback
-            ? "Copy the current playback MP3 used by audio-player."
-            : "Copy the current waveform JSON used by audio-player.",
+          "Copy precomputed waveform data independently of segmented stream loading.",
         ...(inspection.sizeBytes === undefined
           ? {}
           : { sizeBytes: inspection.sizeBytes }),
@@ -592,7 +739,7 @@ export async function buildPublishPlan(
       ),
       trackId: trackPlan.trackId,
       reason:
-        "Generate sanitized player-facing track metadata from approved release and track TOML fields; omit private/editor-only records.",
+        "Generate sanitized player-facing track metadata with relative stream.href and waveform.href resources; omit private/editor-only records.",
     });
   }
 
@@ -615,7 +762,7 @@ export async function buildPublishPlan(
         "publication-manifest.json",
       ),
       reason:
-        "Record public package hashes, source release identity, generation profile, and publish timestamp for validation and rollback.",
+        "Record stable track identities, relative HLS stream and waveform resources, public package hashes, generation profiles, and publish timestamp for validation and rollback.",
     },
     {
       kind: "catalog",
@@ -641,9 +788,27 @@ export async function buildPublishPlan(
     },
     contract: {
       name: "audio-player-public-package",
-      version: 1,
+      version: 2,
       catalogSchemaVersion: 1,
       mediaBaseUrl: "/media",
+      trackResources: {
+        stream: {
+          hrefField: "stream.href",
+          protocol: "hls",
+          manifestRelativePath: "stream/index.m3u8",
+          codec: "aac",
+          bitrateKbps: webStreams.profile.bitrateKbps,
+          segmentDurationSeconds:
+            webStreams.profile.segmentDurationSeconds,
+          segmentType: "fmp4",
+        },
+        waveform: {
+          hrefField: "waveform.href",
+          filename: derivatives.profile.waveform.filename,
+          schemaVersion:
+            derivatives.profile.waveform.schemaVersion,
+        },
+      },
       privateContentExcluded,
     },
     releaseId,
@@ -657,11 +822,25 @@ export async function buildPublishPlan(
     issues,
     items,
     validation: {
-      status: validationReport.status,
-      warningCount: validationReport.summary.warningCount,
-      blockedCount: validationReport.summary.blockedCount,
+      status: validationIssues.some(
+        (issue) => issue.severity === "blocked",
+      )
+        ? "blocked"
+        : validationIssues.some(
+            (issue) => issue.severity === "warning",
+          )
+          ? "warning"
+          : "ok",
+      warningCount: validationIssues.filter(
+        (issue) => issue.severity === "warning",
+      ).length,
+      blockedCount: validationIssues.filter(
+        (issue) => issue.severity === "blocked",
+      ).length,
     },
-    derivatives: derivatives.summary,
+    derivatives: publicDerivatives,
+    webStreams: webStreams.summary,
+    waveforms,
     summary,
   };
 

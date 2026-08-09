@@ -136,6 +136,9 @@ import {
   buildPublishPlan,
 } from "./publish-plan.js";
 import {
+  prepareReleaseMedia,
+} from "./media-processing/prepare.js";
+import {
   readWorkflowLocations,
   resolvePublishRoot,
 } from "./workflow-locations.js";
@@ -4365,6 +4368,84 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown publish-plan error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/publish/prepare"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : "";
+        const planFingerprint =
+          "planFingerprint" in body &&
+          typeof body.planFingerprint === "string"
+            ? body.planFingerprint
+            : "";
+        const planGeneratedAt =
+          "planGeneratedAt" in body &&
+          typeof body.planGeneratedAt === "string"
+            ? body.planGeneratedAt
+            : "";
+
+        if (
+          !releaseId ||
+          !planFingerprint ||
+          !planGeneratedAt
+        ) {
+          sendJson(response, 400, {
+            error:
+              "releaseId, planFingerprint, and planGeneratedAt are required",
+          });
+          return;
+        }
+
+        const [mediaRoot, publishRoot] =
+          await Promise.all([
+            resolveMediaRoot(),
+            resolvePublishRoot(),
+          ]);
+
+        sendJson(
+          response,
+          200,
+          await prepareReleaseMedia(
+            mediaRoot,
+            publishRoot,
+            releaseId,
+            {
+              expectedPublishPlanFingerprint:
+                planFingerprint,
+              publishPlanGeneratedAt:
+                planGeneratedAt,
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown media-preparation error",
         });
       }
 
