@@ -71,7 +71,7 @@ test(
     );
     assert.match(
       builderSource,
-      /Review in Other Files/,
+      /Review in Artwork & files/,
     );
     assert.match(
       builderSource,

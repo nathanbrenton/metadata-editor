@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type DragEvent,
 } from "react";
 
 import {
@@ -33,6 +34,12 @@ import type {
 import {
   stagingDestinationPathForDisplay,
 } from "./ingest-build-display.js";
+import {
+  artworkAssetsAssignedToTarget,
+  buildFrontArtworkAssignmentUpdates,
+  removeFrontArtworkTarget,
+  type ArtworkAssignmentTarget,
+} from "./ingest-artwork-assignment.js";
 import {
   formatIngestSourceDisplayPath,
   sourceDateIsAfterReleaseDate,
@@ -184,11 +191,13 @@ function ArtworkPreview({
   modifiedAt,
   label,
   embeddedArtwork,
+  thumbnailOnly = false,
 }: {
   sourceRelativePath: string;
   modifiedAt?: string;
   label?: string;
   embeddedArtwork?: IngestBuildAssetDraft["embeddedArtwork"];
+  thumbnailOnly?: boolean;
 }) {
   const [previewFailed, setPreviewFailed] =
     useState(false);
@@ -202,6 +211,8 @@ function ArtworkPreview({
     stagingTranscodedArtworkExtensions.has(
       extension,
     );
+  const accessibleLabel =
+    label ?? sourceRelativePath;
 
   if (
     !stagingPreviewArtworkExtensions.has(
@@ -210,10 +221,25 @@ function ArtworkPreview({
     previewFailed
   ) {
     return (
-      <span className="ingest-artwork-preview-unavailable">
-        {previewFailed
-          ? "Preview failed"
-          : "Preview unavailable"}
+      <span
+        className={[
+          "ingest-artwork-preview-unavailable",
+          thumbnailOnly
+            ? "ingest-artwork-preview-unavailable--thumbnail-only"
+            : "",
+        ].filter(Boolean).join(" ")}
+        role={thumbnailOnly ? "img" : undefined}
+        aria-label={
+          thumbnailOnly
+            ? `Artwork preview unavailable for ${accessibleLabel}`
+            : undefined
+        }
+      >
+        {thumbnailOnly
+          ? null
+          : previewFailed
+            ? "Preview failed"
+            : "Preview unavailable"}
       </span>
     );
   }
@@ -223,8 +249,22 @@ function ArtworkPreview({
     modifiedAt,
     embeddedArtwork,
   );
-  const accessibleLabel =
-    label ?? sourceRelativePath;
+
+  if (thumbnailOnly) {
+    return (
+      <span className="ingest-artwork-preview-stack ingest-artwork-preview-stack--thumbnail-only">
+        <img
+          className="ingest-artwork-thumbnail"
+          src={source}
+          alt={`Artwork preview for ${accessibleLabel}`}
+          loading="lazy"
+          onError={() =>
+            setPreviewFailed(true)
+          }
+        />
+      </span>
+    );
+  }
 
   return (
     <span className="ingest-artwork-preview-stack">
@@ -771,7 +811,7 @@ function ArtworkAssignmentSummary({
                       : "copies"}
                     <br />
                     <span className="metadata-empty-value">
-                      Exact paths appear in Review.
+                      Exact destinations appear in Filesystem plan.
                     </span>
                   </td>
                   <td>
@@ -1949,7 +1989,7 @@ function GuidedIngestBuilder({
     },
     {
       number: 3 as const,
-      label: "Other files",
+      label: "Artwork & files",
     },
     {
       number: 4 as const,
@@ -2041,17 +2081,18 @@ function GuidedIngestBuilder({
             <p className="eyebrow">
               Step 3 of 4
             </p>
-            <h3>Confirm images and text</h3>
+            <h3>Assign artwork & other files</h3>
             <p>
-              Optional sidecars are copied into
-              release-relative artwork or notes
-              directories without interpreting
-              their contents.
+              Review folder-derived artwork assignments, then drag or
+              select images for the release and individual tracks. Text
+              sidecars remain optional reviewed copies.
             </p>
           </header>
           <AssetDraftTable
             assets={draft.assets}
             tracks={draft.tracks}
+            releaseTitle={draft.releaseTitle}
+            releaseArtist={draft.releaseArtist}
             sourceStatuses={sourceStatuses}
             attachmentFiles={attachmentFiles}
             onChange={onAssetChange}
@@ -2265,11 +2306,13 @@ function QuickIngestBuilder({
 
       <section className="ingest-table-panel">
         <header className="ingest-table-panel-header">
-          <h3>Other files</h3>
+          <h3>Artwork & files</h3>
         </header>
         <AssetDraftTable
           assets={draft.assets}
           tracks={draft.tracks}
+          releaseTitle={draft.releaseTitle}
+          releaseArtist={draft.releaseArtist}
           sourceStatuses={sourceStatuses}
           attachmentFiles={attachmentFiles}
           onChange={onAssetChange}
@@ -3194,6 +3237,8 @@ function TrackDraftTable({
 function AssetDraftTable({
   assets,
   tracks,
+  releaseTitle,
+  releaseArtist,
   sourceStatuses,
   attachmentFiles,
   onChange,
@@ -3205,6 +3250,8 @@ function AssetDraftTable({
 }: {
   assets: IngestBuildAssetDraft[];
   tracks: IngestBuildTrackDraft[];
+  releaseTitle: string;
+  releaseArtist: string;
   sourceStatuses: IngestDraftSourceStatus[];
   attachmentFiles: IngestFileInspection[];
   onChange: (
@@ -3220,6 +3267,17 @@ function AssetDraftTable({
   onRemoveAsset: (sourceRelativePath: string) => void;
   focusedSourcePath: string | null;
 }) {
+  const [selectedArtworkPath, setSelectedArtworkPath] =
+    useState<string | null>(null);
+  const imageAssets = assets.filter(
+    (asset) => asset.mediaKind === "image",
+  );
+  const textAssets = assets.filter(
+    (asset) => asset.mediaKind === "text",
+  );
+  const includedTracks = tracks.filter(
+    (track) => track.include,
+  );
   const attachedPaths = new Set(
     assets.map((asset) =>
       asset.sourceRelativePath,
@@ -3231,33 +3289,407 @@ function AssetDraftTable({
         !attachedPaths.has(file.relativePath),
     );
 
+  const sourceFilename = (sourceRelativePath: string) => {
+    const segments = sourceRelativePath
+      .split("/")
+      .filter(Boolean);
+
+    return segments[segments.length - 1] ?? sourceRelativePath;
+  };
+
+  const targetLabel = (target: ArtworkAssignmentTarget) => {
+    if (target.scope === "release") {
+      return `Release · ${releaseTitle || "Untitled release"}`;
+    }
+
+    const track = tracks.find(
+      (item) =>
+        item.sourceRelativePath ===
+        target.trackSourceRelativePath,
+    );
+
+    return track
+      ? trackLabel(track)
+      : "Track artwork";
+  };
+
+  const assignedAssetsForTarget = (
+    target: ArtworkAssignmentTarget,
+  ) => artworkAssetsAssignedToTarget(
+    imageAssets,
+    target,
+  );
+
+  const assignArtworkToTarget = (
+    sourceRelativePath: string,
+    target: ArtworkAssignmentTarget,
+  ) => {
+    const sourceAsset = imageAssets.find(
+      (asset) =>
+        asset.sourceRelativePath === sourceRelativePath,
+    );
+    const sourceStatus = sourceStatusForPath(
+      sourceStatuses,
+      sourceAsset?.embeddedArtwork?.audioSourceRelativePath ??
+        sourceRelativePath,
+    );
+
+    if (!sourceAsset || sourceStatus?.state === "missing") {
+      return;
+    }
+
+    const existingAssets = assignedAssetsForTarget(target);
+    const replacingOtherArtwork = existingAssets.some(
+      (asset) =>
+        asset.sourceRelativePath !== sourceRelativePath,
+    );
+
+    if (
+      replacingOtherArtwork &&
+      !window.confirm(
+        `Replace the current front artwork for ${targetLabel(target)}?`,
+      )
+    ) {
+      return;
+    }
+
+    const updates = buildFrontArtworkAssignmentUpdates(
+      imageAssets,
+      sourceRelativePath,
+      target,
+    );
+
+    for (const update of updates) {
+      onChange(update.sourceRelativePath, {
+        include: update.include,
+        artworkAssignments: update.artworkAssignments,
+      });
+    }
+  };
+
+  const removeArtworkFromTarget = (
+    sourceRelativePath: string,
+    target: ArtworkAssignmentTarget,
+  ) => {
+    const asset = imageAssets.find(
+      (item) =>
+        item.sourceRelativePath === sourceRelativePath,
+    );
+
+    if (!asset) {
+      return;
+    }
+
+    const update = removeFrontArtworkTarget(
+      asset,
+      target,
+    );
+
+    onChange(update.sourceRelativePath, {
+      include: update.include,
+      artworkAssignments: update.artworkAssignments,
+    });
+  };
+
+  const handleArtworkDrop = (
+    event: DragEvent<HTMLElement>,
+    target: ArtworkAssignmentTarget,
+  ) => {
+    event.preventDefault();
+    const sourceRelativePath =
+      event.dataTransfer.getData("text/plain");
+
+    if (sourceRelativePath) {
+      assignArtworkToTarget(
+        sourceRelativePath,
+        target,
+      );
+    }
+  };
+
+  const renderAssignedArtwork = (
+    target: ArtworkAssignmentTarget,
+  ) => {
+    const assignedAssets = assignedAssetsForTarget(target);
+
+    if (assignedAssets.length === 0) {
+      return (
+        <span className="ingest-artwork-drop-empty">
+          Drop artwork here
+          <small>
+            {selectedArtworkPath
+              ? "Use Assign selected to place the selected artwork here."
+              : "Or select an artwork tile, then use Assign selected."}
+          </small>
+        </span>
+      );
+    }
+
+    return (
+      <div className="ingest-artwork-target-assets">
+        {assignedAssets.map((asset) => {
+          const sourceStatusPath =
+            asset.embeddedArtwork?.audioSourceRelativePath ??
+            asset.sourceRelativePath;
+          const status = sourceStatusForPath(
+            sourceStatuses,
+            sourceStatusPath,
+          );
+
+          return (
+            <div
+              key={asset.sourceRelativePath}
+              className="ingest-artwork-target-asset"
+            >
+              <ArtworkPreview
+                key={`${asset.sourceRelativePath}:${status?.modifiedAt ?? ""}`}
+                sourceRelativePath={asset.sourceRelativePath}
+                modifiedAt={status?.modifiedAt}
+                embeddedArtwork={asset.embeddedArtwork}
+                label={sourceFilename(asset.sourceRelativePath)}
+              />
+              <span>
+                <strong>
+                  {sourceFilename(asset.sourceRelativePath)}
+                </strong>
+                <small>front cover</small>
+              </span>
+              <button
+                type="button"
+                className="link-button danger-text"
+                aria-label={`Remove ${sourceFilename(asset.sourceRelativePath)} from ${targetLabel(target)}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  removeArtworkFromTarget(
+                    asset.sourceRelativePath,
+                    target,
+                  );
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderArtworkTarget = (
+    target: ArtworkAssignmentTarget,
+    heading: string,
+    subheading: string,
+  ) => {
+    const assignedAssets = assignedAssetsForTarget(target);
+
+    return (
+      <div
+        className={[
+          "ingest-artwork-target-row",
+          target.scope === "release"
+            ? "release"
+            : "track",
+        ].join(" ")}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "copy";
+        }}
+        onDrop={(event) =>
+          handleArtworkDrop(event, target)
+        }
+      >
+        <div className="ingest-artwork-target-label">
+          <strong>{heading}</strong>
+          <span>{subheading}</span>
+        </div>
+        <div
+          className="ingest-artwork-target-dropzone"
+          aria-label={`Artwork destination for ${targetLabel(target)}`}
+        >
+          {renderAssignedArtwork(target)}
+          {selectedArtworkPath && (
+            <button
+              type="button"
+              className="ingest-artwork-target-assign-button"
+              onClick={() =>
+                assignArtworkToTarget(
+                  selectedArtworkPath,
+                  target,
+                )
+              }
+            >
+              {assignedAssets.length > 0
+                ? "Replace with selected"
+                : "Assign selected"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="ingest-asset-workflow">
-      {assets.length === 0 ? (
-        <p className="metadata-empty-value">
-          This candidate has no attached image
-          or text sidecars yet. Add a file to the
-          candidate folder and rescan, or attach a
-          loose file from the drop point below.
-        </p>
-      ) : (
-        <div className="ingest-table-scroll">
-          <table className="ingest-table ingest-builder-asset-table">
-            <thead>
-              <tr>
-                <th scope="col">Source</th>
-                <th scope="col">Preview</th>
-                <th scope="col">Use / copy</th>
-                <th scope="col">Source state</th>
-                <th scope="col">Artwork assignments</th>
-                <th scope="col">
-                  Physical release-relative copy
-                </th>
-                <th scope="col">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {assets.map((asset) => {
+      <section className="ingest-artwork-assignment-workspace">
+        <header className="ingest-artwork-workspace-header">
+          <div>
+            <h4>Available artwork</h4>
+            <p>
+              Drag an image onto the release or a track below. You can
+              also select a tile and then click a destination row.
+              Folder-derived assignments are already shown on their
+              inferred destinations and remain editable.
+            </p>
+          </div>
+          <span className="badge">
+            {imageAssets.length} image{imageAssets.length === 1 ? "" : "s"}
+          </span>
+        </header>
+
+        {imageAssets.length === 0 ? (
+          <p className="metadata-empty-value">
+            This candidate has no attached artwork sources yet.
+          </p>
+        ) : (
+          <div className="ingest-artwork-tile-grid">
+            {imageAssets.map((asset) => {
+              const sourceStatusPath =
+                asset.embeddedArtwork?.audioSourceRelativePath ??
+                asset.sourceRelativePath;
+              const status = sourceStatusForPath(
+                sourceStatuses,
+                sourceStatusPath,
+              );
+              const sourceMissing =
+                status?.state === "missing";
+              const selected =
+                selectedArtworkPath === asset.sourceRelativePath;
+
+              return (
+                <article
+                  key={asset.sourceRelativePath}
+                  className={[
+                    "ingest-artwork-tile",
+                    selected ? "selected" : "",
+                    sourceMissing ? "missing" : "",
+                    focusedSourcePath === asset.sourceRelativePath
+                      ? "focused"
+                      : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  data-ingest-source-path={asset.sourceRelativePath}
+                  role="button"
+                  tabIndex={sourceMissing ? -1 : 0}
+                  aria-disabled={sourceMissing}
+                  aria-pressed={selected}
+                  aria-label={`Select artwork ${sourceFilename(asset.sourceRelativePath)} for assignment`}
+                  draggable={!sourceMissing}
+                  onClick={() => {
+                    if (!sourceMissing) {
+                      setSelectedArtworkPath(
+                        selected
+                          ? null
+                          : asset.sourceRelativePath,
+                      );
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      sourceMissing ||
+                      (event.key !== "Enter" &&
+                        event.key !== " ")
+                    ) {
+                      return;
+                    }
+
+                    event.preventDefault();
+                    setSelectedArtworkPath(
+                      selected
+                        ? null
+                        : asset.sourceRelativePath,
+                    );
+                  }}
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "copy";
+                    event.dataTransfer.setData(
+                      "text/plain",
+                      asset.sourceRelativePath,
+                    );
+                    setSelectedArtworkPath(
+                      asset.sourceRelativePath,
+                    );
+                  }}
+                >
+                  <div className="ingest-artwork-tile-preview">
+                    <ArtworkPreview
+                      key={`${asset.sourceRelativePath}:${status?.modifiedAt ?? ""}`}
+                      sourceRelativePath={asset.sourceRelativePath}
+                      modifiedAt={status?.modifiedAt}
+                      embeddedArtwork={asset.embeddedArtwork}
+                      label={sourceFilename(asset.sourceRelativePath)}
+                      thumbnailOnly
+                    />
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="ingest-artwork-target-list">
+          <header>
+            <div>
+              <h4>Release and track artwork</h4>
+              <p>
+                The release row assigns album artwork. Track rows assign
+                track-specific artwork using the track numbers and titles
+                confirmed in the previous step.
+              </p>
+            </div>
+            {selectedArtworkPath && (
+              <span className="badge complete">
+                Selected: {sourceFilename(selectedArtworkPath)}
+              </span>
+            )}
+          </header>
+
+          {renderArtworkTarget(
+            { scope: "release" },
+            releaseTitle || "Untitled release",
+            ["Release", releaseArtist]
+              .filter(Boolean)
+              .join(" · "),
+          )}
+
+          {includedTracks.map((track) =>
+            renderArtworkTarget(
+              {
+                scope: "track",
+                trackSourceRelativePath:
+                  track.sourceRelativePath,
+              },
+              `${String(track.trackNumber).padStart(2, "0")} · ${track.title || "Untitled"}`,
+              track.version.trim()
+                ? `Track · ${track.version.trim()}`
+                : "Track",
+            ),
+          )}
+        </div>
+
+        {imageAssets.length > 0 && (
+          <details className="ingest-artwork-advanced-assignments">
+            <summary>
+              Advanced artwork roles & multi-target assignments
+            </summary>
+            <p>
+              Use these controls for back covers, alternates, booklets,
+              promotional images, or one source intentionally assigned to
+              several tracks. Front-cover assignments made here stay in
+              sync with the visual release/track rows above.
+            </p>
+            <div className="ingest-artwork-advanced-grid">
+              {imageAssets.map((asset) => {
                 const sourceStatusPath =
                   asset.embeddedArtwork?.audioSourceRelativePath ??
                   asset.sourceRelativePath;
@@ -3269,124 +3701,163 @@ function AssetDraftTable({
                   status?.state === "missing";
 
                 return (
-                  <tr
+                  <section
                     key={asset.sourceRelativePath}
-                    data-ingest-source-path={
-                      asset.sourceRelativePath
-                    }
-                    tabIndex={-1}
-                    className={[
-                      sourceMissing
-                        ? "ingest-source-missing-row"
-                        : "",
-                      focusedSourcePath ===
-                      asset.sourceRelativePath
-                        ? "ingest-source-focused-row"
-                        : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ") || undefined}
+                    className="ingest-artwork-advanced-item"
                   >
-                    <th
-                      scope="row"
-                      className="ingest-sticky-column"
-                    >
-                      <code>
-                        {asset.embeddedArtwork
-                          ? `Embedded cover · ${asset.embeddedArtwork.audioSourceRelativePath}`
-                          : asset.sourceRelativePath}
-                      </code>
-                    </th>
-                    <td className="ingest-artwork-preview-cell">
-                      {asset.mediaKind === "image" ? (
-                        <ArtworkPreview
-                          key={`${asset.sourceRelativePath}:${status?.modifiedAt ?? ""}`}
-                          sourceRelativePath={asset.sourceRelativePath}
-                          modifiedAt={status?.modifiedAt}
-                          embeddedArtwork={asset.embeddedArtwork}
-                        />
-                      ) : (
-                        <span className="ingest-artwork-preview-unavailable">
-                          Text
+                    <header>
+                      <strong>
+                        {sourceFilename(asset.sourceRelativePath)}
+                      </strong>
+                      {asset.embeddedArtwork && (
+                        <span className="badge ingest-artwork-embedded-badge">
+                          Embedded cover
                         </span>
                       )}
-                    </td>
-                    <td>
-                      <label className="ingest-inline-checkbox">
-                        <input
-                          type="checkbox"
-                          aria-label={`Include ${asset.sourceRelativePath}`}
-                          checked={asset.include}
-                          disabled={sourceMissing}
-                          onChange={(event) => {
-                            const include =
-                              event.target.checked;
-                            const artworkAssignments =
-                              asset.mediaKind === "image"
-                                ? include
-                                  ? asset.artworkAssignments.length > 0
-                                    ? asset.artworkAssignments
-                                    : [defaultReleaseArtworkAssignment()]
-                                  : []
-                                : asset.artworkAssignments;
-
-                            onChange(
-                              asset.sourceRelativePath,
-                              {
-                                include,
-                                artworkAssignments,
-                              },
-                            );
-                          }}
+                      <code>{asset.sourceRelativePath}</code>
+                      <div className="ingest-artwork-advanced-source-controls">
+                        <SourceReviewCell
+                          status={status}
+                          onReviewed={(reviewed) =>
+                            onSourceReviewed(
+                              sourceStatusPath,
+                              reviewed,
+                            )
+                          }
                         />
-                        {asset.mediaKind === "image"
-                          ? asset.include
-                            ? "Used as artwork"
-                            : "Not used"
-                          : asset.include
-                            ? "Copy text"
-                            : "Skip text"}
-                      </label>
-                    </td>
-                    <td>
-                      <SourceReviewCell
-                        status={status}
-                        onReviewed={(reviewed) =>
-                          onSourceReviewed(
-                            sourceStatusPath,
-                            reviewed,
-                          )
-                        }
-                      />
-                    </td>
-                    <td>
-                      <ArtworkAssignmentsEditor
-                        asset={asset}
-                        tracks={tracks}
-                        disabled={sourceMissing}
-                        onChange={(patch) =>
-                          onChange(
-                            asset.sourceRelativePath,
-                            patch,
-                          )
-                        }
-                      />
-                    </td>
-                    <td>
-                      {asset.mediaKind === "image" ? (
-                        <span className="ingest-derived-destination">
-                          Derived from artwork assignments
-                        </span>
-                      ) : (
+
+                        {sourceMissing ? (
+                          <button
+                            type="button"
+                            className="danger-button"
+                            onClick={() =>
+                              onRemoveAsset(
+                                asset.sourceRelativePath,
+                              )
+                            }
+                          >
+                            Remove missing source
+                          </button>
+                        ) : status?.attached ? (
+                          <button
+                            type="button"
+                            disabled={asset.include}
+                            title={
+                              asset.include
+                                ? "Remove artwork assignments before detaching this loose file."
+                                : undefined
+                            }
+                            onClick={() =>
+                              onDetachFile(
+                                asset.sourceRelativePath,
+                              )
+                            }
+                          >
+                            Detach
+                          </button>
+                        ) : null}
+                      </div>
+                    </header>
+                    <ArtworkAssignmentsEditor
+                      asset={asset}
+                      tracks={tracks}
+                      disabled={status?.state === "missing"}
+                      onChange={(patch) =>
+                        onChange(
+                          asset.sourceRelativePath,
+                          patch,
+                        )
+                      }
+                    />
+                  </section>
+                );
+              })}
+            </div>
+          </details>
+        )}
+      </section>
+
+      {textAssets.length > 0 && (
+        <section className="ingest-other-files-section">
+          <header>
+            <div>
+              <h4>Other files</h4>
+              <p>
+                Text sidecars remain simple reviewed copies. Their
+                contents are not interpreted during ingest.
+              </p>
+            </div>
+            <span className="badge">
+              {textAssets.length} text file{textAssets.length === 1 ? "" : "s"}
+            </span>
+          </header>
+          <div className="ingest-table-scroll">
+            <table className="ingest-table">
+              <thead>
+                <tr>
+                  <th scope="col">Source</th>
+                  <th scope="col">Use / copy</th>
+                  <th scope="col">Source state</th>
+                  <th scope="col">Physical release-relative copy</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {textAssets.map((asset) => {
+                  const status = sourceStatusForPath(
+                    sourceStatuses,
+                    asset.sourceRelativePath,
+                  );
+                  const sourceMissing =
+                    status?.state === "missing";
+
+                  return (
+                    <tr
+                      key={asset.sourceRelativePath}
+                      data-ingest-source-path={asset.sourceRelativePath}
+                      tabIndex={-1}
+                      className={
+                        focusedSourcePath === asset.sourceRelativePath
+                          ? "ingest-source-focused-row"
+                          : undefined
+                      }
+                    >
+                      <th scope="row" className="ingest-sticky-column">
+                        <code>{asset.sourceRelativePath}</code>
+                      </th>
+                      <td>
+                        <label className="ingest-inline-checkbox">
+                          <input
+                            type="checkbox"
+                            aria-label={`Include ${asset.sourceRelativePath}`}
+                            checked={asset.include}
+                            disabled={sourceMissing}
+                            onChange={(event) =>
+                              onChange(
+                                asset.sourceRelativePath,
+                                { include: event.target.checked },
+                              )
+                            }
+                          />
+                          {asset.include ? "Copy text" : "Skip text"}
+                        </label>
+                      </td>
+                      <td>
+                        <SourceReviewCell
+                          status={status}
+                          onReviewed={(reviewed) =>
+                            onSourceReviewed(
+                              asset.sourceRelativePath,
+                              reviewed,
+                            )
+                          }
+                        />
+                      </td>
+                      <td>
                         <input
                           type="text"
-                          value={
-                            asset.destinationRelativePath
-                          }
-                          disabled={
-                            !asset.include ||
-                            sourceMissing
-                          }
+                          value={asset.destinationRelativePath}
+                          disabled={!asset.include || sourceMissing}
                           spellCheck={false}
                           aria-label={`Destination for ${asset.sourceRelativePath}`}
                           onChange={(event) =>
@@ -3399,52 +3870,48 @@ function AssetDraftTable({
                             )
                           }
                         />
-                      )}
-                    </td>
-                    <td>
-                      {sourceMissing ? (
-                        <button
-                          type="button"
-                          className="danger-button ingest-remove-draft-button"
-                          title={
-                            "Remove this missing asset from the draft. Nothing is deleted from ingest-drop."
-                          }
-                          aria-label="Remove missing asset from draft"
-                          onClick={() =>
-                            onRemoveAsset(
-                              asset.sourceRelativePath,
-                            )
-                          }
-                        >
-                          <span aria-hidden="true">×</span>
-                        </button>
-                      ) : status?.attached ? (
-                        <button
-                          type="button"
-                          disabled={asset.include}
-                          title={
-                            asset.include
-                              ? "Remove artwork assignments or uncheck Use before detaching this loose file."
-                              : undefined
-                          }
-                          onClick={() =>
-                            onDetachFile(
-                              asset.sourceRelativePath,
-                            )
-                          }
-                        >
-                          Detach
-                        </button>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td>
+                        {sourceMissing ? (
+                          <button
+                            type="button"
+                            className="danger-button ingest-remove-draft-button"
+                            title={
+                              "Remove this missing asset from the draft. Nothing is deleted from ingest-drop."
+                            }
+                            aria-label="Remove missing asset from draft"
+                            onClick={() =>
+                              onRemoveAsset(asset.sourceRelativePath)
+                            }
+                          >
+                            <span aria-hidden="true">×</span>
+                          </button>
+                        ) : status?.attached ? (
+                          <button
+                            type="button"
+                            disabled={asset.include}
+                            title={
+                              asset.include
+                                ? "Uncheck Copy text before detaching this loose file."
+                                : undefined
+                            }
+                            onClick={() =>
+                              onDetachFile(asset.sourceRelativePath)
+                            }
+                          >
+                            Detach
+                          </button>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
 
       <section className="ingest-loose-attachments">
@@ -3452,10 +3919,9 @@ function AssetDraftTable({
           <div>
             <h4>Loose files available to attach</h4>
             <p>
-              Root-level images and text files remain
-              separate ingest candidates until you attach
-              them to this draft. Attaching does not move
-              or modify the source.
+              Root-level images and text files remain separate ingest
+              candidates until you attach them to this draft. Attaching
+              does not move or modify the source.
             </p>
           </div>
           <span className="badge">
@@ -3465,9 +3931,8 @@ function AssetDraftTable({
 
         {availableAttachments.length === 0 ? (
           <p className="metadata-empty-value">
-            No unattached loose image or text files are
-            currently available. Add one to ingest-drop
-            and choose Rescan candidate.
+            No unattached loose image or text files are currently
+            available. Add one to ingest-drop and choose Rescan candidate.
           </p>
         ) : (
           <div className="ingest-table-scroll">
@@ -3484,10 +3949,7 @@ function AssetDraftTable({
               <tbody>
                 {availableAttachments.map((file) => (
                   <tr key={file.relativePath}>
-                    <th
-                      scope="row"
-                      className="ingest-sticky-column"
-                    >
+                    <th scope="row" className="ingest-sticky-column">
                       <code>{file.relativePath}</code>
                     </th>
                     <td className="ingest-artwork-preview-cell">
@@ -3504,15 +3966,11 @@ function AssetDraftTable({
                       )}
                     </td>
                     <td>{file.mediaKind}</td>
-                    <td>
-                      {formatByteSize(file.sizeBytes)}
-                    </td>
+                    <td>{formatByteSize(file.sizeBytes)}</td>
                     <td>
                       <button
                         type="button"
-                        onClick={() =>
-                          onAttachFile(file)
-                        }
+                        onClick={() => onAttachFile(file)}
                       >
                         Attach to draft
                       </button>
@@ -3524,6 +3982,269 @@ function AssetDraftTable({
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function reviewSourceFilename(
+  sourceRelativePath: string,
+): string {
+  const segments = sourceRelativePath
+    .split("/")
+    .filter(Boolean);
+
+  return segments[segments.length - 1] ?? sourceRelativePath;
+}
+
+function reviewIncludedArtwork(
+  draft: IngestBuildDraft,
+): IngestBuildAssetDraft[] {
+  return draft.assets.filter(
+    (asset) =>
+      asset.mediaKind === "image" &&
+      asset.include,
+  );
+}
+
+function reviewReleaseFrontArtwork(
+  draft: IngestBuildDraft,
+): IngestBuildAssetDraft | undefined {
+  return reviewIncludedArtwork(draft).find(
+    (asset) =>
+      asset.artworkAssignments.some(
+        (assignment) =>
+          assignment.scope === "release" &&
+          assignment.role === "front_cover",
+      ),
+  );
+}
+
+function reviewTrackFrontArtwork(
+  draft: IngestBuildDraft,
+  trackSourceRelativePath: string,
+): {
+  asset?: IngestBuildAssetDraft;
+  inherited: boolean;
+} {
+  const trackArtwork = reviewIncludedArtwork(draft).find(
+    (asset) =>
+      asset.artworkAssignments.some(
+        (assignment) =>
+          assignment.scope === "track" &&
+          assignment.role === "front_cover" &&
+          assignment.trackSourceRelativePaths.includes(
+            trackSourceRelativePath,
+          ),
+      ),
+  );
+
+  if (trackArtwork) {
+    return {
+      asset: trackArtwork,
+      inherited: false,
+    };
+  }
+
+  return {
+    asset: reviewReleaseFrontArtwork(draft),
+    inherited: true,
+  };
+}
+
+function reviewArtworkSourceStatus(
+  asset: IngestBuildAssetDraft | undefined,
+  sourceStatuses: IngestDraftSourceStatus[],
+): IngestDraftSourceStatus | undefined {
+  if (!asset) {
+    return undefined;
+  }
+
+  return sourceStatusForPath(
+    sourceStatuses,
+    asset.embeddedArtwork?.audioSourceRelativePath ??
+      asset.sourceRelativePath,
+  );
+}
+
+function ReviewArtworkThumbnail({
+  asset,
+  sourceStatuses,
+  label,
+}: {
+  asset?: IngestBuildAssetDraft;
+  sourceStatuses: IngestDraftSourceStatus[];
+  label: string;
+}) {
+  if (!asset) {
+    return (
+      <span
+        className="ingest-review-artwork-empty"
+        role="img"
+        aria-label={`No front artwork assigned for ${label}`}
+      >
+        <span aria-hidden="true">—</span>
+      </span>
+    );
+  }
+
+  const status = reviewArtworkSourceStatus(
+    asset,
+    sourceStatuses,
+  );
+
+  if (status?.state === "missing") {
+    return (
+      <span
+        className="ingest-review-artwork-empty missing"
+        role="img"
+        aria-label={`Artwork source missing for ${label}`}
+      >
+        <span aria-hidden="true">×</span>
+      </span>
+    );
+  }
+
+  return (
+    <ArtworkPreview
+      key={`${asset.sourceRelativePath}:${status?.modifiedAt ?? ""}`}
+      sourceRelativePath={asset.sourceRelativePath}
+      modifiedAt={status?.modifiedAt}
+      embeddedArtwork={asset.embeddedArtwork}
+      label={label}
+      thumbnailOnly
+    />
+  );
+}
+
+function BuildPlanItemsTable({
+  items,
+  preview,
+  audioPreviewControls,
+  emptyLabel,
+}: {
+  items: IngestBuildPreview["items"];
+  preview: IngestBuildPreview;
+  audioPreviewControls: IngestAudioPreviewControls;
+  emptyLabel: string;
+}) {
+  if (items.length === 0) {
+    return (
+      <p className="metadata-empty-value">
+        {emptyLabel}
+      </p>
+    );
+  }
+
+  return (
+    <div className="ingest-table-scroll">
+      <table className="ingest-table ingest-build-plan-table">
+        <thead>
+          <tr>
+            <th scope="col">Action</th>
+            <th scope="col">Source</th>
+            <th scope="col">Relative destination</th>
+            <th scope="col">Adjustment / reason</th>
+            <th
+              scope="col"
+              className="ingest-plan-kind-column"
+            >
+              Kind
+            </th>
+            <th scope="col">Roles</th>
+            <th
+              scope="col"
+              className="numeric"
+            >
+              Size
+            </th>
+            <th
+              scope="col"
+              className="ingest-plan-status-column"
+            >
+              Status
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, index) => (
+            <tr
+              key={`${item.destinationRelativePath}:${index}`}
+            >
+              <td>
+                <span
+                  className={`badge ingest-plan-action ${item.action}`}
+                >
+                  {item.action}
+                </span>
+              </td>
+              <td className="ingest-build-plan-source-cell">
+                <div>
+                  {item.sourceRelativePath &&
+                    item.mediaKind === "audio" && (
+                      <IngestAudioPreviewButton
+                        sourceRelativePath={item.sourceRelativePath}
+                        controls={audioPreviewControls}
+                      />
+                    )}
+                  {item.sourceRelativePath ? (
+                    <code>
+                      {item.sourceRelativePath}
+                    </code>
+                  ) : (
+                    "—"
+                  )}
+                </div>
+              </td>
+              <th
+                scope="row"
+                className="ingest-sticky-column"
+              >
+                <code
+                  title={item.destinationRelativePath}
+                >
+                  {stagingDestinationPathForDisplay(
+                    item.destinationRelativePath,
+                    preview.releaseRelativePath,
+                  )}
+                </code>
+              </th>
+              <td title={item.reason}>
+                {item.adjustment ?? item.reason}
+              </td>
+              <td className="ingest-plan-kind-cell">
+                <PlanKindIcon
+                  kind={item.kind}
+                  mediaKind={item.mediaKind}
+                />
+              </td>
+              <td>
+                {item.logicalRoles?.join(", ") ?? "—"}
+              </td>
+              <td className="numeric">
+                {item.sizeBytes !== undefined
+                  ? formatByteSize(item.sizeBytes)
+                  : "—"}
+              </td>
+              <td className="ingest-plan-status-cell">
+                <span
+                  className={`ingest-plan-status-icon ${item.action === "blocked" ? "blocked" : "ready"}`}
+                  role="img"
+                  aria-label={
+                    item.action === "blocked"
+                      ? "Blocked"
+                      : "Ready"
+                  }
+                  title={item.reason}
+                >
+                  <span aria-hidden="true">
+                    {item.action === "blocked" ? "×" : "✓"}
+                  </span>
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -3588,10 +4309,329 @@ function BuildReview({
   );
   const assignmentIssues =
     artworkAssignmentIssues(draft);
+  const includedTracks = [...draft.tracks]
+    .filter((track) => track.include)
+    .sort((left, right) =>
+      left.trackNumber - right.trackNumber,
+    );
+  const includedArtwork = reviewIncludedArtwork(draft);
+  const releaseFrontArtwork =
+    reviewReleaseFrontArtwork(draft);
+  const releaseArtworkStatus =
+    reviewArtworkSourceStatus(
+      releaseFrontArtwork,
+      sourceStatuses,
+    );
+  const missingTrackSources = includedTracks.filter(
+    (track) =>
+      sourceStatusForPath(
+        sourceStatuses,
+        track.sourceRelativePath,
+      )?.state === "missing",
+  );
+  const trackArtworkCoverage = includedTracks.filter(
+    (track) => {
+      const effectiveArtwork = reviewTrackFrontArtwork(
+        draft,
+        track.sourceRelativePath,
+      ).asset;
+
+      return Boolean(
+        effectiveArtwork &&
+        reviewArtworkSourceStatus(
+          effectiveArtwork,
+          sourceStatuses,
+        )?.state !== "missing",
+      );
+    },
+  ).length;
+  const pendingTrackReviewPaths = new Set(
+    blockingSources
+      .filter((status) =>
+        trackPaths.has(status.sourceRelativePath),
+      )
+      .map((status) => status.sourceRelativePath),
+  );
+  const releaseIdentityReady = Boolean(
+    draft.releaseId.trim() &&
+    draft.releaseTitle.trim() &&
+    draft.releaseArtist.trim() &&
+    draft.releaseDate.trim() &&
+    draft.releaseType.trim(),
+  );
+  const destinationLabel = preview?.releaseRelativePath ??
+    `releases/${draft.releaseId || "…"}`;
+  const filesystemItems = preview?.items.filter(
+    (item) => item.kind !== "toml",
+  ) ?? [];
+  const metadataItems = preview?.items.filter(
+    (item) => item.kind === "toml",
+  ) ?? [];
 
   return (
     <div className="ingest-build-review">
-      <ArtworkAssignmentSummary draft={draft} />
+      <section className="ingest-review-release-card">
+        <div className="ingest-review-release-artwork">
+          <ReviewArtworkThumbnail
+            asset={releaseFrontArtwork}
+            sourceStatuses={sourceStatuses}
+            label={`${draft.releaseTitle || "Untitled release"} release artwork`}
+          />
+        </div>
+        <div className="ingest-review-release-identity">
+          <div className="ingest-review-release-heading">
+            <div>
+              <span className="ingest-review-eyebrow">
+                Release review
+              </span>
+              <h3>{draft.releaseTitle || "Untitled release"}</h3>
+              <p>{draft.releaseArtist || "Unknown artist"}</p>
+            </div>
+            <span className="badge">
+              {operation === "update" ? "Update" : "Create"}
+            </span>
+          </div>
+          <div className="ingest-review-release-facts">
+            <span>{draft.releaseDate || "No release date"}</span>
+            <span>{draft.releaseType || "No release type"}</span>
+            <span>
+              {includedTracks.length} track{includedTracks.length === 1 ? "" : "s"}
+            </span>
+            <span>
+              {includedArtwork.length} artwork source{includedArtwork.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div className="ingest-review-destination">
+            <span>Destination</span>
+            <code>{destinationLabel}</code>
+          </div>
+        </div>
+      </section>
+
+      <section className="ingest-review-track-panel">
+        <header className="ingest-review-section-header">
+          <div>
+            <h4>Tracks</h4>
+            <p>
+              Confirm titles, source audio, and the effective front artwork each track will use.
+            </p>
+          </div>
+          <span className="badge">
+            {includedTracks.length} included
+          </span>
+        </header>
+
+        {includedTracks.length === 0 ? (
+          <p className="metadata-empty-value ingest-review-empty-state">
+            No tracks are included in this staging draft.
+          </p>
+        ) : (
+          <div className="ingest-table-scroll">
+            <table className="ingest-table ingest-review-track-table">
+              <thead>
+                <tr>
+                  <th scope="col" className="ingest-review-track-art-column">Art</th>
+                  <th scope="col" className="numeric">#</th>
+                  <th scope="col">Track</th>
+                  <th scope="col">Source</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {includedTracks.map((track) => {
+                  const trackStatus = sourceStatusForPath(
+                    sourceStatuses,
+                    track.sourceRelativePath,
+                  );
+                  const effectiveArtwork = reviewTrackFrontArtwork(
+                    draft,
+                    track.sourceRelativePath,
+                  );
+                  const effectiveArtworkStatus = reviewArtworkSourceStatus(
+                    effectiveArtwork.asset,
+                    sourceStatuses,
+                  );
+                  const sourceMissing = trackStatus?.state === "missing";
+                  const artworkMissing =
+                    effectiveArtworkStatus?.state === "missing";
+                  const reviewPending = pendingTrackReviewPaths.has(
+                    track.sourceRelativePath,
+                  );
+                  const statusLabel = sourceMissing
+                    ? "Missing source"
+                    : reviewPending
+                      ? "Review source"
+                      : artworkMissing
+                        ? "Artwork missing"
+                        : "Ready";
+                  const statusClass = sourceMissing || artworkMissing
+                    ? "missing"
+                    : reviewPending
+                      ? "ingest-review-status-pending"
+                      : "complete";
+
+                  return (
+                    <tr key={track.sourceRelativePath}>
+                      <td className="ingest-review-track-artwork-cell">
+                        <div className="ingest-review-track-artwork">
+                          <ReviewArtworkThumbnail
+                            asset={effectiveArtwork.asset}
+                            sourceStatuses={sourceStatuses}
+                            label={`Track ${track.trackNumber} artwork`}
+                          />
+                        </div>
+                        <small>
+                          {effectiveArtwork.asset
+                            ? effectiveArtwork.inherited
+                              ? "Release"
+                              : "Track"
+                            : "No front art"}
+                        </small>
+                      </td>
+                      <td className="numeric ingest-review-track-number">
+                        {track.trackNumber}
+                      </td>
+                      <th scope="row" className="ingest-review-track-title-cell">
+                        <strong>{track.title || "Untitled"}</strong>
+                        {track.version.trim() && (
+                          <span>{track.version.trim()}</span>
+                        )}
+                        <small>
+                          {track.artist || draft.releaseArtist || "Unknown artist"}
+                          {track.date ? ` · ${track.date}` : ""}
+                        </small>
+                      </th>
+                      <td className="ingest-review-track-source-cell">
+                        <div>
+                          <IngestAudioPreviewButton
+                            sourceRelativePath={track.sourceRelativePath}
+                            controls={audioPreviewControls}
+                            disabled={sourceMissing}
+                          />
+                          <code title={track.sourceRelativePath}>
+                            {reviewSourceFilename(track.sourceRelativePath)}
+                          </code>
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`badge ${statusClass}`}>
+                          {statusLabel}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section className="ingest-review-preflight">
+        <header className="ingest-review-section-header">
+          <div>
+            <h4>Preflight</h4>
+            <p>
+              Resolve source decisions first, then generate the server-validated destination plan before writing files.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={
+              previewLoading ||
+              buildLoading ||
+              blockingSources.length > 0 ||
+              assignmentIssues.length > 0
+            }
+            onClick={onPreview}
+          >
+            {previewLoading
+              ? "Validating plan…"
+              : preview
+                ? operation === "update"
+                  ? "Refresh update plan"
+                  : "Refresh build plan"
+                : operation === "update"
+                  ? "Preview update plan"
+                  : "Preview build plan"}
+          </button>
+        </header>
+
+        <div className="ingest-review-preflight-grid">
+          <div>
+            <span className={`ingest-review-preflight-icon ${releaseIdentityReady ? "ready" : "blocked"}`} aria-hidden="true">
+              {releaseIdentityReady ? "✓" : "×"}
+            </span>
+            <strong>Release identity</strong>
+            <small>
+              {releaseIdentityReady ? "Title, artist, date, type, and directory ID present" : "Release identity is incomplete"}
+            </small>
+          </div>
+          <div>
+            <span className={`ingest-review-preflight-icon ${missingTrackSources.length === 0 ? "ready" : "blocked"}`} aria-hidden="true">
+              {missingTrackSources.length === 0 ? "✓" : "×"}
+            </span>
+            <strong>Track sources</strong>
+            <small>
+              {missingTrackSources.length === 0
+                ? `${includedTracks.length} included source${includedTracks.length === 1 ? "" : "s"} available`
+                : `${missingTrackSources.length} included source${missingTrackSources.length === 1 ? " is" : "s are"} missing`}
+            </small>
+          </div>
+          <div>
+            <span
+              className={`ingest-review-preflight-icon ${
+                releaseFrontArtwork
+                  ? releaseArtworkStatus?.state === "missing"
+                    ? "blocked"
+                    : "ready"
+                  : "neutral"
+              }`}
+              aria-hidden="true"
+            >
+              {releaseFrontArtwork
+                ? releaseArtworkStatus?.state === "missing"
+                  ? "×"
+                  : "✓"
+                : "•"}
+            </span>
+            <strong>Artwork coverage</strong>
+            <small>
+              {releaseFrontArtwork
+                ? releaseArtworkStatus?.state === "missing"
+                  ? "Release front art source is missing"
+                  : "Release front art assigned"
+                : "No release front art"}
+              {` · ${trackArtworkCoverage}/${includedTracks.length} tracks covered`}
+            </small>
+          </div>
+          <div>
+            <span className={`ingest-review-preflight-icon ${blockingSources.length === 0 && assignmentIssues.length === 0 ? "ready" : "blocked"}`} aria-hidden="true">
+              {blockingSources.length === 0 && assignmentIssues.length === 0 ? "✓" : "×"}
+            </span>
+            <strong>Source review</strong>
+            <small>
+              {blockingSources.length === 0 && assignmentIssues.length === 0
+                ? "No unresolved source or artwork decisions"
+                : `${blockingSources.length} source decision${blockingSources.length === 1 ? "" : "s"} · ${assignmentIssues.length} artwork issue${assignmentIssues.length === 1 ? "" : "s"}`}
+            </small>
+          </div>
+          <div>
+            <span className={`ingest-review-preflight-icon ${preview ? preview.summary.blockedCount === 0 ? "ready" : "blocked" : "neutral"}`} aria-hidden="true">
+              {preview ? preview.summary.blockedCount === 0 ? "✓" : "×" : "•"}
+            </span>
+            <strong>Destination plan</strong>
+            <small>
+              {!preview
+                ? "Not yet server-validated"
+                : preview.summary.blockedCount === 0
+                  ? `No blocked destinations · ${formatByteSize(preview.summary.totalCopyBytes)} to copy`
+                  : `${preview.summary.blockedCount} blocked destination${preview.summary.blockedCount === 1 ? "" : "s"}`}
+            </small>
+          </div>
+        </div>
+      </section>
 
       {missingAssets.length > 0 && (
         <section className="warning-panel ingest-missing-draft-assets">
@@ -3711,7 +4751,7 @@ function BuildReview({
                       : "Include file";
                   const reviewLabel = isTrack
                     ? "Review in Tracks"
-                    : "Review in Other Files";
+                    : "Review in Artwork & files";
 
                   return (
                     <tr key={status.sourceRelativePath}>
@@ -3823,200 +4863,127 @@ function BuildReview({
         </section>
       )}
 
-      <button
-        type="button"
-        className="primary-button"
-        disabled={
-          previewLoading ||
-          buildLoading ||
-          blockingSources.length > 0 ||
-          assignmentIssues.length > 0
-        }
-        onClick={onPreview}
-      >
-        {previewLoading
-          ? "Validating plan…"
-          : preview
-            ? operation === "update"
-              ? "Refresh update plan"
-              : "Refresh build plan"
-            : operation === "update"
-              ? "Preview update plan"
-              : "Preview build plan"}
-      </button>
-
-      {preview && (
-        <>
-          <dl className="ingest-build-summary">
+      {preview && preview.warnings.length > 0 && (
+        <section className="warning-panel ingest-review-plan-warnings">
+          <header>
             <div>
-              <dt>Operation</dt>
-              <dd>{preview.operation === "update" ? "Update" : "Create"}</dd>
+              <h4>Plan warnings</h4>
+              <p>
+                Review these advisories before confirming the staging operation.
+              </p>
             </div>
-            <div>
-              <dt>Tracks</dt>
-              <dd>{preview.summary.trackCount}</dd>
-            </div>
-            <div>
-              <dt>Tracks added</dt>
-              <dd>{preview.summary.addedTrackCount}</dd>
-            </div>
-            <div>
-              <dt>Tracks reordered</dt>
-              <dd>{preview.summary.reorderedTrackCount}</dd>
-            </div>
-            <div>
-              <dt>Files added</dt>
-              <dd>{preview.summary.copiedFileCount}</dd>
-            </div>
-            <div>
-              <dt>Files updated</dt>
-              <dd>{preview.summary.updatedFileCount}</dd>
-            </div>
-            <div>
-              <dt>Files preserved</dt>
-              <dd>{preview.summary.preservedFileCount}</dd>
-            </div>
-            <div>
-              <dt>Files removed</dt>
-              <dd>{preview.summary.removedFileCount}</dd>
-            </div>
-            <div>
-              <dt>Blocked</dt>
-              <dd>{preview.summary.blockedCount}</dd>
-            </div>
-            <div>
-              <dt>Copy size</dt>
-              <dd>{formatByteSize(preview.summary.totalCopyBytes)}</dd>
-            </div>
-            <div className="ingest-build-summary-destination">
-              <dt>Destination</dt>
-              <dd><code>{preview.releaseRelativePath}</code></dd>
-            </div>
-          </dl>
-
-          <div className="ingest-table-scroll">
-            <table className="ingest-table ingest-build-plan-table">
-              <thead>
-                <tr>
-                  <th scope="col">Action</th>
-                  <th scope="col">Source</th>
-                  <th scope="col">Relative destination</th>
-                  <th scope="col">Adjustment / reason</th>
-                  <th
-                    scope="col"
-                    className="ingest-plan-kind-column"
-                  >
-                    Kind
-                  </th>
-                  <th scope="col">Roles</th>
-                  <th
-                    scope="col"
-                    className="numeric"
-                  >
-                    Size
-                  </th>
-                  <th
-                    scope="col"
-                    className="ingest-plan-status-column"
-                  >
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {preview.items.map(
-                  (item, index) => (
-                    <tr
-                      key={`${item.destinationRelativePath}:${index}`}
-                    >
-                      <td>
-                        <span
-                          className={`badge ingest-plan-action ${item.action}`}
-                        >
-                          {item.action}
-                        </span>
-                      </td>
-                      <td className="ingest-build-plan-source-cell">
-                        <div>
-                          {item.sourceRelativePath &&
-                            item.mediaKind === "audio" && (
-                              <IngestAudioPreviewButton
-                                sourceRelativePath={item.sourceRelativePath}
-                                controls={audioPreviewControls}
-                              />
-                            )}
-                          {item.sourceRelativePath ? (
-                            <code>
-                              {item.sourceRelativePath}
-                            </code>
-                          ) : (
-                            "—"
-                          )}
-                        </div>
-                      </td>
-                      <th
-                        scope="row"
-                        className="ingest-sticky-column"
-                      >
-                        <code
-                          title={item.destinationRelativePath}
-                        >
-                          {stagingDestinationPathForDisplay(
-                            item.destinationRelativePath,
-                            preview.releaseRelativePath,
-                          )}
-                        </code>
-                      </th>
-                      <td title={item.reason}>
-                        {item.adjustment ?? item.reason}
-                      </td>
-                      <td className="ingest-plan-kind-cell">
-                        <PlanKindIcon
-                          kind={item.kind}
-                          mediaKind={item.mediaKind}
-                        />
-                      </td>
-                      <td>
-                        {item.logicalRoles?.join(
-                          ", ",
-                        ) ?? "—"}
-                      </td>
-                      <td className="numeric">
-                        {item.sizeBytes !== undefined
-                          ? formatByteSize(
-                              item.sizeBytes,
-                            )
-                          : "—"}
-                      </td>
-                      <td className="ingest-plan-status-cell">
-                        <span
-                          className={`ingest-plan-status-icon ${item.action === "blocked" ? "blocked" : "ready"}`}
-                          role="img"
-                          aria-label={
-                            item.action === "blocked"
-                              ? "Blocked"
-                              : "Ready"
-                          }
-                          title={item.reason}
-                        >
-                          <span aria-hidden="true">
-                            {item.action === "blocked" ? "×" : "✓"}
-                          </span>
-                        </span>
-                      </td>
-                    </tr>
-                  ),
-                )}
-              </tbody>
-            </table>
-          </div>
-
+            <span className="badge missing">
+              {preview.warnings.length} warning{preview.warnings.length === 1 ? "" : "s"}
+            </span>
+          </header>
           <ul className="ingest-warning-list">
             {preview.warnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
           </ul>
+        </section>
+      )}
 
+      <div className="ingest-review-details-stack">
+        <details className="ingest-review-details">
+          <summary>
+            <span>Artwork placement details</span>
+            <span className="badge">
+              {includedArtwork.length} source{includedArtwork.length === 1 ? "" : "s"}
+            </span>
+          </summary>
+          <div className="ingest-review-details-body">
+            <ArtworkAssignmentSummary draft={draft} />
+          </div>
+        </details>
+
+        {preview && (
+          <>
+            <details className="ingest-review-details">
+              <summary>
+                <span>Filesystem plan</span>
+                <span className="badge">
+                  {filesystemItems.length} item{filesystemItems.length === 1 ? "" : "s"}
+                </span>
+              </summary>
+              <div className="ingest-review-details-body">
+                <dl className="ingest-build-summary">
+                  <div>
+                    <dt>Operation</dt>
+                    <dd>{preview.operation === "update" ? "Update" : "Create"}</dd>
+                  </div>
+                  <div>
+                    <dt>Tracks</dt>
+                    <dd>{preview.summary.trackCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Tracks added</dt>
+                    <dd>{preview.summary.addedTrackCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Tracks reordered</dt>
+                    <dd>{preview.summary.reorderedTrackCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Files added</dt>
+                    <dd>{preview.summary.copiedFileCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Files updated</dt>
+                    <dd>{preview.summary.updatedFileCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Files preserved</dt>
+                    <dd>{preview.summary.preservedFileCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Files removed</dt>
+                    <dd>{preview.summary.removedFileCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Blocked</dt>
+                    <dd>{preview.summary.blockedCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Copy size</dt>
+                    <dd>{formatByteSize(preview.summary.totalCopyBytes)}</dd>
+                  </div>
+                  <div className="ingest-build-summary-destination">
+                    <dt>Destination</dt>
+                    <dd><code>{preview.releaseRelativePath}</code></dd>
+                  </div>
+                </dl>
+                <BuildPlanItemsTable
+                  items={filesystemItems}
+                  preview={preview}
+                  audioPreviewControls={audioPreviewControls}
+                  emptyLabel="No filesystem changes are present in this plan."
+                />
+              </div>
+            </details>
+
+            <details className="ingest-review-details">
+              <summary>
+                <span>Metadata / TOML updates</span>
+                <span className="badge">
+                  {metadataItems.length} TOML{metadataItems.length === 1 ? "" : "s"}
+                </span>
+              </summary>
+              <div className="ingest-review-details-body">
+                <BuildPlanItemsTable
+                  items={metadataItems}
+                  preview={preview}
+                  audioPreviewControls={audioPreviewControls}
+                  emptyLabel="No TOML changes are present in this plan."
+                />
+              </div>
+            </details>
+          </>
+        )}
+      </div>
+
+      {preview && (
+        <>
           <label className="ingest-build-confirmation">
             <input
               type="checkbox"

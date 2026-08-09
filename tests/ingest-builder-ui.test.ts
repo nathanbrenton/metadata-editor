@@ -241,7 +241,7 @@ test(
     );
     assert.match(
       builderSource,
-      /Derived from artwork assignments/,
+      /Release and track artwork/,
     );
     assert.match(
       serverSource,
