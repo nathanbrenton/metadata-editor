@@ -148,6 +148,13 @@ function parseStoredVideo(
       typeof record.relatedTrackSourceRelativePath === "string"
         ? record.relatedTrackSourceRelativePath
         : "",
+    ...(typeof record.relatedTrackId === "string" &&
+    record.relatedTrackId.trim()
+      ? {
+          relatedTrackId:
+            record.relatedTrackId,
+        }
+      : {}),
     destinationFilename: draftString(
       record.destinationFilename,
       `Video ${index + 1} destination filename`,

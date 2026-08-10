@@ -309,3 +309,24 @@ test("documents guarded Publish and Update public-package snapshots", () => {
   assert.match(text, /canonical masters/i);
   assert.match(text, /sample-clearance/i);
 });
+
+
+test("documents explicit Ingest target-release selection independent from source naming", () => {
+  const ingest = workflowStages.find(
+    ({ id }) => id === "ingest",
+  );
+  const combinedText = [
+    ...(ingest?.steps ?? []),
+    ingest?.currentNote,
+    ...workflowFaqItems.map(
+      ({ question, answer }) =>
+        `${question} ${answer}`,
+    ),
+  ].join(" ");
+
+  assert.match(combinedText, /Target release/);
+  assert.match(combinedText, /Existing Library release/);
+  assert.match(combinedText, /New release/);
+  assert.match(combinedText, /ingest folder|source-folder naming/i);
+  assert.match(combinedText, /exact unambiguous/i);
+});

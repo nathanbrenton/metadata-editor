@@ -49,14 +49,22 @@ export type IngestBuildTrackDraft = {
 };
 
 export const ingestVideoTypeOptions = [
-  "music_video",
-  "live_performance",
+  "music video",
+  "promo video",
+  "behind the scenes",
+  "social media post",
+  "social media short",
+  "social media reel",
+  "social media story",
+  "teaser",
+  "trailer",
+  "bonus content",
+  "live performance",
   "visualizer",
-  "lyric_video",
-  "studio_footage",
-  "jam_session",
+  "lyric video",
+  "studio footage",
+  "jam session",
   "interview",
-  "promotional",
   "other",
 ] as const;
 
@@ -67,8 +75,10 @@ export type IngestBuildVideoDraft = {
   videoId: string;
   title: string;
   videoType: string;
-  /** Optional semantic relationship; the video remains release-scoped. */
+  /** Optional relation to a candidate track source before the Library ID exists. */
   relatedTrackSourceRelativePath: string;
+  /** Optional relation to an already-canonical Library track. */
+  relatedTrackId?: string;
   destinationFilename: string;
 };
 

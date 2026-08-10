@@ -62,7 +62,7 @@ test("renders desktop-first staging and publish workspaces", () => {
   );
   assert.match(
     styleSource,
-    /\.publish-readiness-table\s*\{[^}]*min-width:\s*68rem;[^}]*table-layout:\s*fixed;/s,
+    /\.publish-readiness-table\s*\{[^}]*min-width:\s*55rem;[^}]*table-layout:\s*fixed;/s,
   );
 });
 

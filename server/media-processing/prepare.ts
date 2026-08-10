@@ -58,6 +58,13 @@ import {
   type WebStreamPlan,
   type WebStreamTrackPlan,
 } from "./web-stream.js";
+import {
+  buildBrowserArtworkFfmpegArgs,
+  buildBrowserArtworkInfo,
+  buildBrowserArtworkPlan,
+  buildBrowserArtworkVerificationArgs,
+  type BrowserArtworkPlan,
+} from "./browser-artwork.js";
 import type {
   MediaPreparationProgress,
 } from "./progress.js";
@@ -71,6 +78,7 @@ export type MediaPreparationReceipt = {
   playbackCount: number;
   streamCount: number;
   waveformCount: number;
+  artworkCount: number;
   completedAt: string;
 };
 
@@ -93,7 +101,11 @@ export type PrepareReleaseMediaOptions = {
 
 type PreparedDerivative = {
   trackId: string;
-  kind: MediaProcessingDerivativePlan["kind"] | "web-stream-hls";
+  kind:
+    | MediaProcessingDerivativePlan["kind"]
+    | "web-stream-hls"
+    | "browser-artwork"
+    | "browser-artwork-info";
   nodeType: "file" | "directory";
   action: "create" | "replace";
   targetRelativePath: string;
@@ -123,7 +135,11 @@ type Manifest = {
   mediaPlanFingerprint: string;
   items: Array<{
     trackId: string;
-    kind: MediaProcessingDerivativePlan["kind"] | "web-stream-hls";
+    kind:
+      | MediaProcessingDerivativePlan["kind"]
+      | "web-stream-hls"
+      | "browser-artwork"
+      | "browser-artwork-info";
     nodeType: "file" | "directory";
     action: "create" | "replace";
     targetRelativePath: string;
@@ -138,6 +154,9 @@ const allowedPreparationPublishBlockers = new Set([
   "playback-not-current",
   "web-stream-not-current",
   "waveform-not-current",
+  // A supported TIFF/TIF artwork master can be converted during the
+  // same reviewed preparation operation as audio derivatives.
+  "browser-artwork-preparation-required",
 ]);
 
 function isPreparableMissingDerivativeReference(
@@ -176,6 +195,7 @@ function rootPath(
 function hashPreparationPlan(
   mediaPlan: MediaProcessingPlan,
   webStreamPlan: WebStreamPlan,
+  browserArtworkPlan: BrowserArtworkPlan,
 ): string {
   return createHash("sha256")
     .update(JSON.stringify({
@@ -183,6 +203,16 @@ function hashPreparationPlan(
       playbackProfile: mediaPlan.profile.playback,
       waveformProfile: mediaPlan.profile.waveform,
       webStreamProfile: webStreamPlan.profile,
+      browserArtwork: {
+        status: browserArtworkPlan.status,
+        action: browserArtworkPlan.action,
+        master: browserArtworkPlan.master,
+        outputRelativePath: browserArtworkPlan.outputRelativePath,
+        infoRelativePath: browserArtworkPlan.infoRelativePath,
+        sourceSizeBytes: browserArtworkPlan.sourceSizeBytes,
+        sourceSha256: browserArtworkPlan.sourceSha256,
+        profileSha256: browserArtworkPlan.profileSha256,
+      },
       tracks: mediaPlan.items.map((item) => ({
         trackId: item.trackId,
         trackRelativePath: item.trackRelativePath,
@@ -751,6 +781,110 @@ async function stageWaveform(
   await assertRegularFile(stagePath, "Prepared waveform JSON");
 }
 
+async function stageBrowserArtwork(
+  mediaRoot: string,
+  stageRoot: string,
+  plan: BrowserArtworkPlan,
+  capabilities: FfmpegCapabilities,
+  generatedAt: string,
+  runProcess: ProcessRunner,
+): Promise<{
+  outputStagePath: string;
+  infoStagePath: string;
+}> {
+  if (
+    !plan.master ||
+    !plan.sourceSha256 ||
+    plan.sourceSizeBytes === undefined
+  ) {
+    throw new Error(
+      "Browser artwork preparation requires one resolved canonical TIFF/TIF master.",
+    );
+  }
+
+  if (!capabilities.available) {
+    throw new Error(
+      "FFmpeg is required to generate the browser-compatible artwork derivative.",
+    );
+  }
+
+  const masterPath = rootPath(
+    mediaRoot,
+    plan.master.relativePath,
+  );
+  await assertRegularFile(masterPath, "Canonical release artwork master");
+
+  const outputStagePath = rootPath(
+    stageRoot,
+    plan.outputRelativePath,
+  );
+  const infoStagePath = rootPath(
+    stageRoot,
+    plan.infoRelativePath,
+  );
+  await mkdir(path.dirname(outputStagePath), {
+    recursive: true,
+    mode: 0o700,
+  });
+
+  await runProcess(
+    capabilities.executable,
+    buildBrowserArtworkFfmpegArgs(
+      masterPath,
+      outputStagePath,
+    ),
+  );
+  await assertRegularFile(
+    outputStagePath,
+    "Prepared browser artwork PNG",
+  );
+  await runProcess(
+    capabilities.executable,
+    buildBrowserArtworkVerificationArgs(
+      outputStagePath,
+    ),
+  );
+
+  await writeFile(
+    infoStagePath,
+    `${JSON.stringify(
+      buildBrowserArtworkInfo(plan, generatedAt),
+      null,
+      2,
+    )}\n`,
+    { mode: 0o600 },
+  );
+  await assertRegularFile(
+    infoStagePath,
+    "Prepared browser artwork generation sidecar",
+  );
+
+  return {
+    outputStagePath,
+    infoStagePath,
+  };
+}
+
+async function targetExists(
+  root: string,
+  relativePath: string,
+): Promise<boolean> {
+  try {
+    await lstat(rootPath(root, relativePath));
+    return true;
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 async function promoteDerivatives(
   mediaRoot: string,
   operationRoot: string,
@@ -963,32 +1097,43 @@ export async function prepareReleaseMedia(
     mediaPlan,
     capabilities,
   );
+  const browserArtworkPlan = await buildBrowserArtworkPlan(
+    mediaRoot,
+    release,
+  );
   const blockedPublicDerivative = mediaPlan.items.some(
     (track) =>
       track.master.status !== "ready" ||
       track.waveform.action === "blocked",
-  ) || webStreamPlan.summary.blockedCount > 0;
+  ) ||
+    webStreamPlan.summary.blockedCount > 0 ||
+    browserArtworkPlan.status === "blocked";
 
   if (blockedPublicDerivative) {
     throw new Error(
-      "Media preparation is blocked by the canonical source, HLS stream, or waveform plan.",
+      "Media preparation is blocked by the canonical source, HLS stream, waveform, or browser-artwork plan.",
     );
   }
 
   const itemsToPrepare = preparationItems(mediaPlan);
   const streamsToPrepare = streamPreparationItems(webStreamPlan);
+  const artworkNeedsPreparation =
+    browserArtworkPlan.action === "create" ||
+    browserArtworkPlan.action === "replace";
   if (
     itemsToPrepare.length === 0 &&
-    streamsToPrepare.length === 0
+    streamsToPrepare.length === 0 &&
+    !artworkNeedsPreparation
   ) {
     throw new Error(
-      "No missing or stale private playback/HLS/waveform derivatives need preparation.",
+      "No missing or stale private playback/HLS/waveform/browser-artwork derivatives need preparation.",
     );
   }
 
   const mediaPlanFingerprint = hashPreparationPlan(
     mediaPlan,
     webStreamPlan,
+    browserArtworkPlan,
   );
   const operationId =
     options.operationId ??
@@ -997,6 +1142,7 @@ export async function prepareReleaseMedia(
   const totalUnits =
     streamsToPrepare.length +
     itemsToPrepare.length +
+    (artworkNeedsPreparation ? 1 : 0) +
     2;
   let completedUnits = 0;
   const reportProgress = async (
@@ -1081,6 +1227,84 @@ export async function prepareReleaseMedia(
   await writeManifest(manifestPath, manifest);
 
   try {
+    if (artworkNeedsPreparation) {
+      await reportProgress({
+        status: "running",
+        phase: "browser-artwork",
+        message:
+          "Release artwork: generating browser-compatible PNG from canonical TIFF/TIF master…",
+      });
+
+      const {
+        outputStagePath,
+        infoStagePath,
+      } = await stageBrowserArtwork(
+        mediaRoot,
+        stageRoot,
+        browserArtworkPlan,
+        capabilities,
+        options.publishPlanGeneratedAt,
+        runProcess,
+      );
+      const outputIntegrity = await hashFile(outputStagePath);
+      const infoIntegrity = await hashFile(infoStagePath);
+      const outputAction = browserArtworkPlan.action === "replace"
+        ? "replace"
+        : "create";
+      const infoAction = await targetExists(
+        mediaRoot,
+        browserArtworkPlan.infoRelativePath,
+      )
+        ? "replace"
+        : "create";
+
+      const artworkPrepared: PreparedDerivative = {
+        trackId: releaseId,
+        kind: "browser-artwork",
+        nodeType: "file",
+        action: outputAction,
+        targetRelativePath: browserArtworkPlan.outputRelativePath,
+        stagePath: outputStagePath,
+        sizeBytes: outputIntegrity.sizeBytes,
+        sha256: outputIntegrity.sha256,
+      };
+      const infoPrepared: PreparedDerivative = {
+        trackId: releaseId,
+        kind: "browser-artwork-info",
+        nodeType: "file",
+        action: infoAction,
+        targetRelativePath: browserArtworkPlan.infoRelativePath,
+        stagePath: infoStagePath,
+        sizeBytes: infoIntegrity.sizeBytes,
+        sha256: infoIntegrity.sha256,
+      };
+      prepared.push(artworkPrepared, infoPrepared);
+
+      for (const item of [artworkPrepared, infoPrepared]) {
+        manifest.items.push({
+          trackId: item.trackId,
+          kind: item.kind,
+          nodeType: item.nodeType,
+          action: item.action,
+          targetRelativePath: item.targetRelativePath,
+          sizeBytes: item.sizeBytes,
+          sha256: item.sha256,
+          ...(item.action === "replace"
+            ? {
+                backupRelativePath: path.posix.join(
+                  ".metadata-editor-operations",
+                  operationId,
+                  "backups",
+                  item.targetRelativePath,
+                ),
+              }
+            : {}),
+        });
+      }
+      await writeManifest(manifestPath, manifest);
+      completedUnits += 1;
+    }
+
     for (const stream of streamsToPrepare) {
       if (
         stream.action !== "create" &&
@@ -1259,11 +1483,17 @@ export async function prepareReleaseMedia(
       planBeforePromotion,
       capabilities,
     );
+    const browserArtworkBeforePromotion =
+      await buildBrowserArtworkPlan(
+        mediaRoot,
+        releaseBeforePromotion,
+      );
 
     if (
       hashPreparationPlan(
         planBeforePromotion,
         webStreamsBeforePromotion,
+        browserArtworkBeforePromotion,
       ) !== mediaPlanFingerprint
     ) {
       throw new Error(
@@ -1324,6 +1554,11 @@ export async function prepareReleaseMedia(
           verifiedPlan,
           capabilities,
         );
+        const verifiedBrowserArtwork =
+          await buildBrowserArtworkPlan(
+            mediaRoot,
+            promotedRelease,
+          );
         const preparedFileKeys = new Set(
           prepared
             .filter((item) => item.nodeType === "file")
@@ -1344,10 +1579,12 @@ export async function prepareReleaseMedia(
         if (
           incompletePreparedFiles.length > 0 ||
           verifiedWebStreams.summary.currentCount !==
-            verifiedWebStreams.summary.trackCount
+            verifiedWebStreams.summary.trackCount ||
+          (artworkNeedsPreparation &&
+            verifiedBrowserArtwork.status !== "current")
         ) {
           throw new Error(
-            "Prepared private playback/HLS/waveform derivatives did not validate as current after promotion.",
+            "Prepared private playback/HLS/waveform/browser-artwork derivatives did not validate as current after promotion.",
           );
         }
       },
@@ -1377,6 +1614,9 @@ export async function prepareReleaseMedia(
     const waveformCount = prepared.filter(
       (item) => item.kind === "waveform-peaks",
     ).length;
+    const artworkCount = prepared.filter(
+      (item) => item.kind === "browser-artwork",
+    ).length;
     const createdCount = prepared.filter(
       (item) => item.action === "create",
     ).length;
@@ -1396,6 +1636,7 @@ export async function prepareReleaseMedia(
       playbackCount,
       streamCount,
       waveformCount,
+      artworkCount,
       completedAt,
     };
   } catch (error) {

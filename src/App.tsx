@@ -230,6 +230,9 @@ import type {
   IngestFileInspection,
   IngestScanResult,
 } from "../shared/ingest-types.js";
+import type {
+  IngestDraftIdentitySeed,
+} from "../shared/ingest-drafts.js";
 
 import {
   workflowPath,
@@ -270,6 +273,11 @@ import {
   selectIngestIdentityOverride,
   type IngestIdentityOverride,
 } from "./ingest-identity-source.js";
+import {
+  buildExistingReleaseIdentitySeed,
+  findAutomaticIngestTargetRelease,
+  type IngestTargetReleaseMode,
+} from "./ingest-target-release.js";
 
 // Defer secondary workflows until they are opened so the initial editor
 // bundle remains smaller and faster to parse.
@@ -371,6 +379,8 @@ type ReleaseScanResult = {
   relativePath: string;
   releaseTitle?: string;
   primaryArtistName?: string;
+  releaseDate?: string;
+  releaseType?: string;
   metadataFiles: MetadataFileStatus[];
   artworkMasters: DiscoveredAsset[];
   tracks: TrackScanResult[];
@@ -382,6 +392,11 @@ type LibraryScanResult = {
   releases: ReleaseScanResult[];
   warnings: string[];
 };
+
+type IngestStagingIdentitySeed =
+  IngestDraftIdentitySeed & {
+    evidence: IngestIdentityOverride["evidence"];
+  };
 
 type PublishPlanIssue = {
   code: string;
@@ -510,6 +525,7 @@ type MediaPreparationReceipt = {
   playbackCount: number;
   streamCount: number;
   waveformCount: number;
+  artworkCount: number;
   completedAt: string;
 };
 
@@ -520,6 +536,7 @@ type MediaPreparationProgress = {
   phase:
     | "starting"
     | "web-stream-hls"
+    | "browser-artwork"
     | "playback-mp3"
     | "waveform-peaks"
     | "validating"
@@ -1082,7 +1099,7 @@ export function App() {
   const [ingestInspection, setIngestInspection] =
     useState<IngestCandidateInspection | null>(null);
   const [ingestIdentityOverride, setIngestIdentityOverride] =
-    useState<IngestIdentityOverride | null>(null);
+    useState<IngestStagingIdentitySeed | null>(null);
   const [ingestInspectionError, setIngestInspectionError] =
     useState<string | null>(null);
   const [ingestInspectionLoading, setIngestInspectionLoading] =
@@ -2154,6 +2171,8 @@ export function App() {
           ) : applicationView === "ingest" ? (
             <IngestView
               scan={ingestScan}
+              releases={scan?.releases ?? []}
+              identitySeed={ingestIdentityOverride}
               error={ingestError}
               loading={ingestLoading}
               inspection={ingestInspection}
@@ -4302,7 +4321,7 @@ function StagingWorkspace({
   onNotify,
 }: {
   inspection: IngestCandidateInspection | null;
-  identitySeed: IngestIdentityOverride | null;
+  identitySeed: IngestDraftIdentitySeed | null;
   releases: ReleaseScanResult[];
   inspectionError: string | null;
   onChooseCandidate: () => void;
@@ -4561,6 +4580,30 @@ function assessPublishReadiness(
   };
 }
 
+const mediaPreparationAllowedPublishBlockers = new Set([
+  "playback-not-current",
+  "web-stream-not-current",
+  "waveform-not-current",
+  "browser-artwork-preparation-required",
+]);
+
+function browserArtworkNeedsPreparation(
+  plan: PublishPlan,
+): boolean {
+  return plan.issues.some(
+    (issue) =>
+      issue.code === "browser-artwork-preparation-required",
+  );
+}
+
+function browserArtworkIsBlocked(
+  plan: PublishPlan,
+): boolean {
+  return plan.issues.some(
+    (issue) => issue.code === "browser-artwork-required",
+  );
+}
+
 function hasNonDerivativePublishBlockers(
   plan: PublishPlan,
 ): boolean {
@@ -4569,13 +4612,30 @@ function hasNonDerivativePublishBlockers(
       issue.severity === "blocked" &&
       issue.code !== "playback-not-current" &&
       issue.code !== "web-stream-not-current" &&
-      issue.code !== "waveform-not-current",
+      issue.code !== "waveform-not-current" &&
+      issue.code !== "browser-artwork-preparation-required",
+  );
+}
+
+function hasMediaPreparationPublishBlockers(
+  plan: PublishPlan,
+): boolean {
+  return plan.issues.some(
+    (issue) =>
+      issue.severity === "blocked" &&
+      !mediaPreparationAllowedPublishBlockers.has(
+        issue.code,
+      ),
   );
 }
 
 function publishPreflightStatus(
   plan: PublishPlan,
 ): { label: string; tone: string } {
+  if (canPreparePublishPlan(plan)) {
+    return { label: "Needs preparation", tone: "warning" };
+  }
+
   if (
     plan.validation.blockedCount > 0 ||
     plan.derivatives.blockedCount > 0 ||
@@ -4608,10 +4668,11 @@ function canPreparePublishPlan(
   return (
     plan.validation.blockedCount === 0 &&
     plan.derivatives.blockedCount === 0 &&
-    !hasNonDerivativePublishBlockers(plan) &&
+    !hasMediaPreparationPublishBlockers(plan) &&
     (
       plan.derivatives.createCount > 0 ||
-      plan.derivatives.replaceCount > 0
+      plan.derivatives.replaceCount > 0 ||
+      browserArtworkNeedsPreparation(plan)
     )
   );
 }
@@ -4688,6 +4749,10 @@ function formatPublishPlanKind(
 function publishPreflightHeadline(
   plan: PublishPlan,
 ): string {
+  if (canPreparePublishPlan(plan)) {
+    return "Web media needs preparation";
+  }
+
   if (
     plan.validation.blockedCount > 0 ||
     plan.derivatives.blockedCount > 0 ||
@@ -4717,6 +4782,14 @@ function publishPreflightHeadline(
 function publishPreflightGuidance(
   plan: PublishPlan,
 ): string {
+  if (canPreparePublishPlan(plan)) {
+    return hasNonDerivativePublishBlockers(plan)
+      ? "Prepare the reproducible private media that can be generated now. Other publish-only blockers remain visible and must still be resolved before the public package can be built."
+      : browserArtworkNeedsPreparation(plan)
+        ? "The release is ready for derivative preparation. Prepare release will generate current browser artwork from the canonical TIFF/TIF master along with any missing HLS or waveform resources."
+        : "The canonical release can continue, but its segmented HLS web stream or waveform derivatives must be prepared first.";
+  }
+
   if (
     plan.validation.blockedCount > 0 ||
     plan.derivatives.blockedCount > 0 ||
@@ -4746,6 +4819,10 @@ function publishPreflightGuidance(
 function publishNextStepLabel(
   plan: PublishPlan,
 ): string {
+  if (canPreparePublishPlan(plan)) {
+    return "Prepare release";
+  }
+
   if (
     plan.validation.blockedCount > 0 ||
     plan.derivatives.blockedCount > 0 ||
@@ -4926,6 +5003,9 @@ function PublishWorkspace({
         payload.waveformCount > 0
           ? `${payload.waveformCount} ${payload.waveformCount === 1 ? "waveform" : "waveforms"}`
           : null,
+        payload.artworkCount > 0
+          ? `${payload.artworkCount} browser artwork ${payload.artworkCount === 1 ? "derivative" : "derivatives"}`
+          : null,
       ].filter((part): part is string => Boolean(part));
 
       onNotify(
@@ -5032,7 +5112,7 @@ function PublishWorkspace({
       <div className="workflow-workspace-notice planned">
         <strong>Preflight planning is read-only</strong>
         <span>
-          Choose a release and use Continue to preflight.
+          Choose a release row to open its preflight.
           Preflight validates the canonical release, requires
           current segmented HLS web-stream and waveform derivatives,
           selects browser-compatible front artwork, and lists
@@ -5092,13 +5172,12 @@ function PublishWorkspace({
                 <th scope="col">Sources</th>
                 <th scope="col">Public media</th>
                 <th scope="col">Status</th>
-                <th scope="col" className="action-column">Next step</th>
               </tr>
             </thead>
             <tbody>
               {releases.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="workflow-empty-cell">
+                  <td colSpan={4} className="workflow-empty-cell">
                     No releases are available for readiness review.
                   </td>
                 </tr>
@@ -5121,7 +5200,38 @@ function PublishWorkspace({
                   return (
                     <tr
                       key={release.id}
-                      className={selected ? "selected" : undefined}
+                      className={[
+                        "publish-release-row",
+                        selected ? "selected" : "",
+                        loadingPlan ? "is-loading" : "",
+                      ].filter(Boolean).join(" ")}
+                      tabIndex={loadingPlan ? -1 : 0}
+                      aria-busy={loadingPlan || undefined}
+                      aria-label={`${loadingPlan ? "Loading preflight for" : "Open preflight for"} ${
+                        release.releaseTitle ??
+                        formatReleaseTitle(release.id)
+                      }`}
+                      onClick={() => {
+                        if (!loadingPlan) {
+                          void loadPublishPlan(release.id);
+                        }
+                      }}
+                      onKeyDown={(event) => {
+                        if (
+                          loadingPlan ||
+                          event.target !== event.currentTarget
+                        ) {
+                          return;
+                        }
+
+                        if (
+                          event.key === "Enter" ||
+                          event.key === " "
+                        ) {
+                          event.preventDefault();
+                          void loadPublishPlan(release.id);
+                        }
+                      }}
                     >
                       <th scope="row">
                         <div className="publish-release-cell">
@@ -5191,16 +5301,14 @@ function PublishWorkspace({
                           {assessment.preflightLabel}
                         </span>
                         <span>{assessment.note}</span>
-                      </td>
-                      <td className="action-column publish-next-step-action">
-                        <button
-                          type="button"
-                          className="primary-button"
-                          disabled={loadingPlan}
-                          onClick={() => void loadPublishPlan(release.id)}
-                        >
-                          {loadingPlan ? "Planning…" : "Continue to preflight"}
-                        </button>
+                        {loadingPlan && (
+                          <small
+                            className="publish-row-loading"
+                            role="status"
+                          >
+                            Planning…
+                          </small>
+                        )}
                       </td>
                     </tr>
                   );
@@ -5212,7 +5320,24 @@ function PublishWorkspace({
       </section>
 
       {selectedPlan && (
-        <section className="publish-plan-panel" aria-label="Publish preflight result">
+        <MetadataFieldModal
+          title={`Publish preflight · ${
+            releases.find(
+              (release) =>
+                release.id === selectedPlan.releaseId,
+            )?.releaseTitle ?? selectedPlan.releaseId
+          }`}
+          variant="wide"
+          closeDisabled={prepareLoading || publishLoading}
+          onClose={() => {
+            setSelectedPlan(null);
+            setPlanError(null);
+          }}
+        >
+          <section
+            className="publish-plan-panel publish-plan-modal"
+            aria-label="Publish preflight result"
+          >
           <header>
             <div>
               <p className="eyebrow">Preflight result</p>
@@ -5237,9 +5362,16 @@ function PublishWorkspace({
               <span className="eyebrow">Result</span>
               <strong>{publishPreflightHeadline(selectedPlan)}</strong>
               <span>
-                {selectedPlan.validation.blockedCount} blocked · {selectedPlan.validation.warningCount} warnings
+                {selectedPlan.issues.filter((issue) =>
+                  issue.severity === "blocked"
+                ).length} blocked · {selectedPlan.issues.filter((issue) =>
+                  issue.severity === "warning"
+                ).length} warnings
                 {" · "}
                 {selectedPlan.derivatives.createCount} missing derivatives · {selectedPlan.derivatives.replaceCount} stale
+                {browserArtworkNeedsPreparation(selectedPlan)
+                  ? " · browser artwork needs preparation"
+                  : ""}
               </span>
             </div>
 
@@ -5310,7 +5442,7 @@ function PublishWorkspace({
                     }
                     title={
                       canPreparePublishPlan(selectedPlan)
-                        ? "Generate reviewed private playback MP3s plus segmented AAC-LC HLS streams and waveform derivatives in the private Library."
+                        ? "Generate reviewed private playback MP3s, segmented AAC-LC HLS streams, waveform derivatives, and browser-compatible release artwork in the private Library."
                         : canBuildPublishPlan(selectedPlan)
                           ? "Publish a complete sanitized public release snapshot, validate it, and atomically promote it into published-media."
                           : "Resolve the blocking preflight issues first."
@@ -5324,7 +5456,7 @@ function PublishWorkspace({
                   </button>
                   <small>
                     {canPreparePublishPlan(selectedPlan)
-                      ? "Creates reproducible private playback MP3, HLS stream, and waveform derivatives. Canonical masters are never modified, and private MP3s are never copied into published-media."
+                      ? "Creates reproducible private playback MP3, HLS stream, waveform, and browser-artwork derivatives. Canonical masters are never modified, and private MP3s are never copied into published-media."
                       : canBuildPublishPlan(selectedPlan)
                         ? "Publishes the complete public snapshot from current Library metadata, browser artwork, waveform peaks, and HLS assets. Existing public releases are replaced as a unit so obsolete files cannot survive an update."
                         : "Resolve the blocking issues shown in preflight before preparing derivatives or publishing."}
@@ -5370,6 +5502,16 @@ function PublishWorkspace({
               <dt>Waveform</dt>
               <dd>
                 {selectedPlan.waveforms.currentCount} current · {selectedPlan.waveforms.createCount} missing · {selectedPlan.waveforms.replaceCount} stale
+              </dd>
+            </div>
+            <div>
+              <dt>Browser artwork</dt>
+              <dd>
+                {browserArtworkNeedsPreparation(selectedPlan)
+                  ? "Needs preparation"
+                  : browserArtworkIsBlocked(selectedPlan)
+                    ? "Blocked"
+                    : "Current"}
               </dd>
             </div>
             <div>
@@ -5494,7 +5636,8 @@ function PublishWorkspace({
               </code>
             </div>
           </details>
-        </section>
+          </section>
+        </MetadataFieldModal>
       )}
     </section>
   );
@@ -5502,6 +5645,8 @@ function PublishWorkspace({
 
 function IngestView({
   scan,
+  releases,
+  identitySeed,
   error,
   loading,
   inspection,
@@ -5513,6 +5658,8 @@ function IngestView({
   onOpenStaging,
 }: {
   scan: IngestScanResult | null;
+  releases: ReleaseScanResult[];
+  identitySeed: IngestDraftIdentitySeed | null;
   error: string | null;
   loading: boolean;
   inspection: IngestCandidateInspection | null;
@@ -5522,13 +5669,15 @@ function IngestView({
   onInspect: (candidateId: string) => void;
   onBackToCandidates: () => void;
   onOpenStaging: (
-    identityOverride: IngestIdentityOverride,
+    identityOverride: IngestStagingIdentitySeed,
   ) => void;
 }) {
   if (inspection) {
     return (
       <IngestCandidateInspectionView
         inspection={inspection}
+        releases={releases}
+        identitySeed={identitySeed}
         onBack={onBackToCandidates}
         onOpenStaging={onOpenStaging}
       />
@@ -5919,13 +6068,17 @@ function getNextIngestAudioFile(
 
 function IngestCandidateInspectionView({
   inspection,
+  releases,
+  identitySeed,
   onBack,
   onOpenStaging,
 }: {
   inspection: IngestCandidateInspection;
+  releases: ReleaseScanResult[];
+  identitySeed: IngestDraftIdentitySeed | null;
   onBack: () => void;
   onOpenStaging: (
-    identityOverride: IngestIdentityOverride,
+    identityOverride: IngestStagingIdentitySeed,
   ) => void;
 }) {
   const { candidate } = inspection;
@@ -5946,6 +6099,101 @@ function IngestCandidateInspectionView({
       ),
     [artistSourceId, identityPlan, titleSourceId],
   );
+  const [targetReleaseMode, setTargetReleaseMode] =
+    useState<IngestTargetReleaseMode>(
+      identitySeed?.targetReleaseId
+        ? "existing"
+        : "auto",
+    );
+  const [
+    selectedTargetReleaseId,
+    setSelectedTargetReleaseId,
+  ] = useState(
+    identitySeed?.targetReleaseId ?? "",
+  );
+  const automaticTargetRelease = useMemo(
+    () =>
+      findAutomaticIngestTargetRelease(
+        releases,
+        {
+          ...identityOverride,
+          ...(candidate.dateCandidates.length === 1
+            ? {
+                releaseDate:
+                  candidate.dateCandidates[0],
+              }
+            : {}),
+        },
+      ),
+    [
+      candidate.dateCandidates,
+      identityOverride,
+      releases,
+    ],
+  );
+  const selectedTargetRelease = useMemo(
+    () =>
+      releases.find(
+        (release) =>
+          release.id === selectedTargetReleaseId,
+      ) ?? null,
+    [releases, selectedTargetReleaseId],
+  );
+  const resolvedTargetRelease =
+    targetReleaseMode === "auto"
+      ? automaticTargetRelease
+      : targetReleaseMode === "existing"
+        ? selectedTargetRelease
+        : null;
+  const stagingIdentitySeed = useMemo<
+    IngestStagingIdentitySeed
+  >(
+    () =>
+      resolvedTargetRelease
+        ? {
+            ...buildExistingReleaseIdentitySeed(
+              resolvedTargetRelease,
+            ),
+            evidence: identityOverride.evidence,
+          }
+        : identityOverride,
+    [identityOverride, resolvedTargetRelease],
+  );
+  const sortedTargetReleases = useMemo(
+    () =>
+      releases.slice().sort((left, right) => {
+        const leftTitle =
+          left.releaseTitle?.trim() || left.id;
+        const rightTitle =
+          right.releaseTitle?.trim() || right.id;
+
+        return (
+          leftTitle.localeCompare(rightTitle) ||
+          left.id.localeCompare(right.id)
+        );
+      }),
+    [releases],
+  );
+  const targetSelectionRequired =
+    targetReleaseMode === "existing" &&
+    !selectedTargetRelease;
+
+  useEffect(() => {
+    if (
+      targetReleaseMode === "existing" &&
+      !selectedTargetReleaseId &&
+      automaticTargetRelease
+    ) {
+      setSelectedTargetReleaseId(
+        automaticTargetRelease.id,
+      );
+    }
+  }, [
+    automaticTargetRelease,
+    selectedTargetReleaseId,
+    targetReleaseMode,
+  ]);
+
   const previewEvidence = useMemo(
     () =>
       mergeIngestIdentityEvidence(
@@ -6141,10 +6389,13 @@ function IngestCandidateInspectionView({
             type="button"
             className="primary-button"
             disabled={
-              candidate.audioCount === 0 &&
-              candidate.videoCount === 0 &&
-              !inspection.files.some(
-                (file) => file.metadataSidecar,
+              targetSelectionRequired ||
+              (
+                candidate.audioCount === 0 &&
+                candidate.videoCount === 0 &&
+                !inspection.files.some(
+                  (file) => file.metadataSidecar,
+                )
               )
             }
             title={
@@ -6156,7 +6407,7 @@ function IngestCandidateInspectionView({
                   : undefined
             }
             onClick={() =>
-              onOpenStaging(identityOverride)
+              onOpenStaging(stagingIdentitySeed)
             }
           >
             Continue to Staging
@@ -6228,13 +6479,170 @@ function IngestCandidateInspectionView({
           </label>
 
           <div className="ingest-identity-preview">
-            <span>Staging identity</span>
+            <span>Candidate identity</span>
             <strong>
               {identityOverride.releaseArtist || "Artist not inferred"}
             </strong>
             <small>{identityOverride.releaseTitle}</small>
           </div>
         </div>
+
+        <section
+          className="ingest-target-release-panel"
+          aria-labelledby="ingest-target-release-heading"
+        >
+          <div className="ingest-target-release-intro">
+            <strong id="ingest-target-release-heading">
+              Target release
+            </strong>
+            <small>
+              Choose where this candidate belongs. Source-folder naming is evidence only and does not determine the Library destination.
+            </small>
+          </div>
+
+          <fieldset className="ingest-target-release-modes">
+            <legend>
+              Target mode
+            </legend>
+            <label>
+              <input
+                type="radio"
+                name="ingest-target-release-mode"
+                value="auto"
+                checked={targetReleaseMode === "auto"}
+                onChange={() =>
+                  setTargetReleaseMode("auto")
+                }
+              />
+              <span>Auto</span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="ingest-target-release-mode"
+                value="new"
+                checked={targetReleaseMode === "new"}
+                onChange={() =>
+                  setTargetReleaseMode("new")
+                }
+              />
+              <span>New release</span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="ingest-target-release-mode"
+                value="existing"
+                checked={targetReleaseMode === "existing"}
+                onChange={() =>
+                  setTargetReleaseMode("existing")
+                }
+              />
+              <span>Existing Library release</span>
+            </label>
+          </fieldset>
+
+          {targetReleaseMode === "existing" && (
+            <label className="ingest-target-release-select">
+              <span>Existing release</span>
+              <select
+                value={selectedTargetReleaseId}
+                onChange={(event) =>
+                  setSelectedTargetReleaseId(
+                    event.target.value,
+                  )
+                }
+              >
+                <option value="">
+                  Select a Library release…
+                </option>
+                {sortedTargetReleases.map((release) => (
+                  <option
+                    key={release.id}
+                    value={release.id}
+                  >
+                    {release.releaseTitle?.trim() || release.id}
+                    {release.primaryArtistName
+                      ? ` — ${release.primaryArtistName}`
+                      : ""}
+                    {` — ${release.id}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <div
+            className={[
+              "ingest-target-release-resolution",
+              resolvedTargetRelease
+                ? "existing"
+                : targetReleaseMode === "auto"
+                  ? "unresolved"
+                  : "new",
+            ].join(" ")}
+          >
+            {resolvedTargetRelease ? (
+              <>
+                <span className="badge complete">
+                  Existing Library release
+                </span>
+                <strong>
+                  {resolvedTargetRelease.releaseTitle?.trim() ||
+                    resolvedTargetRelease.id}
+                </strong>
+                <small>
+                  {resolvedTargetRelease.primaryArtistName
+                    ? `${resolvedTargetRelease.primaryArtistName} · `
+                    : ""}
+                  {resolvedTargetRelease.id}
+                </small>
+                {(
+                  identityOverride.releaseTitle.trim() &&
+                  resolvedTargetRelease.releaseTitle?.trim() &&
+                  identityOverride.releaseTitle.trim().localeCompare(
+                    resolvedTargetRelease.releaseTitle.trim(),
+                    undefined,
+                    { sensitivity: "base" },
+                  ) !== 0
+                ) && (
+                  <small className="ingest-target-release-note">
+                    Candidate title differs from the selected Library release. The canonical Library identity remains the destination; candidate values remain evidence.
+                  </small>
+                )}
+              </>
+            ) : targetReleaseMode === "auto" ? (
+              <>
+                <span className="badge">
+                  No exact Library match
+                </span>
+                <strong>New release suggested</strong>
+                <small>
+                  Auto only targets an existing release when the candidate identity has one unambiguous exact match. Choose Existing Library release to override this suggestion.
+                </small>
+              </>
+            ) : targetReleaseMode === "new" ? (
+              <>
+                <span className="badge">New release</span>
+                <strong>{identityOverride.releaseTitle}</strong>
+                <small>
+                  Staging will generate the destination from the reviewed candidate identity.
+                </small>
+              </>
+            ) : (
+              <>
+                <span className="badge missing">
+                  Selection required
+                </span>
+                <strong>Choose an existing Library release</strong>
+                <small>
+                  Continue to Staging is disabled until a destination is selected.
+                </small>
+              </>
+            )}
+          </div>
+        </section>
+
         <details className="ingest-evidence-disclosure">
           <summary>
             <span
@@ -10227,22 +10635,40 @@ function MetadataFieldModal({
   title,
   onClose,
   children,
+  variant = "default",
+  closeDisabled = false,
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  variant?: "default" | "wide";
+  closeDisabled?: boolean;
 }) {
   const closeButtonRef =
     useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
+  const closeDisabledRef =
+    useRef(closeDisabled);
+  const previousFocusRef =
+    useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
   useEffect(() => {
+    closeDisabledRef.current =
+      closeDisabled;
+  }, [closeDisabled]);
+
+  useEffect(() => {
     const previousOverflow =
       document.body.style.overflow;
+
+    previousFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
 
     document.body.style.overflow =
       "hidden";
@@ -10251,7 +10677,10 @@ function MetadataFieldModal({
     const handleKeyDown = (
       event: KeyboardEvent,
     ) => {
-      if (event.key === "Escape") {
+      if (
+        event.key === "Escape" &&
+        !closeDisabledRef.current
+      ) {
         onCloseRef.current();
       }
     };
@@ -10268,6 +10697,7 @@ function MetadataFieldModal({
         "keydown",
         handleKeyDown,
       );
+      previousFocusRef.current?.focus();
     };
   }, []);
 
@@ -10277,6 +10707,7 @@ function MetadataFieldModal({
       role="presentation"
       onMouseDown={(event) => {
         if (
+          !closeDisabled &&
           event.target ===
           event.currentTarget
         ) {
@@ -10285,7 +10716,11 @@ function MetadataFieldModal({
       }}
     >
       <section
-        className="metadata-field-modal"
+        className={`metadata-field-modal ${
+          variant === "wide"
+            ? "metadata-field-modal--wide"
+            : ""
+        }`.trim()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="metadata-field-modal-title"
@@ -10300,6 +10735,12 @@ function MetadataFieldModal({
             type="button"
             className="metadata-field-modal-close"
             aria-label="Close dialog"
+            disabled={closeDisabled}
+            title={
+              closeDisabled
+                ? "Wait for the current operation to finish before closing."
+                : "Close dialog"
+            }
             onClick={onClose}
           >
             ×

@@ -90,6 +90,35 @@ test("applies the explicit Ingest identity over a locally saved inferred draft",
   assert.equal(updated.tracks[1].artist, "Guest Artist");
 });
 
+
+
+test("an explicit existing-release target overrides a saved generated or custom directory ID", () => {
+  const stored = createStoredIngestDraft(inspection());
+  stored.draft.releaseId = "different-source-derived-id";
+  stored.draft.releaseDate = "2026-08-09";
+  stored.draft.releaseType = "single";
+
+  const updated = applyIngestDraftIdentitySeed(
+    stored.draft,
+    {
+      releaseArtist: "nobodies",
+      releaseTitle: "Cardillo",
+      targetReleaseId: "2022-04-17_cardillo",
+      releaseDate: "2022-04-17",
+      releaseType: "album",
+    },
+  );
+
+  assert.equal(
+    updated.releaseId,
+    "2022-04-17_cardillo",
+  );
+  assert.equal(updated.releaseTitle, "Cardillo");
+  assert.equal(updated.releaseArtist, "nobodies");
+  assert.equal(updated.releaseDate, "2022-04-17");
+  assert.equal(updated.releaseType, "album");
+});
+
 test("preserves an explicitly customized staging directory ID", () => {
   const stored = createStoredIngestDraft(inspection());
   stored.draft.releaseId = "manual-release-directory";

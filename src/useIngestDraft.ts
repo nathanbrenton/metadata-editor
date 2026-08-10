@@ -117,6 +117,12 @@ export function useIngestDraft(
     identitySeed?.releaseArtist ?? "";
   const seedReleaseTitle =
     identitySeed?.releaseTitle ?? "";
+  const seedTargetReleaseId =
+    identitySeed?.targetReleaseId ?? "";
+  const seedReleaseDate =
+    identitySeed?.releaseDate ?? "";
+  const seedReleaseType =
+    identitySeed?.releaseType ?? "";
   const initialStored = useMemo(() => {
     const stored = createStoredIngestDraft(
       initialInspection,
@@ -133,6 +139,9 @@ export function useIngestDraft(
     initialInspection,
     seedReleaseArtist,
     seedReleaseTitle,
+    seedTargetReleaseId,
+    seedReleaseDate,
+    seedReleaseType,
   ]);
   const [draft, setDraft] =
     useState<IngestBuildDraft>(
@@ -269,6 +278,9 @@ export function useIngestDraft(
     initialInspection,
     seedReleaseArtist,
     seedReleaseTitle,
+    seedTargetReleaseId,
+    seedReleaseDate,
+    seedReleaseType,
   ]);
 
   useEffect(() => {

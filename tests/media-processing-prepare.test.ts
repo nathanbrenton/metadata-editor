@@ -76,7 +76,10 @@ test("guards media preparation with reviewed fingerprints, staging, backups, and
   assert.match(source, /parseWavBuffer/);
   assert.match(source, /buildWebStreamFfmpegArgs/);
   assert.match(source, /inspectWebStreamDirectory/);
+  assert.match(source, /stageBrowserArtwork/);
+  assert.match(source, /buildBrowserArtworkPlan/);
   assert.match(source, /web-stream-hls/);
+  assert.match(source, /browser-artwork-preparation-required/);
   assert.match(source, /\[track\.playback, track\.waveform\]/);
   assert.match(source, /derivative\.kind === "playback-mp3"/);
 });

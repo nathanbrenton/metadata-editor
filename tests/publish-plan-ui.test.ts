@@ -12,8 +12,9 @@ const serverSource = await readFile(
 );
 
 test("Publish exposes guided preflight, preparation, and guarded package writes", () => {
-  assert.match(appSource, /Continue to preflight/);
-  assert.match(appSource, /Preflight result/);
+  assert.match(appSource, /Choose a release row to open its preflight/);
+  assert.match(appSource, /publish-release-row/);
+  assert.match(appSource, /Publish preflight ·/);
   assert.match(appSource, /Technical package plan/);
   assert.match(appSource, /Publish public package/);
   assert.match(appSource, /Update public package/);
@@ -51,23 +52,68 @@ test("Publish readiness table groups source and public-media readiness", () => {
   assert.doesNotMatch(appSource, />Dry-run only<\/span>/);
 });
 
-test("Publish readiness overview exposes one designated next-step action", () => {
-  const start = appSource.indexOf("function PublishWorkspace");
-  const end = appSource.indexOf("function IngestView", start);
-
-  assert.notEqual(start, -1);
-  assert.notEqual(end, -1);
-
-  const publishWorkspaceSource = appSource.slice(start, end);
-
-  assert.match(publishWorkspaceSource, /<th[^>]*>Next step<\/th>/);
-  assert.match(publishWorkspaceSource, /Continue to preflight/);
-  assert.match(
-    publishWorkspaceSource,
-    /className="primary-button"[\s\S]*Continue to preflight/,
+test("Publish readiness overview uses each release row as the preflight action", () => {
+  const workspaceStart = appSource.indexOf(
+    "function PublishWorkspace",
   );
-  assert.doesNotMatch(publishWorkspaceSource, />Open Library<\/button>/);
-  assert.doesNotMatch(publishWorkspaceSource, /publish-row-actions/);
+  const workspaceEnd = appSource.indexOf(
+    "function IngestView",
+    workspaceStart,
+  );
+
+  assert.notEqual(workspaceStart, -1);
+  assert.notEqual(workspaceEnd, -1);
+
+  const publishWorkspaceSource = appSource.slice(
+    workspaceStart,
+    workspaceEnd,
+  );
+
+  const overviewStart = publishWorkspaceSource.indexOf(
+    "<h3>Release readiness overview</h3>",
+  );
+  const overviewEnd = publishWorkspaceSource.indexOf(
+    "{selectedPlan && (",
+    overviewStart,
+  );
+
+  assert.notEqual(overviewStart, -1);
+  assert.notEqual(overviewEnd, -1);
+
+  const readinessOverviewSource =
+    publishWorkspaceSource.slice(
+      overviewStart,
+      overviewEnd,
+    );
+
+  assert.match(
+    readinessOverviewSource,
+    /"publish-release-row"/,
+  );
+  assert.match(
+    readinessOverviewSource,
+    /loadPublishPlan\(release\.id\)/,
+  );
+  assert.match(
+    readinessOverviewSource,
+    /event\.key === "Enter"/,
+  );
+  assert.match(
+    readinessOverviewSource,
+    /event\.key === " "/,
+  );
+  assert.doesNotMatch(
+    readinessOverviewSource,
+    /<th[^>]*>Next step<\/th>/,
+  );
+  assert.doesNotMatch(
+    readinessOverviewSource,
+    /Continue to preflight/,
+  );
+  assert.doesNotMatch(
+    readinessOverviewSource,
+    /publish-next-step-action/,
+  );
 });
 
 test("Publish readiness rows include release artwork thumbnails", () => {
@@ -105,6 +151,8 @@ test("Publish preflight keeps technical detail collapsed behind one next-step re
   assert.match(publishWorkspaceSource, /HLS/);
   assert.match(publishWorkspaceSource, /selectedPlan\.webStreams/);
   assert.match(publishWorkspaceSource, /selectedPlan\.waveforms/);
+  assert.match(publishWorkspaceSource, /Browser artwork/);
+  assert.match(publishWorkspaceSource, /payload\.artworkCount/);
   assert.match(publishWorkspaceSource, /selectedPlan\.libraryPlayback/);
   assert.match(publishWorkspaceSource, /Prepare Library MP3s/);
   assert.match(publishWorkspaceSource, /canPrepareLibraryPlayback/);
@@ -114,6 +162,14 @@ test("Publish preflight keeps technical detail collapsed behind one next-step re
   assert.match(publishWorkspaceSource, /<details className="publish-plan-disclosure publish-plan-contract">/);
   assert.doesNotMatch(publishWorkspaceSource, /<details[^>]*\sopen(?:=|>)/);
   assert.match(publishWorkspaceSource, /canPreparePublishPlan/);
+  assert.match(
+    appSource,
+    /hasMediaPreparationPublishBlockers/,
+  );
+  assert.match(
+    appSource,
+    /browser-artwork-preparation-required/,
+  );
   assert.match(publishWorkspaceSource, /canBuildPublishPlan/);
   assert.match(publishWorkspaceSource, /prepareRelease/);
   assert.match(publishWorkspaceSource, /publishRelease/);

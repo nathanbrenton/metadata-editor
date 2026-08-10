@@ -119,7 +119,10 @@ async function readReleaseLibraryIdentity(
 ): Promise<
   Pick<
     ReleaseScanResult,
-    "releaseTitle" | "primaryArtistName"
+    | "releaseTitle"
+    | "primaryArtistName"
+    | "releaseDate"
+    | "releaseType"
   >
 > {
   const releaseDocument = metadataFiles.find(
@@ -177,6 +180,15 @@ async function readReleaseLibraryIdentity(
     );
     const primaryArtistName =
       readNonBlankString(primaryArtist?.name);
+    const dates = isRecord(releaseTable.dates)
+      ? releaseTable.dates
+      : null;
+    const releaseDate = readNonBlankString(
+      dates?.release,
+    );
+    const releaseType = readNonBlankString(
+      releaseTable.type,
+    );
 
     return {
       ...(releaseTitle
@@ -184,6 +196,12 @@ async function readReleaseLibraryIdentity(
         : {}),
       ...(primaryArtistName
         ? { primaryArtistName }
+        : {}),
+      ...(releaseDate
+        ? { releaseDate }
+        : {}),
+      ...(releaseType
+        ? { releaseType }
         : {}),
     };
   } catch {

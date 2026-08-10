@@ -33,7 +33,7 @@ test("shows a compact first-class Videos disclosure on Library release cards", (
   assert.match(styleSource, /\.library-video-row\s*\{[\s\S]*?grid-template-columns:/);
 });
 
-test("documents Library video inspection and read-only preview while keeping derivatives future", () => {
+test("documents Library video inspection, preview, and guarded V3b private preparation", () => {
   assert.match(
     helpSource,
     /Library scanner recognizes those canonical video directories/,
@@ -48,6 +48,18 @@ test("documents Library video inspection and read-only preview while keeping der
   );
   assert.match(
     helpSource,
-    /public web-video derivatives remain later milestones/,
+    /V3b H\.264\/AAC HLS backend can now produce the private/,
+  );
+  assert.match(
+    helpSource,
+    /reviewed video-plan fingerprint/,
+  );
+  assert.match(
+    helpSource,
+    /existing Publish UI still operates on audio readiness/,
+  );
+  assert.match(
+    helpSource,
+    /public web-video publication remain later milestones/,
   );
 });

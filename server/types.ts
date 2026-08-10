@@ -35,6 +35,8 @@ export type ReleaseScanResult = {
   relativePath: string;
   releaseTitle?: string;
   primaryArtistName?: string;
+  releaseDate?: string;
+  releaseType?: string;
   metadataFiles: MetadataFileStatus[];
   artworkMasters: DiscoveredAsset[];
   tracks: TrackScanResult[];

@@ -1,6 +1,8 @@
 export type MediaPreparationProgressPhase =
   | "starting"
   | "web-stream-hls"
+  | "video-web-stream-hls"
+  | "browser-artwork"
   | "playback-mp3"
   | "waveform-peaks"
   | "validating"
@@ -17,9 +19,13 @@ export type MediaPreparationProgress = {
   completedUnits: number;
   totalUnits: number;
   trackCount: number;
+  videoCount?: number;
   trackId?: string;
   trackLabel?: string;
   trackIndex?: number;
+  videoId?: string;
+  videoLabel?: string;
+  videoIndex?: number;
   updatedAt: string;
 };
 

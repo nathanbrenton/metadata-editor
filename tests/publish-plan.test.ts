@@ -489,7 +489,10 @@ test("blocks archival-only artwork until a browser derivative exists", async () 
 
     assert.equal(plan.status, "blocked");
     assert.ok(
-      plan.issues.some((item) => item.code === "browser-artwork-required"),
+      plan.issues.some(
+        (item) =>
+          item.code === "browser-artwork-preparation-required",
+      ),
     );
   } finally {
     await rm(fixture.temporaryRoot, {
@@ -655,6 +658,128 @@ test("prepares reviewed HLS stream and waveform derivatives without writing the 
           "code" in error &&
           error.code === "ENOENT",
         ),
+    );
+  } finally {
+    await rm(fixture.temporaryRoot, {
+      recursive: true,
+      force: true,
+    });
+  }
+});
+
+test("Prepare release generates durable browser artwork from canonical TIFF without modifying the master", async () => {
+  const fixture = await createPublishFixture({
+    includeBrowserArtwork: false,
+  });
+  const generatedAt = "2026-08-01T03:00:00.000Z";
+  const masterPath = path.join(
+    fixture.mediaRoot,
+    "releases",
+    fixture.releaseId,
+    "artwork",
+    "front",
+    "artwork-master.tif",
+  );
+  const originalMaster = await readFile(masterPath);
+
+  try {
+    const reviewedPlan = await buildPublishPlan(
+      fixture.mediaRoot,
+      fixture.publishRoot,
+      fixture.releaseId,
+      {
+        generatedAt,
+        ffmpegCapabilities: readyCapabilities,
+      },
+    );
+
+    assert.ok(
+      reviewedPlan.issues.some(
+        (item) =>
+          item.code === "browser-artwork-preparation-required",
+      ),
+    );
+
+    const receipt = await prepareReleaseMedia(
+      fixture.mediaRoot,
+      fixture.publishRoot,
+      fixture.releaseId,
+      {
+        expectedPublishPlanFingerprint:
+          reviewedPlan.planFingerprint,
+        publishPlanGeneratedAt: generatedAt,
+        ffmpegCapabilities: readyCapabilities,
+        operationId: "browser-artwork-preparation-test",
+        now: () => new Date("2026-08-01T03:01:00.000Z"),
+        processRunner: async (_executable, args) => {
+          const outputPath = args.at(-1);
+          if (outputPath?.endsWith("artwork.png")) {
+            await mkdir(path.dirname(outputPath), { recursive: true });
+            await writeFile(
+              outputPath,
+              Buffer.from("prepared-browser-png"),
+            );
+          }
+        },
+      },
+    );
+
+    assert.equal(receipt.artworkCount, 1);
+    assert.equal(receipt.createdCount, 2);
+    assert.deepEqual(await readFile(masterPath), originalMaster);
+
+    const derivativePath = path.join(
+      fixture.mediaRoot,
+      "releases",
+      fixture.releaseId,
+      "artwork",
+      "front",
+      "artwork.png",
+    );
+    const infoPath = path.join(
+      fixture.mediaRoot,
+      "releases",
+      fixture.releaseId,
+      "artwork",
+      "front",
+      "artwork-info.json",
+    );
+    assert.equal(
+      (await readFile(derivativePath)).toString(),
+      "prepared-browser-png",
+    );
+    const info = JSON.parse(
+      await readFile(infoPath, "utf8"),
+    ) as {
+      source: { relativePath: string; sha256: string };
+      profile: { sha256: string };
+    };
+    assert.match(info.source.relativePath, /artwork-master\.tif$/);
+    assert.match(info.source.sha256, /^[a-f0-9]{64}$/);
+    assert.match(info.profile.sha256, /^[a-f0-9]{64}$/);
+
+    const refreshedPlan = await buildPublishPlan(
+      fixture.mediaRoot,
+      fixture.publishRoot,
+      fixture.releaseId,
+      {
+        generatedAt: "2026-08-01T03:02:00.000Z",
+        ffmpegCapabilities: readyCapabilities,
+      },
+    );
+    assert.ok(
+      refreshedPlan.issues.every(
+        (item) =>
+          item.code !== "browser-artwork-preparation-required" &&
+          item.code !== "browser-artwork-required",
+      ),
+    );
+    assert.ok(
+      refreshedPlan.items.some(
+        (item) =>
+          item.kind === "release-artwork" &&
+          item.sourceRelativePath?.endsWith("artwork.png"),
+      ),
     );
   } finally {
     await rm(fixture.temporaryRoot, {

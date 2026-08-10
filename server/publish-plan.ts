@@ -26,6 +26,10 @@ import {
   type WebStreamPlanSummary,
 } from "./media-processing/web-stream.js";
 import {
+  browserArtworkAssetFromPlan,
+  buildBrowserArtworkPlan,
+} from "./media-processing/browser-artwork.js";
+import {
   scanReleaseById,
 } from "./scanner.js";
 import type {
@@ -187,6 +191,7 @@ const privateContentExcluded = [
   "distribution masters and full-quality audio derivatives",
   "private playback MP3 and other monolithic listening derivatives",
   "private stream generation sidecars such as stream-info.json",
+  "private browser-artwork generation sidecars such as artwork-info.json",
   "archival TIFF artwork masters",
   "TOML source documents",
   "ingest receipts",
@@ -349,7 +354,7 @@ function preferredBrowserArtwork(
 
 async function discoverBrowserArtwork(
   mediaRoot: string,
-  releaseRelativePath: string,
+  assetRelativePath: string,
   masterCandidates: readonly DiscoveredAsset[],
 ): Promise<DiscoveredAsset | null> {
   const standardDerivativeFilenames = [
@@ -363,7 +368,7 @@ async function discoverBrowserArtwork(
 
   for (const filename of standardDerivativeFilenames) {
     const relativePath = path.posix.join(
-      releaseRelativePath,
+      assetRelativePath,
       "artwork/front",
       filename,
     );
@@ -759,31 +764,40 @@ export async function buildPublishPlan(
     destinationReleaseRelativePath,
   );
 
-  const artwork = await discoverBrowserArtwork(
+  const browserArtworkPlan = await buildBrowserArtworkPlan(
     mediaRoot,
-    release.relativePath,
-    release.artworkMasters,
+    release,
   );
+  const artwork = browserArtworkPlan.status === "not-needed"
+    ? preferredBrowserArtwork(release.artworkMasters)
+    : browserArtworkAssetFromPlan(browserArtworkPlan);
 
   if (!artwork) {
+    const artworkCanBePrepared =
+      browserArtworkPlan.status === "missing" ||
+      browserArtworkPlan.status === "stale";
+
     issues.push({
-      code: "browser-artwork-required",
+      code: artworkCanBePrepared
+        ? "browser-artwork-preparation-required"
+        : "browser-artwork-required",
       severity: "blocked",
       relativePath: release.relativePath,
-      message:
-        "Publish requires one browser-compatible release artwork source. TIFF/TIF remains an archival master and must first produce a current PNG, WebP, AVIF, JPEG, or GIF derivative.",
-      suggestion:
-        "Generate and review a browser artwork derivative under Library → Files & Sources before publishing.",
+      message: artworkCanBePrepared
+        ? `Browser artwork must be current before it can enter the hosted package. Current status: ${browserArtworkPlan.status}.`
+        : "Publish requires one browser-compatible release artwork source, and no supported canonical source is available for preparation.",
+      suggestion: artworkCanBePrepared
+        ? "Use Prepare release to generate the reviewed browser-compatible artwork derivative from the canonical TIFF/TIF master, then refresh preflight."
+        : "Assign one supported release-level front artwork master before publishing.",
     });
     items.push({
       kind: "release-artwork",
       action: "blocked",
       destinationRelativePath: path.posix.join(
         destinationReleaseRelativePath,
-        "artwork/front/artwork.webp",
+        "artwork/front/artwork.png",
       ),
-      reason:
-        "No browser-compatible release artwork source is available.",
+      reason: browserArtworkPlan.reason,
     });
   } else {
     const inspection = await inspectRegularFile(

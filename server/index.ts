@@ -150,6 +150,12 @@ import {
   prepareReleaseMedia,
 } from "./media-processing/prepare.js";
 import {
+  prepareReleaseVideoWebStreams,
+} from "./media-processing/video-prepare.js";
+import {
+  buildVideoWebStreamPlan,
+} from "./media-processing/video-web-stream.js";
+import {
   readMediaPreparationProgress,
   recordMediaPreparationProgress,
 } from "./media-processing/progress.js";
@@ -4732,6 +4738,144 @@ const server = createServer(
       }
 
       sendJson(response, 200, progress);
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/publish/video-plan"
+    ) {
+      try {
+        const releaseId =
+          requestUrl.searchParams.get("release") ?? "";
+        if (!releaseId) {
+          sendJson(response, 400, {
+            error: "Missing release query parameter",
+          });
+          return;
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        const release = await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        const capabilities =
+          await detectFfmpegCapabilities();
+        sendJson(
+          response,
+          200,
+          await buildVideoWebStreamPlan(
+            mediaRoot,
+            release,
+            capabilities,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown video-plan error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/publish/prepare-video"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : "";
+        const planFingerprint =
+          "planFingerprint" in body &&
+          typeof body.planFingerprint === "string"
+            ? body.planFingerprint
+            : "";
+        const planGeneratedAt =
+          "planGeneratedAt" in body &&
+          typeof body.planGeneratedAt === "string"
+            ? body.planGeneratedAt
+            : "";
+        const operationId =
+          "operationId" in body &&
+          typeof body.operationId === "string"
+            ? body.operationId
+            : "";
+
+        if (
+          !releaseId ||
+          !planFingerprint ||
+          !planGeneratedAt
+        ) {
+          sendJson(response, 400, {
+            error:
+              "releaseId, planFingerprint, and planGeneratedAt are required",
+          });
+          return;
+        }
+
+        if (
+          operationId &&
+          !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operationId)
+        ) {
+          sendJson(response, 400, {
+            error:
+              "operationId contains unsupported characters",
+          });
+          return;
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        const result =
+          await prepareReleaseVideoWebStreams(
+            mediaRoot,
+            releaseId,
+            {
+              expectedPlanFingerprint:
+                planFingerprint,
+              planGeneratedAt,
+              ...(operationId
+                ? { operationId }
+                : {}),
+              onProgress:
+                recordMediaPreparationProgress,
+            },
+          );
+        sendJson(response, 200, result);
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown video-preparation error",
+        });
+      }
+
       return;
     }
 

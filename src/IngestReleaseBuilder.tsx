@@ -1314,6 +1314,8 @@ export function IngestReleaseBuilder({
     useState<IngestStagingTargetStatus | null>(null);
   const [targetStatusLoading, setTargetStatusLoading] =
     useState(false);
+  const canonicalTargetAppliedRef =
+    useRef<string | null>(null);
   const audioPreviewRef =
     useRef<HTMLAudioElement | null>(null);
   const [audioPreviewSourcePath, setAudioPreviewSourcePath] =
@@ -1467,9 +1469,59 @@ export function IngestReleaseBuilder({
             );
           }
 
-          setTargetStatus(
-            body as IngestStagingTargetStatus,
-          );
+          const status =
+            body as IngestStagingTargetStatus;
+
+          setTargetStatus(status);
+
+          if (
+            identitySeed?.targetReleaseId ===
+              status.releaseId &&
+            status.exists &&
+            status.existingRelease &&
+            canonicalTargetAppliedRef.current !==
+              status.releaseId
+          ) {
+            canonicalTargetAppliedRef.current =
+              status.releaseId;
+
+            setDraft((current) => {
+              const existing =
+                status.existingRelease!;
+              const previousReleaseArtist =
+                current.releaseArtist;
+
+              const releaseArtist =
+                existing.artist.trim() ||
+                current.releaseArtist;
+
+              return {
+                ...current,
+                releaseId: status.releaseId,
+                releaseTitle:
+                  existing.title.trim() ||
+                  current.releaseTitle,
+                releaseArtist,
+                releaseDate:
+                  existing.date.trim() ||
+                  current.releaseDate,
+                releaseType:
+                  existing.type.trim() ||
+                  current.releaseType,
+                tracks: current.tracks.map(
+                  (track) => ({
+                    ...track,
+                    artist:
+                      !track.artist.trim() ||
+                      track.artist ===
+                        previousReleaseArtist
+                        ? releaseArtist
+                        : track.artist,
+                  }),
+                ),
+              };
+            });
+          }
         })
         .catch((lookupError: unknown) => {
           if (
@@ -2555,14 +2607,16 @@ function GuidedIngestBuilder({
             <h3>Confirm videos</h3>
             <p>
               Review every probe-verified video before it becomes a canonical
-              release asset. Choose a stable ID, descriptive type, and optional
-              related track; source bytes remain unchanged.
+              release asset. Confirm its title, descriptive type, and optional
+              related track; stable identity and destination paths are managed
+              automatically and source bytes remain unchanged.
             </p>
           </header>
           <VideoDraftTable
             videos={draft.videos ?? []}
             tracks={draft.tracks}
             sourceStatuses={sourceStatuses}
+            existingTracks={targetStatus?.existingTracks ?? []}
             existingVideos={targetStatus?.existingVideos ?? []}
             onChange={onVideoChange}
             onSourceReviewed={onSourceReviewed}
@@ -2626,6 +2680,7 @@ function GuidedIngestBuilder({
             preview={preview}
             sourceStatuses={sourceStatuses}
             blockingSources={blockingSources}
+            existingTracks={targetStatus?.existingTracks ?? []}
             onAcceptBlockingSource={onAcceptBlockingSource}
             onSkipBlockingSource={onSkipBlockingSource}
             onReviewBlockingSource={onReviewBlockingSource}
@@ -2823,8 +2878,9 @@ function QuickIngestBuilder({
           <div>
             <h3>Videos</h3>
             <p>
-              Confirm canonical release-level video assets, stable IDs, types,
-              and optional track relationships before writing the Library copy.
+              Confirm canonical release-level video titles, types, and optional
+              track relationships before writing the Library copy. Stable IDs and
+              destination paths are managed automatically.
             </p>
           </div>
         </header>
@@ -2832,6 +2888,7 @@ function QuickIngestBuilder({
           videos={draft.videos ?? []}
           tracks={draft.tracks}
           sourceStatuses={sourceStatuses}
+          existingTracks={targetStatus?.existingTracks ?? []}
           existingVideos={targetStatus?.existingVideos ?? []}
           onChange={onVideoChange}
           onSourceReviewed={onSourceReviewed}
@@ -2873,6 +2930,7 @@ function QuickIngestBuilder({
           preview={preview}
           sourceStatuses={sourceStatuses}
           blockingSources={blockingSources}
+          existingTracks={targetStatus?.existingTracks ?? []}
           onAcceptBlockingSource={onAcceptBlockingSource}
           onSkipBlockingSource={onSkipBlockingSource}
           onReviewBlockingSource={onReviewBlockingSource}
@@ -3073,49 +3131,68 @@ function SourceReviewCell({
   onReviewed: (reviewed: boolean) => void;
 }) {
   if (!status) {
-    return <span>—</span>;
-  }
-
-  if (status.state === "unchanged") {
     return (
-      <span className="badge complete">
-        Unchanged
+      <span
+        className="ingest-source-state-indicator unknown"
+        role="img"
+        aria-label="Source state unavailable"
+        title="Source state unavailable"
+      >
+        ?
       </span>
     );
   }
 
-  if (status.state === "missing") {
-    return (
-      <span className="badge missing">
-        Source missing
-      </span>
-    );
-  }
+  const statePresentation =
+    status.state === "unchanged"
+      ? {
+          label: "Unchanged",
+          symbol: "✓",
+        }
+      : status.state === "missing"
+        ? {
+            label: "Source missing",
+            symbol: "×",
+          }
+        : status.state === "changed"
+          ? {
+              label: "Changed source",
+              symbol: "!",
+            }
+          : {
+              label: "New source",
+              symbol: "+",
+            };
 
   return (
-    <label className="ingest-source-review-control">
+    <span className="ingest-source-state-control">
       <span
-        className={`badge ${
-          status.state === "changed"
-            ? "missing"
-            : ""
-        }`}
+        className={`ingest-source-state-indicator ${status.state}`}
+        role="img"
+        aria-label={statePresentation.label}
+        title={statePresentation.label}
       >
-        {status.state === "changed"
-          ? "Changed"
-          : "New"}
+        {statePresentation.symbol}
       </span>
-      <span>
+
+      {(status.state === "new" ||
+        status.state === "changed") && (
         <input
+          className="ingest-source-state-reviewed"
           type="checkbox"
           checked={status.reviewed}
+          aria-label={`Mark ${statePresentation.label.toLowerCase()} reviewed`}
+          title={
+            status.reviewed
+              ? `${statePresentation.label} reviewed`
+              : `Mark ${statePresentation.label.toLowerCase()} reviewed`
+          }
           onChange={(event) =>
             onReviewed(event.target.checked)
           }
         />
-        Reviewed
-      </span>
-    </label>
+      )}
+    </span>
   );
 }
 
@@ -3577,7 +3654,7 @@ function TrackDraftTable({
                 scope="col"
                 className="ingest-track-state-column"
               >
-                Source state
+                State
               </th>
               {existingTracks.length > 0 && (
                 <th
@@ -3681,13 +3758,19 @@ function TrackDraftTable({
                 <th
                   scope="row"
                   className="ingest-sticky-column ingest-track-source-cell"
-                  title={track.sourceRelativePath}
                 >
-                  <code>
-                    {formatIngestSourceDisplayPath(
-                      track.sourceRelativePath,
-                    )}
-                  </code>
+                  <span
+                    className="ingest-track-source-audio-icon"
+                    title={track.sourceRelativePath}
+                    aria-label={`Audio source: ${track.sourceRelativePath}`}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <path d="M10 5v10.2a3.5 3.5 0 1 1-2-3.16V7l11-2v8.2a3.5 3.5 0 1 1-2-3.16V3.5z" />
+                    </svg>
+                  </span>
                 </th>
                 <td className="ingest-track-preview-cell">
                   <IngestAudioPreviewButton
@@ -3915,6 +3998,7 @@ function VideoDraftTable({
   videos,
   tracks,
   sourceStatuses,
+  existingTracks,
   existingVideos,
   onChange,
   onSourceReviewed,
@@ -3923,6 +4007,7 @@ function VideoDraftTable({
   videos: IngestBuildVideoDraft[];
   tracks: IngestBuildTrackDraft[];
   sourceStatuses: IngestDraftSourceStatus[];
+  existingTracks: IngestStagingTargetStatus["existingTracks"];
   existingVideos: IngestStagingTargetStatus["existingVideos"];
   onChange: (
     sourceRelativePath: string,
@@ -3954,6 +4039,25 @@ function VideoDraftTable({
         left.trackNumber - right.trackNumber ||
         left.title.localeCompare(right.title),
     );
+  const existingTrackBySource = new Map(
+    existingTracks.map((track) => [
+      track.sourceRelativePath,
+      track,
+    ]),
+  );
+  const candidateTrackOptions = includedTracks.filter(
+    (track) =>
+      !existingTrackBySource.has(
+        track.sourceRelativePath,
+      ),
+  );
+  const existingTrackOptions = existingTracks
+    .slice()
+    .sort(
+      (left, right) =>
+        left.number - right.number ||
+        left.title.localeCompare(right.title),
+    );
 
   return (
     <div className="ingest-video-table-workflow">
@@ -3961,9 +4065,10 @@ function VideoDraftTable({
         <strong>Canonical release video</strong>
         <span>
           Each selected source is stored under videos/&lt;stable-id&gt;/ as
-          video-master.&lt;original-extension&gt; plus video.toml. The video remains
-          release-scoped; optionally relate it to one track without moving it into
-          the track directory. Staging does not transcode video.
+          video-master.&lt;original-extension&gt; plus video.toml. Stable IDs are
+          generated automatically and remain independent from the editable title.
+          The video remains release-scoped; optionally relate it to one canonical
+          track without moving it into the track directory. Staging does not transcode video.
         </span>
       </div>
 
@@ -3996,14 +4101,13 @@ function VideoDraftTable({
               <th scope="col">Title</th>
               <th scope="col">Type</th>
               <th scope="col">Related track</th>
-              <th scope="col">Stable video ID</th>
               <th scope="col">Destination</th>
             </tr>
           </thead>
           <tbody>
             {videos.length === 0 ? (
               <tr>
-                <td colSpan={7} className="metadata-empty-value">
+                <td colSpan={6} className="metadata-empty-value">
                   No probe-verified video sources are available in this candidate.
                 </td>
               </tr>
@@ -4012,6 +4116,10 @@ function VideoDraftTable({
                 const status = statusByPath.get(video.sourceRelativePath);
                 const sourceMissing = status?.state === "missing";
                 const existing = existingBySource.get(video.sourceRelativePath);
+                const relatedExistingTrack =
+                  existingTrackBySource.get(
+                    video.relatedTrackSourceRelativePath,
+                  );
                 const controlsDisabled = !video.include || sourceMissing;
 
                 return (
@@ -4047,7 +4155,12 @@ function VideoDraftTable({
                       />
                     </td>
                     <th scope="row">
-                      <code>{video.sourceRelativePath}</code>
+                      <code
+                        className="ingest-video-source-filename"
+                        title={video.sourceRelativePath}
+                      >
+                        {reviewSourceFilename(video.sourceRelativePath)}
+                      </code>
                       {existing && (
                         <small className="ingest-inline-success">
                           Existing · {existing.id}
@@ -4088,42 +4201,64 @@ function VideoDraftTable({
                     </td>
                     <td>
                       <select
-                        value={video.relatedTrackSourceRelativePath}
+                        value={
+                          video.relatedTrackId
+                            ? `id:${video.relatedTrackId}`
+                            : relatedExistingTrack
+                              ? `id:${relatedExistingTrack.id}`
+                              : video.relatedTrackSourceRelativePath
+                                ? `source:${video.relatedTrackSourceRelativePath}`
+                                : ""
+                        }
                         disabled={controlsDisabled || Boolean(existing)}
                         aria-label={`Related track for ${video.sourceRelativePath}`}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          if (value.startsWith("id:")) {
+                            onChange(video.sourceRelativePath, {
+                              relatedTrackId: value.slice(3),
+                              relatedTrackSourceRelativePath: "",
+                            });
+                            return;
+                          }
+
                           onChange(video.sourceRelativePath, {
-                            relatedTrackSourceRelativePath: event.target.value,
-                          })
-                        }
+                            relatedTrackId: "",
+                            relatedTrackSourceRelativePath:
+                              value.startsWith("source:")
+                                ? value.slice(7)
+                                : "",
+                          });
+                        }}
                       >
                         <option value="">Release-level only</option>
-                        {includedTracks.map((track) => (
+                        {candidateTrackOptions.map((track) => (
                           <option
-                            key={track.sourceRelativePath}
-                            value={track.sourceRelativePath}
+                            key={`source:${track.sourceRelativePath}`}
+                            value={`source:${track.sourceRelativePath}`}
                           >
-                            {`${track.trackNumber}. ${track.title}`}
+                            {track.title || "Untitled"}
+                          </option>
+                        ))}
+                        {existingTrackOptions.map((track) => (
+                          <option
+                            key={`id:${track.id}`}
+                            value={`id:${track.id}`}
+                          >
+                            {track.title || `Track ${track.number}`}
                           </option>
                         ))}
                       </select>
                     </td>
                     <td>
-                      <input
-                        type="text"
-                        value={video.videoId}
-                        disabled={controlsDisabled || Boolean(existing)}
-                        pattern="[a-z0-9][a-z0-9_-]*"
-                        aria-label={`Stable video ID for ${video.sourceRelativePath}`}
-                        onChange={(event) =>
-                          onChange(video.sourceRelativePath, {
-                            videoId: event.target.value,
-                          })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <code>{`videos/${video.videoId}/${video.destinationFilename}`}</code>
+                      <details className="ingest-video-path-disclosure">
+                        <summary
+                          title={`videos/${video.videoId}/${video.destinationFilename}`}
+                        >
+                          Path
+                        </summary>
+                        <code>{`videos/${video.videoId}/${video.destinationFilename}`}</code>
+                      </details>
                     </td>
                   </tr>
                 );
@@ -5437,6 +5572,7 @@ function BuildReview({
   preview,
   sourceStatuses,
   blockingSources,
+  existingTracks,
   onAcceptBlockingSource,
   onSkipBlockingSource,
   onReviewBlockingSource,
@@ -5454,6 +5590,7 @@ function BuildReview({
   preview: IngestBuildPreview | null;
   sourceStatuses: IngestDraftSourceStatus[];
   blockingSources: IngestDraftSourceStatus[];
+  existingTracks: IngestStagingTargetStatus["existingTracks"];
   onAcceptBlockingSource: (
     status: IngestDraftSourceStatus,
   ) => void;
@@ -5773,11 +5910,24 @@ function BuildReview({
                   const reviewPending = pendingVideoReviewPaths.has(
                     video.sourceRelativePath,
                   );
-                  const relatedTrack = draft.tracks.find(
+                  const canonicalRelatedTrack = video.relatedTrackId
+                    ? existingTracks.find(
+                        (track) => track.id === video.relatedTrackId,
+                      )
+                    : existingTracks.find(
+                        (track) =>
+                          track.sourceRelativePath ===
+                          video.relatedTrackSourceRelativePath,
+                      );
+                  const candidateRelatedTrack = draft.tracks.find(
                     (track) =>
                       track.sourceRelativePath ===
                       video.relatedTrackSourceRelativePath,
                   );
+                  const relatedTrackTitle =
+                    canonicalRelatedTrack?.title ||
+                    candidateRelatedTrack?.title ||
+                    "";
 
                   return (
                     <tr key={video.sourceRelativePath}>
@@ -5787,9 +5937,7 @@ function BuildReview({
                       </th>
                       <td>{video.videoType || "other"}</td>
                       <td>
-                        {relatedTrack
-                          ? `${relatedTrack.trackNumber}. ${relatedTrack.title || "Untitled"}`
-                          : "Release-level only"}
+                        {relatedTrackTitle || "Release-level only"}
                       </td>
                       <td><code>{reviewSourceFilename(video.sourceRelativePath)}</code></td>
                       <td>

@@ -410,6 +410,11 @@ function parseVideoDraft(
       `Video ${index + 1} related track source`,
       1000,
     ),
+    relatedTrackId: optionalString(
+      value.relatedTrackId,
+      `Video ${index + 1} related track ID`,
+      255,
+    ),
     destinationFilename: requireString(
       value.destinationFilename,
       `Video ${index + 1} destination filename`,
@@ -1572,6 +1577,12 @@ async function releaseSidecarComparisonValues(
   );
   addComparableMetadataValue(
     values,
+    "release.type",
+    document,
+    ["release", "type"],
+  );
+  addComparableMetadataValue(
+    values,
     "release.genres",
     document,
     ["release", "genres"],
@@ -1842,25 +1853,45 @@ export async function inspectIngestStagingTarget(
       ] as const),
     ),
   );
+  const canonicalReleaseTitle =
+    existingReleaseMetadataValues["release.title"];
+  const canonicalReleaseArtist =
+    existingReleaseMetadataValues[
+      "release.primary_artist.name"
+    ];
+  const canonicalReleaseDate =
+    existingReleaseMetadataValues[
+      "release.dates.release"
+    ];
+  const canonicalReleaseType =
+    existingReleaseMetadataValues["release.type"];
   const existingRelease =
     isRecord(receiptRelease)
       ? {
           title:
-            typeof receiptRelease.title === "string"
-              ? receiptRelease.title
-              : "",
+            typeof canonicalReleaseTitle === "string"
+              ? canonicalReleaseTitle
+              : typeof receiptRelease.title === "string"
+                ? receiptRelease.title
+                : "",
           artist:
-            typeof receiptRelease.artist === "string"
-              ? receiptRelease.artist
-              : "",
+            typeof canonicalReleaseArtist === "string"
+              ? canonicalReleaseArtist
+              : typeof receiptRelease.artist === "string"
+                ? receiptRelease.artist
+                : "",
           date:
-            typeof receiptRelease.date === "string"
-              ? receiptRelease.date
-              : "",
+            typeof canonicalReleaseDate === "string"
+              ? canonicalReleaseDate
+              : typeof receiptRelease.date === "string"
+                ? receiptRelease.date
+                : "",
           type:
-            typeof receiptRelease.type === "string"
-              ? receiptRelease.type
-              : "",
+            typeof canonicalReleaseType === "string"
+              ? canonicalReleaseType
+              : typeof receiptRelease.type === "string"
+                ? receiptRelease.type
+                : "",
           ...(Object.keys(existingReleaseMetadataValues).length > 0
             ? { metadataValues: existingReleaseMetadataValues }
             : {}),
@@ -3038,6 +3069,12 @@ export async function prepareIngestReleaseBuild(
       track,
     ]),
   );
+  const trackById = new Map(
+    tracks.map((track) => [
+      track.id,
+      track,
+    ]),
+  );
 
   const candidateVideos = includedVideoDrafts.map(
     (video): PreparedIngestVideo => {
@@ -3087,12 +3124,21 @@ export async function prepareIngestReleaseBuild(
         usedVideoIds.add(requestedId);
       }
 
+      const relatedTrackId =
+        video.relatedTrackId?.trim() ?? "";
       const relatedTrackSource =
         video.relatedTrackSourceRelativePath.trim();
-      const relatedTrack = relatedTrackSource
-        ? trackBySource.get(relatedTrackSource)
-        : undefined;
-      if (relatedTrackSource && !relatedTrack) {
+      const relatedTrack = relatedTrackId
+        ? trackById.get(relatedTrackId)
+        : relatedTrackSource
+          ? trackBySource.get(relatedTrackSource)
+          : undefined;
+      if (relatedTrackId && !relatedTrack) {
+        throw new Error(
+          `${video.sourceRelativePath}: related Library track is not available in the resulting release: ${relatedTrackId}`,
+        );
+      }
+      if (!relatedTrackId && relatedTrackSource && !relatedTrack) {
         throw new Error(
           `${video.sourceRelativePath}: related track is not available in the resulting release: ${relatedTrackSource}`,
         );
@@ -3140,6 +3186,9 @@ export async function prepareIngestReleaseBuild(
           title: video.title,
           videoType: video.videoType,
           relatedTrackSourceRelativePath: "",
+          ...(video.relatedTrackId
+            ? { relatedTrackId: video.relatedTrackId }
+            : {}),
           destinationFilename:
             path.posix.basename(video.destinationRelativePath),
         },

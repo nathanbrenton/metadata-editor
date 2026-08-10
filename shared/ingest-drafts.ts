@@ -55,6 +55,9 @@ export type IngestDraftMergeResult = {
 export type IngestDraftIdentitySeed = {
   releaseArtist: string;
   releaseTitle: string;
+  targetReleaseId?: string;
+  releaseDate?: string;
+  releaseType?: string;
 };
 
 /*
@@ -72,6 +75,12 @@ export function applyIngestDraftIdentitySeed(
 
   const releaseTitle = seed.releaseTitle.trim();
   const releaseArtist = seed.releaseArtist.trim();
+  const targetReleaseId =
+    seed.targetReleaseId?.trim() ?? "";
+  const releaseDate =
+    seed.releaseDate?.trim() ?? "";
+  const releaseType =
+    seed.releaseType?.trim() ?? "";
 
   if (!releaseTitle) {
     return draft;
@@ -85,12 +94,16 @@ export function applyIngestDraftIdentitySeed(
     ...draft,
     releaseTitle,
     releaseArtist,
-    releaseId: synchronizeReleaseId
-      ? buildReleaseDirectoryId(
-          draft.releaseDate,
-          releaseTitle,
-        )
-      : draft.releaseId,
+    releaseDate: releaseDate || draft.releaseDate,
+    releaseType: releaseType || draft.releaseType,
+    releaseId: targetReleaseId
+      ? targetReleaseId
+      : synchronizeReleaseId
+        ? buildReleaseDirectoryId(
+            releaseDate || draft.releaseDate,
+            releaseTitle,
+          )
+        : draft.releaseId,
     tracks: draft.tracks.map((track) => ({
       ...track,
       artist:

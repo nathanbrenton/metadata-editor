@@ -51,6 +51,11 @@ test("reports track and phase milestones from the preparation executor", () => {
     /preparing Library playback MP3/,
   );
   assert.match(prepareSource, /generating waveform peaks/);
+  assert.match(
+    prepareSource,
+    /generating browser-compatible PNG from canonical TIFF\/TIF master/,
+  );
+  assert.match(prepareSource, /phase: "browser-artwork"/);
   assert.match(prepareSource, /phase: "validating"/);
   assert.match(prepareSource, /phase: "promoting"/);
   assert.match(prepareSource, /phase: "completed"/);
