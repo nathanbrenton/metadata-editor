@@ -8,6 +8,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 
 import {
@@ -13314,6 +13316,41 @@ function MetadataReadinessWorkItem({
   );
 }
 
+const METADATA_SIDEBAR_WIDTH_STORAGE_KEY =
+  "metadata-editor.library-sidebar-width-rem";
+const DEFAULT_METADATA_SIDEBAR_WIDTH_REM = 20;
+const MIN_METADATA_SIDEBAR_WIDTH_REM = 15;
+const MAX_METADATA_SIDEBAR_WIDTH_REM = 32;
+const METADATA_SIDEBAR_WIDTH_STEP_REM = 1;
+
+function clampMetadataSidebarWidth(
+  widthRem: number,
+): number {
+  if (!Number.isFinite(widthRem)) {
+    return DEFAULT_METADATA_SIDEBAR_WIDTH_REM;
+  }
+
+  return Math.min(
+    MAX_METADATA_SIDEBAR_WIDTH_REM,
+    Math.max(
+      MIN_METADATA_SIDEBAR_WIDTH_REM,
+      widthRem,
+    ),
+  );
+}
+
+function readMetadataSidebarWidth(
+  storage: Storage,
+): number {
+  const stored = Number.parseFloat(
+    storage.getItem(
+      METADATA_SIDEBAR_WIDTH_STORAGE_KEY,
+    ) ?? "",
+  );
+
+  return clampMetadataSidebarWidth(stored);
+}
+
 function ReleaseMetadataDetailView({
   detail,
   release,
@@ -13518,6 +13555,21 @@ function ReleaseMetadataDetailView({
     useRef<HTMLElement>(null);
   const metadataSidebarRef =
     useRef<HTMLElement>(null);
+  const metadataSidebarResizeRef = useRef<{
+    pointerId: number;
+    startClientX: number;
+    startWidthRem: number;
+    rootRemPx: number;
+    currentWidthRem: number;
+  } | null>(null);
+  const [
+    metadataSidebarWidthRem,
+    setMetadataSidebarWidthRem,
+  ] = useState(() =>
+    readMetadataSidebarWidth(
+      window.localStorage,
+    ),
+  );
   const audioPreviewRef =
     useRef<HTMLAudioElement | null>(null);
   const audioPreviewTrackIdRef =
@@ -13715,6 +13767,139 @@ function ReleaseMetadataDetailView({
       );
     };
   }, [detail.releaseId]);
+
+  const persistMetadataSidebarWidth = (
+    widthRem: number,
+  ) => {
+    const nextWidth =
+      clampMetadataSidebarWidth(widthRem);
+
+    setMetadataSidebarWidthRem(nextWidth);
+    window.localStorage.setItem(
+      METADATA_SIDEBAR_WIDTH_STORAGE_KEY,
+      String(nextWidth),
+    );
+  };
+
+  const resetMetadataSidebarWidth = () => {
+    persistMetadataSidebarWidth(
+      DEFAULT_METADATA_SIDEBAR_WIDTH_REM,
+    );
+  };
+
+  const handleMetadataSidebarResizePointerDown = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const rootRemPx =
+      Number.parseFloat(
+        window.getComputedStyle(
+          document.documentElement,
+        ).fontSize,
+      ) || 16;
+
+    metadataSidebarResizeRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startWidthRem: metadataSidebarWidthRem,
+      rootRemPx,
+      currentWidthRem: metadataSidebarWidthRem,
+    };
+
+    event.currentTarget.setPointerCapture(
+      event.pointerId,
+    );
+    event.preventDefault();
+  };
+
+  const handleMetadataSidebarResizePointerMove = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    const resize =
+      metadataSidebarResizeRef.current;
+
+    if (
+      !resize ||
+      resize.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+
+    const nextWidth =
+      clampMetadataSidebarWidth(
+        resize.startWidthRem +
+          (event.clientX -
+            resize.startClientX) /
+            resize.rootRemPx,
+      );
+
+    resize.currentWidthRem = nextWidth;
+    setMetadataSidebarWidthRem(nextWidth);
+  };
+
+  const handleMetadataSidebarResizePointerEnd = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    const resize =
+      metadataSidebarResizeRef.current;
+
+    if (
+      !resize ||
+      resize.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+
+    metadataSidebarResizeRef.current = null;
+
+    if (
+      event.currentTarget.hasPointerCapture(
+        event.pointerId,
+      )
+    ) {
+      event.currentTarget.releasePointerCapture(
+        event.pointerId,
+      );
+    }
+
+    persistMetadataSidebarWidth(
+      resize.currentWidthRem,
+    );
+  };
+
+  const handleMetadataSidebarResizeKeyDown = (
+    event: React.KeyboardEvent<HTMLDivElement>,
+  ) => {
+    let nextWidth: number | null = null;
+
+    if (event.key === "ArrowLeft") {
+      nextWidth =
+        metadataSidebarWidthRem -
+        METADATA_SIDEBAR_WIDTH_STEP_REM;
+    } else if (event.key === "ArrowRight") {
+      nextWidth =
+        metadataSidebarWidthRem +
+        METADATA_SIDEBAR_WIDTH_STEP_REM;
+    } else if (event.key === "Home") {
+      nextWidth =
+        DEFAULT_METADATA_SIDEBAR_WIDTH_REM;
+    }
+
+    if (nextWidth === null) {
+      return;
+    }
+
+    event.preventDefault();
+    persistMetadataSidebarWidth(nextWidth);
+  };
+
+  const metadataWorkspaceStyle = {
+    "--metadata-sidebar-width":
+      `${metadataSidebarWidthRem}rem`,
+  } as CSSProperties;
 
   const recordMetadataActivity = (
     entry: MetadataActivityEntry,
@@ -18352,7 +18537,10 @@ function ReleaseMetadataDetailView({
           ))}
       </nav>
 
-      <div className="release-metadata-workspace">
+      <div
+        className="release-metadata-workspace"
+        style={metadataWorkspaceStyle}
+      >
         <nav
           ref={metadataSidebarRef}
           className="metadata-document-tabs"
@@ -18634,6 +18822,34 @@ function ReleaseMetadataDetailView({
           );
         })}
         </nav>
+
+        <div
+          className="metadata-sidebar-resize-handle"
+          role="separator"
+          aria-label="Resize release and track sidebar"
+          aria-orientation="vertical"
+          aria-valuemin={MIN_METADATA_SIDEBAR_WIDTH_REM}
+          aria-valuemax={MAX_METADATA_SIDEBAR_WIDTH_REM}
+          aria-valuenow={metadataSidebarWidthRem}
+          aria-valuetext={`${metadataSidebarWidthRem.toFixed(1)} rem`}
+          aria-keyshortcuts="ArrowLeft ArrowRight Home"
+          tabIndex={0}
+          title="Drag to resize. Arrow keys adjust width; Home or double-click resets."
+          onDoubleClick={resetMetadataSidebarWidth}
+          onKeyDown={handleMetadataSidebarResizeKeyDown}
+          onPointerDown={
+            handleMetadataSidebarResizePointerDown
+          }
+          onPointerMove={
+            handleMetadataSidebarResizePointerMove
+          }
+          onPointerUp={
+            handleMetadataSidebarResizePointerEnd
+          }
+          onPointerCancel={
+            handleMetadataSidebarResizePointerEnd
+          }
+        />
 
         <div className="release-metadata-content">
           {readinessTarget &&

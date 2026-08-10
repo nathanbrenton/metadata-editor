@@ -10141,16 +10141,55 @@ input[aria-invalid="true"] {
   gap: 0.65rem;
 }
 
+.metadata-sidebar-resize-handle {
+  display: none;
+}
+
 /* Keep the long track list independently available while metadata follows the page scroll. */
 @media (min-width: 48.001rem) {
   .release-metadata-workspace {
     grid-template-columns:
-      minmax(13.5rem, 15.5rem)
+      var(--metadata-sidebar-width, 20rem)
+      0.6rem
       minmax(0, 1fr);
+    column-gap: 0.5rem;
     height: auto;
     min-height: 0;
     align-items: start;
     overflow: visible;
+  }
+
+  .metadata-sidebar-resize-handle {
+    position: sticky;
+    top: 4.75rem;
+    display: block;
+    min-height: 8rem;
+    height: calc(100vh - 9rem);
+    cursor: col-resize;
+    touch-action: none;
+    user-select: none;
+    outline: none;
+  }
+
+  .metadata-sidebar-resize-handle::before {
+    position: absolute;
+    top: 0.5rem;
+    bottom: 0.5rem;
+    left: 50%;
+    width: 2px;
+    border-radius: 999px;
+    background: #343f48;
+    content: "";
+    transform: translateX(-50%);
+    transition:
+      background-color 120ms ease,
+      width 120ms ease;
+  }
+
+  .metadata-sidebar-resize-handle:hover::before,
+  .metadata-sidebar-resize-handle:focus-visible::before {
+    width: 3px;
+    background: #7890a6;
   }
 
   .metadata-document-tabs {
@@ -10309,14 +10348,6 @@ input[aria-invalid="true"] {
 
 .track-navigation-badges > small {
   margin: 0;
-}
-
-@media (max-width: 70rem) and (min-width: 48.001rem) {
-  .release-metadata-workspace {
-    grid-template-columns:
-      minmax(12.5rem, 13.5rem)
-      minmax(0, 1fr);
-  }
 }
 
 @media (max-width: 48rem) {
