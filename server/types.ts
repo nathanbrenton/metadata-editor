@@ -19,6 +19,17 @@ export type TrackScanResult = {
   artworkMasters: DiscoveredAsset[];
 };
 
+export type VideoScanResult = {
+  id: string;
+  relativePath: string;
+  title?: string;
+  videoType?: string;
+  relatedTrackId?: string;
+  masterPath?: string;
+  metadataFiles: MetadataFileStatus[];
+  videoMasters: DiscoveredAsset[];
+};
+
 export type ReleaseScanResult = {
   id: string;
   relativePath: string;
@@ -27,6 +38,7 @@ export type ReleaseScanResult = {
   metadataFiles: MetadataFileStatus[];
   artworkMasters: DiscoveredAsset[];
   tracks: TrackScanResult[];
+  videos?: VideoScanResult[];
 };
 
 export type LibraryScanResult = {

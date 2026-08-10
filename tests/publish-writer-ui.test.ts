@@ -18,14 +18,14 @@ const locationsSource = await readFile(
   "utf8",
 );
 
-test("enables one reviewed Build or Update public-package action", () => {
+test("enables one reviewed Publish or Update public-package action", () => {
   assert.match(
     appSource,
     /function canBuildPublishPlan/,
   );
   assert.match(
     appSource,
-    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update public package[\s\S]*?Build public package/,
+    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update public package[\s\S]*?Publish public package/,
   );
   assert.match(
     appSource,

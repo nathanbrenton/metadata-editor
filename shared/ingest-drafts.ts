@@ -2,6 +2,7 @@ import type {
   IngestBuildAssetDraft,
   IngestBuildDraft,
   IngestBuildTrackDraft,
+  IngestBuildVideoDraft,
 } from "./ingest-builder.js";
 import {
   buildReleaseDirectoryId,
@@ -165,6 +166,17 @@ function preserveTrack(
   };
 }
 
+function preserveVideo(
+  previous: IngestBuildVideoDraft,
+  fallback: IngestBuildVideoDraft,
+): IngestBuildVideoDraft {
+  return {
+    ...fallback,
+    ...previous,
+    sourceRelativePath: fallback.sourceRelativePath,
+  };
+}
+
 function preserveAsset(
   previous: IngestBuildAssetDraft,
   fallback: IngestBuildAssetDraft,
@@ -231,6 +243,12 @@ export function mergeIngestDraftAfterRescan(
       track,
     ]),
   );
+  const previousVideos = new Map(
+    (stored.draft.videos ?? []).map((video) => [
+      video.sourceRelativePath,
+      video,
+    ]),
+  );
   const previousAssets = new Map(
     stored.draft.assets.map((asset) => [
       asset.sourceRelativePath,
@@ -259,6 +277,25 @@ export function mergeIngestDraftAfterRescan(
           };
     },
   );
+
+  const videos = (defaults.videos ?? []).map((fallback) => {
+    const previous = previousVideos.get(
+      fallback.sourceRelativePath,
+    );
+
+    return previous
+      ? preserveVideo(previous, fallback)
+      : {
+          ...fallback,
+          include: false,
+        };
+  });
+
+  for (const previous of stored.draft.videos ?? []) {
+    if (!currentFiles.has(previous.sourceRelativePath)) {
+      videos.push(previous);
+    }
+  }
 
   let embeddedFrontAdded = false;
   const existingIncludedArtwork = stored.draft.assets.some(
@@ -311,6 +348,7 @@ export function mergeIngestDraftAfterRescan(
   const allPaths = new Set([
     ...currentFiles.keys(),
     ...previousTracks.keys(),
+    ...previousVideos.keys(),
     ...stored.draft.assets
       .filter((asset) => !asset.embeddedArtwork)
       .map((asset) => asset.sourceRelativePath),
@@ -395,6 +433,7 @@ export function mergeIngestDraftAfterRescan(
       candidateId:
         inspection.candidate.id,
       tracks,
+      videos,
       assets,
     },
     sourceStatuses,
@@ -428,6 +467,9 @@ export function buildBlockingSourceStatuses(
       .map((track) =>
         track.sourceRelativePath,
       ),
+    ...(draft.videos ?? [])
+      .filter((video) => video.include)
+      .map((video) => video.sourceRelativePath),
     ...draft.assets
       .filter((asset) => asset.include)
       .map((asset) =>

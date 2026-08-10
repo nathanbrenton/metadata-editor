@@ -48,6 +48,30 @@ export type IngestBuildTrackDraft = {
   replacementTrackId?: string;
 };
 
+export const ingestVideoTypeOptions = [
+  "music_video",
+  "live_performance",
+  "visualizer",
+  "lyric_video",
+  "studio_footage",
+  "jam_session",
+  "interview",
+  "promotional",
+  "other",
+] as const;
+
+export type IngestBuildVideoDraft = {
+  sourceRelativePath: string;
+  include: boolean;
+  /** Stable Library identity. Editing the display title does not rewrite it. */
+  videoId: string;
+  title: string;
+  videoType: string;
+  /** Optional semantic relationship; the video remains release-scoped. */
+  relatedTrackSourceRelativePath: string;
+  destinationFilename: string;
+};
+
 export type IngestArtworkAssignmentDraft = {
   id: string;
   scope: "release" | "track";
@@ -145,6 +169,8 @@ export type IngestBuildDraft = {
   releaseDate: string;
   releaseType: string;
   tracks: IngestBuildTrackDraft[];
+  /** Optional on read so stored V1 drafts and older test fixtures remain compatible. */
+  videos?: IngestBuildVideoDraft[];
   assets: IngestBuildAssetDraft[];
 };
 
@@ -175,6 +201,8 @@ export type IngestBuildPreview = {
   items: IngestBuildPlanItem[];
   summary: {
     trackCount: number;
+    videoCount: number;
+    addedVideoCount: number;
     copiedFileCount: number;
     tomlCount: number;
     totalCopyBytes: number;
@@ -213,6 +241,15 @@ export type IngestStagingTrackTarget = {
   metadataValues?: Record<string, IngestStagingMetadataValue>;
 };
 
+export type IngestStagingVideoTarget = {
+  id: string;
+  title: string;
+  videoType: string;
+  sourceRelativePath: string;
+  destinationRelativePath: string;
+  relatedTrackId?: string;
+};
+
 export type IngestStagingArtworkTarget = {
   sourceRelativePath: string;
   destinationRelativePath: string;
@@ -235,6 +272,7 @@ export type IngestStagingTargetStatus = {
     metadataValues?: Record<string, IngestStagingMetadataValue>;
   };
   existingTracks: IngestStagingTrackTarget[];
+  existingVideos: IngestStagingVideoTarget[];
   existingArtwork: IngestStagingArtworkTarget[];
 };
 
@@ -710,11 +748,34 @@ function defaultTrackDate(
   );
 }
 
+function defaultVideoTitle(
+  file: IngestFileInspection,
+): string {
+  return (
+    embeddedValue(file, ["title"]) ??
+    evidenceValue(file.evidence, "video.title") ??
+    filenameStem(file.filename)
+      .replace(/[_-]+/g, " ")
+      .trim()
+  );
+}
+
+export function buildVideoDirectoryId(
+  title: string,
+  ordinal = 1,
+): string {
+  const slug = slugifyIngestValue(title) || `video-${ordinal}`;
+  return `video_${slug}`;
+}
+
 export function createDefaultIngestBuildDraft(
   inspection: IngestCandidateInspection,
 ): IngestBuildDraft {
   const audioFiles = inspection.files.filter(
     (file) => file.mediaKind === "audio",
+  );
+  const videoFiles = inspection.files.filter(
+    (file) => file.mediaKind === "video",
   );
   const structure = analyzeIngestStructure(
     inspection,
@@ -827,6 +888,32 @@ export function createDefaultIngestBuildDraft(
       };
     },
   );
+  const usedVideoIds = new Set<string>();
+  const videos = videoFiles.map(
+    (file, index): IngestBuildVideoDraft => {
+      const title = defaultVideoTitle(file);
+      const baseId = buildVideoDirectoryId(title, index + 1);
+      let videoId = baseId;
+      let suffix = 2;
+      while (usedVideoIds.has(videoId)) {
+        videoId = `${baseId}-${suffix}`;
+        suffix += 1;
+      }
+      usedVideoIds.add(videoId);
+
+      return {
+        sourceRelativePath: file.relativePath,
+        include: true,
+        videoId,
+        title,
+        videoType: "other",
+        relatedTrackSourceRelativePath: "",
+        destinationFilename:
+          `video-master${extensionOf(file.filename)}`,
+      };
+    },
+  );
+
   const trackSourceByStructureNumber = new Map(
     tracks
       .map((track) => {
@@ -1002,8 +1089,11 @@ export function createDefaultIngestBuildDraft(
     releaseType:
       audioFiles.length === 1
         ? "single"
-        : "album",
+        : audioFiles.length === 0 && videoFiles.length > 0
+          ? "other"
+          : "album",
     tracks,
+    videos,
     assets,
   };
 }

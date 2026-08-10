@@ -31,6 +31,7 @@ function inspection(): IngestCandidateInspection {
       displayTitle: "Session",
       fileCount: 1,
       audioCount: 1,
+      videoCount: 0,
       imageCount: 0,
       textCount: 0,
       unknownCount: 0,

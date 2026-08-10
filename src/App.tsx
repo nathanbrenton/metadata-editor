@@ -28,6 +28,11 @@ import {
   buildIngestAudioPreviewUrl,
 } from "./ingest-audio-preview.js";
 
+import {
+  buildLibraryVideoPreviewUrl,
+  canPreviewLibraryVideoExtension,
+} from "./video-preview.js";
+
 
 import {
   getArrangementCreditDisplayPriority,
@@ -245,6 +250,7 @@ import {
 } from "../shared/track-directory-naming.js";
 import {
   buildReleaseDirectoryId,
+  ingestVideoTypeOptions,
 } from "../shared/ingest-builder.js";
 
 import {
@@ -338,6 +344,28 @@ type TrackScanResult = {
   artworkMasters: DiscoveredAsset[];
 };
 
+type VideoScanResult = {
+  id: string;
+  relativePath: string;
+  title?: string;
+  videoType?: string;
+  relatedTrackId?: string;
+  masterPath?: string;
+  metadataFiles: MetadataFileStatus[];
+  videoMasters: DiscoveredAsset[];
+};
+
+type VideoMetadataEditorSnapshot = {
+  releaseId: string;
+  videoId: string;
+  relativePath: string;
+  originalSha256: string;
+  title: string;
+  videoType: string;
+  relatedTrackId: string;
+  masterPath: string;
+};
+
 type ReleaseScanResult = {
   id: string;
   relativePath: string;
@@ -346,6 +374,7 @@ type ReleaseScanResult = {
   metadataFiles: MetadataFileStatus[];
   artworkMasters: DiscoveredAsset[];
   tracks: TrackScanResult[];
+  videos: VideoScanResult[];
 };
 
 type LibraryScanResult = {
@@ -1540,6 +1569,7 @@ export function App() {
     }
 
     let trackCount = 0;
+    let videoCount = 0;
     let missingCoreMetadataCount = 0;
     let missingCreditMetadataCount = 0;
     let missingSupplementalMetadataCount = 0;
@@ -1548,6 +1578,7 @@ export function App() {
 
     for (const release of scan.releases) {
       trackCount += release.tracks.length;
+      videoCount += release.videos.length;
       artworkMasterCount +=
         release.artworkMasters.length;
 
@@ -1574,6 +1605,7 @@ export function App() {
     return {
       releaseCount: scan.releases.length,
       trackCount,
+      videoCount,
       missingMetadataCount:
         missingCoreMetadataCount +
         missingCreditMetadataCount +
@@ -1629,6 +1661,10 @@ export function App() {
           "track",
         ),
         formatCount(
+          selectedRelease.videos.length,
+          "video",
+        ),
+        formatCount(
           audioMasterCount,
           "audio master",
         ),
@@ -1655,6 +1691,10 @@ export function App() {
           formatCount(
             candidate.audioCount,
             "audio file",
+          ),
+          formatCount(
+            candidate.videoCount,
+            "video file",
           ),
           formatCount(
             candidate.imageCount,
@@ -1711,6 +1751,10 @@ export function App() {
           formatCount(
             candidate.audioCount,
             "audio file",
+          ),
+          formatCount(
+            candidate.videoCount,
+            "video file",
           ),
           formatCount(
             candidate.imageCount,
@@ -1806,6 +1850,10 @@ export function App() {
       formatCount(
         summary.trackCount,
         "track",
+      ),
+      formatCount(
+        summary.videoCount,
+        "video",
       ),
       formatCount(
         summary.audioMasterCount,
@@ -2225,6 +2273,7 @@ export function App() {
                           showAdminTools={
                             showAdminTools
                           }
+                          onNotify={notify}
                         />
                       ),
                     )}
@@ -4346,6 +4395,7 @@ function StagingWorkspace({
               <tr>
                 <th scope="col">Release</th>
                 <th scope="col" className="numeric">Tracks</th>
+                <th scope="col" className="numeric">Videos</th>
                 <th scope="col" className="numeric">Audio masters</th>
                 <th scope="col">Metadata</th>
                 <th scope="col">Update behavior</th>
@@ -4355,7 +4405,7 @@ function StagingWorkspace({
             <tbody>
               {releases.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="workflow-empty-cell">
+                  <td colSpan={7} className="workflow-empty-cell">
                     No staged release workspaces were found in the configured library root.
                   </td>
                 </tr>
@@ -4376,6 +4426,7 @@ function StagingWorkspace({
                         <code>{release.relativePath}</code>
                       </th>
                       <td className="numeric">{release.tracks.length}</td>
+                      <td className="numeric">{release.videos.length}</td>
                       <td className="numeric">{masterCount}</td>
                       <td>
                         <span
@@ -4386,8 +4437,8 @@ function StagingWorkspace({
                       </td>
                       <td>
                         Preserve authored files; add new
-                        tracks and apply validated numbering
-                        changes only.
+                        tracks/videos and apply validated
+                        track numbering changes only.
                       </td>
                       <td className="action-column">
                         <button
@@ -4682,7 +4733,7 @@ function publishPreflightGuidance(
   }
 
   if (plan.status === "warning") {
-    return "No blocking issue was found, but the remaining warnings should be reviewed before building the public package.";
+    return "No blocking issue was found, but the remaining warnings should be reviewed before publishing the public package.";
   }
 
   if (publicPackageIsUpToDate(plan)) {
@@ -4716,7 +4767,7 @@ function publishNextStepLabel(
 
   return publicReleaseAlreadyExists(plan)
     ? "Update public package"
-    : "Build public package";
+    : "Publish public package";
 }
 
 function PublishWorkspace({
@@ -4925,21 +4976,21 @@ function PublishWorkspace({
         throw new Error(
           "error" in payload && payload.error
             ? payload.error
-            : "Unable to build the public package.",
+            : "Unable to publish the public package.",
         );
       }
 
       await loadPublishPlan(plan.releaseId);
       await Promise.resolve(onRefresh());
       onNotify(
-        `Public package ${payload.mode === "update" ? "updated" : "built"} successfully.`,
+        `Public package ${payload.mode === "update" ? "updated" : "published"} successfully.`,
         "success",
       );
     } catch (publishError) {
       setPlanError(
         publishError instanceof Error
           ? publishError.message
-          : "Unable to build the public package.",
+          : "Unable to publish the public package.",
       );
     } finally {
       setPublishLoading(false);
@@ -4957,7 +5008,7 @@ function PublishWorkspace({
             the exact sanitized package intended for
             audio-player. Preflight is read-only; Prepare release
             can generate private HLS web-stream and waveform derivatives.
-            Build public package writes a validated sanitized snapshot to
+            Publish public package writes a validated sanitized snapshot to
             published-media without exposing canonical masters.
           </p>
         </div>
@@ -4989,7 +5040,7 @@ function PublishWorkspace({
           Preflight itself writes nothing. After review, Prepare
           release may create or replace only reproducible HLS stream
           and waveform derivatives inside the private Library. Once
-          those are current, Build or Update public package stages,
+          those are current, Publish or Update public package stages,
           validates, and atomically promotes the complete sanitized
           release snapshot.
         </span>
@@ -5261,7 +5312,7 @@ function PublishWorkspace({
                       canPreparePublishPlan(selectedPlan)
                         ? "Generate reviewed private playback MP3s plus segmented AAC-LC HLS streams and waveform derivatives in the private Library."
                         : canBuildPublishPlan(selectedPlan)
-                          ? "Build a complete sanitized public release snapshot, validate it, and atomically promote it into published-media."
+                          ? "Publish a complete sanitized public release snapshot, validate it, and atomically promote it into published-media."
                           : "Resolve the blocking preflight issues first."
                     }
                   >
@@ -5275,7 +5326,7 @@ function PublishWorkspace({
                     {canPreparePublishPlan(selectedPlan)
                       ? "Creates reproducible private playback MP3, HLS stream, and waveform derivatives. Canonical masters are never modified, and private MP3s are never copied into published-media."
                       : canBuildPublishPlan(selectedPlan)
-                        ? "Builds the complete public snapshot from current Library metadata, browser artwork, waveform peaks, and HLS assets. Existing public releases are replaced as a unit so obsolete files cannot survive an update."
+                        ? "Publishes the complete public snapshot from current Library metadata, browser artwork, waveform peaks, and HLS assets. Existing public releases are replaced as a unit so obsolete files cannot survive an update."
                         : "Resolve the blocking issues shown in preflight before preparing derivatives or publishing."}
                   </small>
                 </>
@@ -5603,6 +5654,9 @@ function IngestCandidateTable({
                 Audio
               </th>
               <th scope="col" className="numeric">
+                Video
+              </th>
+              <th scope="col" className="numeric">
                 Images
               </th>
               <th scope="col" className="numeric">
@@ -5672,6 +5726,9 @@ function IngestCandidateTable({
                 </td>
                 <td className="numeric">
                   {candidate.audioCount}
+                </td>
+                <td className="numeric">
+                  {candidate.videoCount}
                 </td>
                 <td className="numeric">
                   {candidate.imageCount}
@@ -5781,6 +5838,18 @@ function IngestSourcePreview({
           onError={() => setImagePreviewFailed(true)}
         />
       </a>
+    );
+  }
+
+  if (file.mediaKind === "video") {
+    return (
+      <span
+        className="ingest-source-video-indicator"
+        title="Video source detected; source preview will be added with the video workflow."
+        aria-label={`Video source: ${file.filename}`}
+      >
+        VID
+      </span>
     );
   }
 
@@ -6073,15 +6142,18 @@ function IngestCandidateInspectionView({
             className="primary-button"
             disabled={
               candidate.audioCount === 0 &&
+              candidate.videoCount === 0 &&
               !inspection.files.some(
                 (file) => file.metadataSidecar,
               )
             }
             title={
-              candidate.audioCount === 0 &&
-              inspection.files.some((file) => file.metadataSidecar)
-                ? "Continue with metadata-sidecar evidence and target an existing Library release in Staging."
-                : undefined
+              candidate.videoCount > 0
+                ? "Continue to Staging to confirm canonical video placement, stable identity, type, and any optional track relationship."
+                : candidate.audioCount === 0 &&
+                    inspection.files.some((file) => file.metadataSidecar)
+                  ? "Continue with metadata-sidecar evidence and target an existing Library release in Staging."
+                  : undefined
             }
             onClick={() =>
               onOpenStaging(identityOverride)
@@ -6091,6 +6163,14 @@ function IngestCandidateInspectionView({
           </button>
         </div>
       </header>
+
+      {candidate.videoCount > 0 && (
+        <p className="status-message">
+          Video source{candidate.videoCount === 1 ? "" : "s"} detected and
+          probe-verified. Continue to Staging to confirm each canonical video
+          destination, stable ID, descriptive type, and optional related track.
+        </p>
+      )}
 
       <section
         className="ingest-table-panel"
@@ -6284,7 +6364,8 @@ function IngestCandidateInspectionView({
                       )}
                     </th>
                     <td className="numeric">
-                      {file.mediaKind === "audio" &&
+                      {(file.mediaKind === "audio" ||
+                        file.mediaKind === "video") &&
                       file.technical.durationSeconds !==
                         undefined
                         ? formatDuration(
@@ -6577,6 +6658,15 @@ function formatIngestTechnicalValue(
     return `${value} px`;
   }
 
+  if (
+    key === "frameRate" &&
+    typeof value === "number"
+  ) {
+    return `${value.toLocaleString(undefined, {
+      maximumFractionDigits: 3,
+    })} fps`;
+  }
+
   return String(value);
 }
 
@@ -6586,11 +6676,16 @@ function ReleaseCard({
   onLibraryChanged,
   onOpenMetadata,
   showAdminTools,
+  onNotify,
 }: {
   release: ReleaseScanResult;
   onLibraryChanged: () => Promise<void>;
   onOpenMetadata: () => void;
   showAdminTools: boolean;
+  onNotify: (
+    message: string,
+    tone?: ToastMessage["tone"],
+  ) => void;
 }) {
   const [adminToolsOpen, setAdminToolsOpen] =
     useState(false);
@@ -6634,6 +6729,131 @@ function ReleaseCard({
     useState<string | null>(null);
   const [creationMessage, setCreationMessage] =
     useState<string | null>(null);
+  const [videoPreviewId, setVideoPreviewId] =
+    useState<string | null>(null);
+  const [videoPreviewErrorId, setVideoPreviewErrorId] =
+    useState<string | null>(null);
+  const [videoEditorId, setVideoEditorId] =
+    useState<string | null>(null);
+  const [videoEditorDraft, setVideoEditorDraft] =
+    useState<VideoMetadataEditorSnapshot | null>(null);
+  const [videoEditorLoading, setVideoEditorLoading] =
+    useState(false);
+  const [videoEditorSaving, setVideoEditorSaving] =
+    useState(false);
+  const [videoEditorError, setVideoEditorError] =
+    useState<string | null>(null);
+
+  const openVideoMetadataEditor = async (
+    videoId: string,
+  ) => {
+    setVideoPreviewId(null);
+    setVideoPreviewErrorId(null);
+    setVideoEditorId(videoId);
+    setVideoEditorDraft(null);
+    setVideoEditorError(null);
+    setVideoEditorLoading(true);
+
+    try {
+      const query = new URLSearchParams({
+        release: release.id,
+        video: videoId,
+      });
+      const response = await fetch(
+        `/api/library/video-metadata?${query.toString()}`,
+      );
+      const payload = (await response.json()) as
+        | VideoMetadataEditorSnapshot
+        | { error?: string };
+
+      if (!response.ok || !("originalSha256" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : `Video metadata load failed: HTTP ${response.status}`,
+        );
+      }
+
+      setVideoEditorDraft(payload);
+    } catch (error) {
+      setVideoEditorError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load video metadata",
+      );
+    } finally {
+      setVideoEditorLoading(false);
+    }
+  };
+
+  const saveVideoMetadataEditor = async () => {
+    if (!videoEditorDraft) {
+      return;
+    }
+
+    const title = videoEditorDraft.title.trim();
+    const videoType =
+      videoEditorDraft.videoType.trim();
+
+    if (!title || !videoType) {
+      setVideoEditorError(
+        "Video title and type are required.",
+      );
+      return;
+    }
+
+    setVideoEditorSaving(true);
+    setVideoEditorError(null);
+
+    try {
+      const response = await fetch(
+        "/api/library/save-video-metadata",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: release.id,
+            videoId: videoEditorDraft.videoId,
+            originalSha256:
+              videoEditorDraft.originalSha256,
+            title,
+            videoType,
+            relatedTrackId:
+              videoEditorDraft.relatedTrackId,
+          }),
+        },
+      );
+      const payload = (await response.json()) as {
+        savedSha256?: string;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.savedSha256) {
+        throw new Error(
+          payload.error ??
+            `Video metadata save failed: HTTP ${response.status}`,
+        );
+      }
+
+      setVideoEditorId(null);
+      setVideoEditorDraft(null);
+      onNotify(
+        "Video metadata updated.",
+        "success",
+      );
+      await onLibraryChanged();
+    } catch (error) {
+      setVideoEditorError(
+        error instanceof Error
+          ? error.message
+          : "Unable to save video metadata",
+      );
+    } finally {
+      setVideoEditorSaving(false);
+    }
+  };
 
   const loadPreview = async () => {
     setPreviewLoading(true);
@@ -6924,6 +7144,15 @@ function ReleaseCard({
               {release.tracks.length === 1
                 ? "track"
                 : "tracks"}
+              {release.videos.length > 0 && (
+                <>
+                  {" · "}
+                  {release.videos.length}{" "}
+                  {release.videos.length === 1
+                    ? "video"
+                    : "videos"}
+                </>
+              )}
             </span>
           </span>
         </button>
@@ -6968,6 +7197,313 @@ function ReleaseCard({
           </button>
         </div>
       </header>
+
+      {release.videos.length > 0 && (
+        <details className="library-video-disclosure">
+          <summary>
+            <span>Videos</span>
+            <small>
+              {release.videos.length}{" "}
+              {release.videos.length === 1
+                ? "video"
+                : "videos"}
+            </small>
+          </summary>
+
+          <div className="library-video-list">
+            {release.videos.map((video) => {
+              const master = video.videoMasters[0];
+              const normalizedVideoType =
+                video.videoType?.trim() ?? "";
+              const videoType = normalizedVideoType
+                ? normalizedVideoType.replaceAll("_", " ")
+                : "Type not set";
+              const previewSupported =
+                video.videoMasters.length === 1 &&
+                Boolean(master) &&
+                canPreviewLibraryVideoExtension(
+                  master?.extension ?? "",
+                );
+              const previewOpen =
+                videoPreviewId === video.id;
+              const editorOpen =
+                videoEditorId === video.id;
+
+              return (
+                <Fragment key={video.relativePath}>
+                  <div
+                    className="library-video-row"
+                  >
+                    <span
+                      className="library-video-kind"
+                      aria-hidden="true"
+                    >
+                      VID
+                    </span>
+                    <span className="library-video-identity">
+                      <strong>
+                        {video.title?.trim() || video.id}
+                      </strong>
+                      <small>{video.id}</small>
+                    </span>
+                    <span className="library-video-type">
+                      {videoType}
+                    </span>
+                    <span className="library-video-relation">
+                      {video.relatedTrackId
+                        ? <>Related · <code>{video.relatedTrackId}</code></>
+                        : "Release-level"}
+                    </span>
+                    <button
+                      type="button"
+                      className="library-video-preview-toggle"
+                      disabled={!previewSupported}
+                      title={
+                        previewSupported
+                          ? previewOpen
+                            ? "Hide the read-only canonical video preview"
+                            : "Preview the canonical video master without creating a derivative"
+                          : video.videoMasters.length !== 1
+                            ? "Preview requires exactly one canonical video master"
+                            : "Browser-direct preview currently supports MP4, M4V, MOV, and WebM masters"
+                      }
+                      onClick={() => {
+                        setVideoEditorId(null);
+                        setVideoEditorDraft(null);
+                        setVideoEditorError(null);
+                        setVideoPreviewErrorId(null);
+                        setVideoPreviewId(
+                          previewOpen
+                            ? null
+                            : video.id,
+                        );
+                      }}
+                    >
+                      {previewOpen
+                        ? "Hide preview"
+                        : "Preview"}
+                    </button>
+                    <button
+                      type="button"
+                      className="library-video-edit-toggle"
+                      aria-expanded={editorOpen}
+                      onClick={() => {
+                        if (editorOpen) {
+                          setVideoEditorId(null);
+                          setVideoEditorDraft(null);
+                          setVideoEditorError(null);
+                          return;
+                        }
+
+                        void openVideoMetadataEditor(
+                          video.id,
+                        );
+                      }}
+                    >
+                      {editorOpen
+                        ? "Cancel edit"
+                        : "Edit metadata"}
+                    </button>
+                    <span
+                      className={`badge ${
+                        video.videoMasters.length === 1
+                          ? "complete"
+                          : "warning"
+                      }`}
+                      title={
+                        master
+                          ? master.filename
+                          : "No canonical video master detected"
+                      }
+                    >
+                      {video.videoMasters.length === 1
+                        ? "Master"
+                        : video.videoMasters.length === 0
+                          ? "Missing master"
+                          : `${video.videoMasters.length} masters`}
+                    </span>
+                  </div>
+
+                  {previewOpen && master && (
+                    <div className="library-video-preview-panel">
+                      <video
+                        className="library-video-preview-player"
+                        controls
+                        playsInline
+                        preload="metadata"
+                        src={buildLibraryVideoPreviewUrl(
+                          release.id,
+                          video.id,
+                        )}
+                        aria-label={`Preview ${video.title?.trim() || video.id}`}
+                        onLoadedMetadata={() =>
+                          setVideoPreviewErrorId(null)
+                        }
+                        onError={() =>
+                          setVideoPreviewErrorId(video.id)
+                        }
+                      />
+                      <div className="library-video-preview-copy">
+                        <strong>
+                          Read-only canonical master preview
+                        </strong>
+                        <small>
+                          No video derivative is generated. Browser playback still depends on the codecs inside the canonical container.
+                        </small>
+                        {videoPreviewErrorId === video.id && (
+                          <small className="metadata-error">
+                            This browser could not play the canonical master directly. The Library master is unchanged; a later video-derivative milestone can provide a browser-compatible preview.
+                          </small>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {editorOpen && (
+                    <div className="library-video-editor-panel">
+                      {videoEditorLoading ? (
+                        <p className="metadata-empty-value">
+                          Loading video metadata…
+                        </p>
+                      ) : videoEditorDraft ? (
+                        <>
+                          <div className="library-video-editor-fields">
+                            <label>
+                              <span>Title</span>
+                              <input
+                                type="text"
+                                value={videoEditorDraft.title}
+                                disabled={videoEditorSaving}
+                                onChange={(event) =>
+                                  setVideoEditorDraft((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          title: event.target.value,
+                                        }
+                                      : current,
+                                  )
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              <span>Type</span>
+                              <input
+                                type="text"
+                                list={`library-video-type-options-${release.id}`}
+                                value={videoEditorDraft.videoType}
+                                disabled={videoEditorSaving}
+                                onChange={(event) =>
+                                  setVideoEditorDraft((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          videoType: event.target.value,
+                                        }
+                                      : current,
+                                  )
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              <span>Related track</span>
+                              <select
+                                value={videoEditorDraft.relatedTrackId}
+                                disabled={videoEditorSaving}
+                                onChange={(event) =>
+                                  setVideoEditorDraft((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          relatedTrackId: event.target.value,
+                                        }
+                                      : current,
+                                  )
+                                }
+                              >
+                                <option value="">
+                                  Release-level only
+                                </option>
+                                {release.tracks.map((track) => (
+                                  <option
+                                    key={track.id}
+                                    value={track.id}
+                                  >
+                                    {track.id}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+
+                          <div className="library-video-editor-reference">
+                            <span>
+                              Stable video ID · <code>{videoEditorDraft.videoId}</code>
+                            </span>
+                            <span>
+                              Canonical master · <code>{videoEditorDraft.masterPath}</code>
+                            </span>
+                            <small>
+                              Stable identity and canonical master path are intentionally read-only here.
+                            </small>
+                          </div>
+
+                          {videoEditorError && (
+                            <p className="metadata-error">
+                              {videoEditorError}
+                            </p>
+                          )}
+
+                          <div className="library-video-editor-actions">
+                            <button
+                              type="button"
+                              className="primary-button"
+                              disabled={videoEditorSaving}
+                              onClick={() =>
+                                void saveVideoMetadataEditor()
+                              }
+                            >
+                              {videoEditorSaving
+                                ? "Saving…"
+                                : "Save video metadata"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={videoEditorSaving}
+                              onClick={() => {
+                                setVideoEditorId(null);
+                                setVideoEditorDraft(null);
+                                setVideoEditorError(null);
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="metadata-error">
+                          {videoEditorError ??
+                            "Unable to load video metadata."}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </Fragment>
+              );
+            })}
+
+            <datalist
+              id={`library-video-type-options-${release.id}`}
+            >
+              {ingestVideoTypeOptions.map((value) => (
+                <option key={value} value={value} />
+              ))}
+            </datalist>
+          </div>
+        </details>
+      )}
 
       {showAdminTools && adminToolsOpen && (
       <div
@@ -7048,6 +7584,32 @@ function ReleaseCard({
                     <TrackMetadataSummary
                       key={track.relativePath}
                       track={track}
+                    />
+                  ))
+                )}
+              </div>
+            </details>
+
+            <details>
+              <summary>
+                <span>Video Assets</span>
+                <small>
+                  {release.videos.length} videos
+                </small>
+              </summary>
+
+              <div className="library-disclosure-content asset-stack">
+                {release.videos.length === 0 ? (
+                  <p className="empty-state">
+                    No canonical videos detected.
+                  </p>
+                ) : (
+                  release.videos.map((video) => (
+                    <AssetPanel
+                      key={video.relativePath}
+                      title={`${video.title?.trim() || video.id} video master`}
+                      assets={video.videoMasters}
+                      emptyLabel="No video master detected"
                     />
                   ))
                 )}
@@ -7613,6 +8175,15 @@ function stringArrayToEditorText(
 }
 
 function editorTextToStringArray(
+  value: string,
+): string[] {
+  // Preserve the editor's exact line text while the user is typing.
+  // Trimming here makes a controlled textarea immediately erase a trailing
+  // space or newline, which prevents entering ordinary multi-word values.
+  return value.split("\n");
+}
+
+function normalizeStringArrayEditorValue(
   value: string,
 ): string[] {
   return value
@@ -8747,7 +9318,11 @@ function getDocumentDraftChanges(
     )
     .map(([key, value]) => ({
       path: key.slice(prefix.length),
-      value,
+      value: Array.isArray(value)
+        ? value
+            .map((entry) => entry.trim())
+            .filter((entry) => entry.length > 0)
+        : value,
     }));
 }
 
@@ -11078,6 +11653,97 @@ function getSupplementalFieldGuidance(
     exactGuidance[normalizedPath];
 
   if (exact) {
+  const artworkMetadataMatch = path.match(
+    /^(release|track)\.artwork\[\d+\]\.(id|role|primary|description|credits|copyright)$/,
+  );
+
+  if (artworkMetadataMatch) {
+    const artworkField = artworkMetadataMatch[2];
+
+    const artworkGuidance: Record<
+      string,
+      {
+        examples?: string[];
+        commonValues?: string[];
+        help: string;
+      }
+    > = {
+      id: {
+        examples: [
+          "release-front-cover",
+          "alternate-cover-01",
+        ],
+        help:
+          "Stable internal identifier for this artwork record. Use a short machine-friendly ID that identifies the asset, not the creator's name. Put creator names and contribution roles in Artwork Credits instead.",
+      },
+      role: {
+        commonValues: [
+          "front_cover",
+          "back_cover",
+          "booklet",
+          "disc",
+          "media_label",
+          "liner",
+          "leaflet",
+          "alternate",
+          "artist",
+          "band",
+          "composer",
+          "recording_location",
+          "publisher_logo",
+          "studio_logo",
+          "other",
+        ],
+        examples: [
+          "front_cover",
+          "alternate",
+        ],
+        help:
+          "Describes what the image is used for, not who made it. Put creator names in Artwork Credits.",
+      },
+      primary: {
+        examples: [
+          "true",
+          "false",
+        ],
+        help:
+          "Marks the preferred/default artwork for this scope. The primary front cover is normally true; alternate, back, booklet, and other artwork is normally false. This field does not identify an artist or designer.",
+      },
+      description: {
+        examples: [
+          "Front cover",
+          "Alternate monochrome cover",
+          "Band photograph used on the back cover",
+        ],
+        help:
+          "Human-readable description of what this artwork is or depicts. Do not use Description as the creator-credit field; put names and contribution wording in Artwork Credits.",
+      },
+      credits: {
+        examples: [
+          "Artwork by Jane Doe",
+          "Illustration by Jane Doe",
+          "Photography by Alex Smith",
+          "Design by Example Studio",
+          "Art direction by Jane Doe",
+          "Cover concept by Jane Doe",
+          "Artwork prompt by Jane Doe",
+        ],
+        help:
+          "Artwork credits identify who created or contributed to this visual asset. Enter one credit statement per line and include both the contribution role and the credited person or organization. For example: Artwork by Jane Doe; Photography by Alex Smith; Design by Example Studio. A person's name belongs here when you are crediting their artwork contribution. Use separate lines when several people performed different roles.",
+      },
+      copyright: {
+        examples: [
+          "© 2026 Jane Doe",
+          "© 2026 Example Studio",
+        ],
+        help:
+          "Artwork-specific copyright notice for this image. This is ownership/rightsholder information, not the general creator-credit field. Put creator or contributor names in Artwork Credits; leave this blank when the release-level rights statement already governs the artwork and no artwork-specific notice is needed.",
+      },
+    };
+
+    return artworkGuidance[artworkField];
+  }
+
     return {
       ...exact,
       commonValues: mergeMetadataGuidanceValues(
@@ -19490,6 +20156,16 @@ function MetadataValueCell({
               row.path,
               originalValue,
               editorTextToStringArray(
+                event.target.value,
+              ),
+            )
+          }
+          onBlur={(event) =>
+            onDraftValueChange(
+              document,
+              row.path,
+              originalValue,
+              normalizeStringArrayEditorValue(
                 event.target.value,
               ),
             )

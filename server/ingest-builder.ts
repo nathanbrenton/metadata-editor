@@ -51,6 +51,7 @@ import {
   type IngestBuildOperation,
   type IngestStagingTargetStatus,
   type IngestBuildTrackDraft,
+  type IngestBuildVideoDraft,
   type IngestEmbeddedArtworkSourceDraft,
 } from "../shared/ingest-builder.js";
 import type {
@@ -151,6 +152,15 @@ type ExistingReceiptTrack = {
   destinationRelativePath: string;
 };
 
+type ExistingReceiptVideo = {
+  id: string;
+  title: string;
+  videoType: string;
+  sourceRelativePath: string;
+  destinationRelativePath: string;
+  relatedTrackId?: string;
+};
+
 type ExistingReceiptCopy = {
   sourceRelativePath: string;
   destinationRelativePath: string;
@@ -163,6 +173,7 @@ type ExistingReceiptCopy = {
 type ExistingIngestReceipt = {
   raw: Record<string, unknown>;
   tracks: ExistingReceiptTrack[];
+  videos: ExistingReceiptVideo[];
   copies: ExistingReceiptCopy[];
 };
 
@@ -349,6 +360,59 @@ function parseTrackDraft(
     destinationFilename: requireString(
       value.destinationFilename,
       `Track ${index + 1} destination filename`,
+      255,
+    ),
+  };
+}
+
+
+function parseVideoDraft(
+  value: unknown,
+  index: number,
+): IngestBuildVideoDraft {
+  if (!isRecord(value)) {
+    throw new Error(`Video ${index + 1} must be an object.`);
+  }
+
+  const videoId = requireString(
+    value.videoId,
+    `Video ${index + 1} ID`,
+    160,
+  );
+  if (!/^[a-z0-9][a-z0-9_-]*$/.test(videoId)) {
+    throw new Error(
+      `Video ${index + 1} ID may contain lowercase letters, numbers, hyphens, and underscores only.`,
+    );
+  }
+
+  return {
+    sourceRelativePath: requireString(
+      value.sourceRelativePath,
+      `Video ${index + 1} source path`,
+      1000,
+    ),
+    include: requireBoolean(
+      value.include,
+      `Video ${index + 1} include`,
+    ),
+    videoId,
+    title: requireString(
+      value.title,
+      `Video ${index + 1} title`,
+    ),
+    videoType: requireString(
+      value.videoType,
+      `Video ${index + 1} type`,
+      80,
+    ),
+    relatedTrackSourceRelativePath: optionalString(
+      value.relatedTrackSourceRelativePath,
+      `Video ${index + 1} related track source`,
+      1000,
+    ),
+    destinationFilename: requireString(
+      value.destinationFilename,
+      `Video ${index + 1} destination filename`,
       255,
     ),
   };
@@ -543,6 +607,12 @@ export function parseIngestBuildDraft(
     );
   }
 
+  if (value.videos !== undefined && !Array.isArray(value.videos)) {
+    throw new Error(
+      "Ingest build videos must be an array when present.",
+    );
+  }
+
   if (!Array.isArray(value.assets)) {
     throw new Error(
       "Ingest build assets must be an array.",
@@ -578,6 +648,9 @@ export function parseIngestBuildDraft(
       80,
     ),
     tracks: value.tracks.map(parseTrackDraft),
+    videos: Array.isArray(value.videos)
+      ? value.videos.map(parseVideoDraft)
+      : [],
     assets: value.assets.map(parseAssetDraft),
   };
 }
@@ -635,6 +708,12 @@ function expectedAudioDestination(
   return `audio-master${extensionOf(file.filename)}`;
 }
 
+function expectedVideoDestination(
+  file: IngestFileInspection,
+): string {
+  return `video-master${extensionOf(file.filename)}`;
+}
+
 function trackIdFor(
   track: IngestBuildTrackDraft,
 ): string {
@@ -678,6 +757,17 @@ type PreparedIngestTrack = {
     previousSourceRelativePath: string;
     previousDestinationRelativePath: string;
   };
+};
+
+type PreparedIngestVideo = {
+  draft: IngestBuildVideoDraft;
+  id: string;
+  relativePath: string;
+  videoDestination: string;
+  file?: IngestFileInspection;
+  relatedTrackId?: string;
+  existingVideo?: ExistingReceiptVideo;
+  preserveOnly?: boolean;
 };
 
 type PreparedArtworkPlacement = {
@@ -1666,6 +1756,17 @@ export async function inspectIngestStagingTarget(
   const existingTrackById = new Map(
     existingTracks.map((track) => [track.id, track]),
   );
+  const existingVideos: IngestStagingTargetStatus["existingVideos"] =
+    (existingReceipt?.videos ?? []).map((video) => ({
+      id: video.id,
+      title: video.title,
+      videoType: video.videoType,
+      sourceRelativePath: video.sourceRelativePath,
+      destinationRelativePath: video.destinationRelativePath,
+      ...(video.relatedTrackId
+        ? { relatedTrackId: video.relatedTrackId }
+        : {}),
+    }));
   const existingArtwork: IngestStagingTargetStatus["existingArtwork"] =
     (existingReceipt?.copies ?? []).flatMap<
       IngestStagingTargetStatus["existingArtwork"][number]
@@ -1790,6 +1891,7 @@ export async function inspectIngestStagingTarget(
           }
         : {}),
     })),
+    existingVideos,
     existingArtwork,
   };
 }
@@ -1872,6 +1974,37 @@ function parseExistingReceiptTrack(
   };
 }
 
+function parseExistingReceiptVideo(
+  value: unknown,
+  index: number,
+): ExistingReceiptVideo {
+  if (!isRecord(value)) {
+    throw new Error(
+      `Video ${index + 1} is malformed in ingest-receipt.json.`,
+    );
+  }
+
+  return {
+    id: receiptText(value, "id", `Video ${index + 1} ID`),
+    title: typeof value.title === "string" ? value.title : "",
+    videoType:
+      typeof value.videoType === "string" ? value.videoType : "other",
+    sourceRelativePath: receiptText(
+      value,
+      "sourceRelativePath",
+      `Video ${index + 1} source path`,
+    ),
+    destinationRelativePath: receiptText(
+      value,
+      "destinationRelativePath",
+      `Video ${index + 1} destination path`,
+    ),
+    ...(typeof value.relatedTrackId === "string" && value.relatedTrackId.trim()
+      ? { relatedTrackId: value.relatedTrackId.trim() }
+      : {}),
+  };
+}
+
 function parseExistingReceiptCopy(
   value: unknown,
   index: number,
@@ -1886,6 +2019,7 @@ function parseExistingReceiptCopy(
 
   if (
     mediaKind !== "audio" &&
+    mediaKind !== "video" &&
     mediaKind !== "image" &&
     mediaKind !== "text" &&
     mediaKind !== "unknown"
@@ -1985,6 +2119,7 @@ async function readExistingIngestReceipt(
 
   if (
     !Array.isArray(rawValue.tracks) ||
+    (rawValue.videos !== undefined && !Array.isArray(rawValue.videos)) ||
     !Array.isArray(rawValue.copies)
   ) {
     throw new Error(
@@ -1997,6 +2132,9 @@ async function readExistingIngestReceipt(
     tracks: rawValue.tracks.map(
       parseExistingReceiptTrack,
     ),
+    videos: Array.isArray(rawValue.videos)
+      ? rawValue.videos.map(parseExistingReceiptVideo)
+      : [],
     copies: rawValue.copies.map(
       parseExistingReceiptCopy,
     ),
@@ -2232,6 +2370,7 @@ function createReceiptContent(
     relativePath: string;
     audioDestination: string;
   }>,
+  videos: PreparedIngestVideo[],
   copies: PreparedCopy[],
 ): string {
   return `${JSON.stringify(
@@ -2239,7 +2378,7 @@ function createReceiptContent(
       schema: {
         name:
           "metadata-editor-ingest-receipt",
-        version: 1,
+        version: 3,
       },
       candidate: {
         id: inspection.candidate.id,
@@ -2267,6 +2406,17 @@ function createReceiptContent(
           track.draft.sourceRelativePath,
         destinationRelativePath:
           `${track.relativePath}/${track.audioDestination}`,
+      })),
+      videos: videos.map((video) => ({
+        id: video.id,
+        title: video.draft.title,
+        videoType: video.draft.videoType,
+        sourceRelativePath: video.draft.sourceRelativePath,
+        destinationRelativePath:
+          `${video.relativePath}/${video.videoDestination}`,
+        ...(video.relatedTrackId
+          ? { relatedTrackId: video.relatedTrackId }
+          : {}),
       })),
       copies: copies.map((copy) => ({
         sourceRelativePath:
@@ -2405,6 +2555,7 @@ function buildUpdatedReceiptContent(
   draft: IngestBuildDraft,
   releaseRelativePath: string,
   tracks: PreparedIngestTrack[],
+  videos: PreparedIngestVideo[],
   newCopies: PreparedCopy[],
   replacedDestinationPaths: Set<string>,
 ): string {
@@ -2448,7 +2599,7 @@ function buildUpdatedReceiptContent(
       ...existingReceipt.raw,
       schema: {
         name: "metadata-editor-ingest-receipt",
-        version: 2,
+        version: 3,
       },
       candidate: {
         id: inspection.candidate.id,
@@ -2475,6 +2626,17 @@ function buildUpdatedReceiptContent(
         destinationRelativePath:
           `${track.relativePath}/${track.audioDestination}`,
       })),
+      videos: videos.map((video) => ({
+        id: video.id,
+        title: video.draft.title,
+        videoType: video.draft.videoType,
+        sourceRelativePath: video.draft.sourceRelativePath,
+        destinationRelativePath:
+          `${video.relativePath}/${video.videoDestination}`,
+        ...(video.relatedTrackId
+          ? { relatedTrackId: video.relatedTrackId }
+          : {}),
+      })),
       copies,
       updates: [
         ...previousUpdates,
@@ -2484,6 +2646,9 @@ function buildUpdatedReceiptContent(
           addedTrackIds: tracks
             .filter((track) => !track.existingTrack)
             .map((track) => track.id),
+          addedVideoIds: videos
+            .filter((video) => !video.existingVideo)
+            .map((video) => video.id),
           replacedTrackIds: tracks
             .filter((track) => Boolean(track.replacement))
             .map((track) => track.id),
@@ -2521,6 +2686,38 @@ function buildUpdatedReceiptContent(
     null,
     2,
   )}\n`;
+}
+
+function videoMetadataDocument(
+  releaseRelativePath: string,
+  video: PreparedIngestVideo,
+): GeneratedMetadataDocument {
+  const data = {
+    schema: {
+      name: "video-metadata",
+      version: 1,
+    },
+    video: {
+      id: video.id,
+      title: video.draft.title,
+      type: video.draft.videoType,
+      master_path: video.videoDestination,
+      related_track_id: video.relatedTrackId ?? "",
+    },
+  };
+  const content = `${stringify(data).trimEnd()}\n`;
+  parse(content);
+
+  return {
+    // Until the metadata registry gains a dedicated video storage role,
+    // this document is release-scoped for writer typing but lives under
+    // videos/<stable-id>/video.toml and is not treated as release.toml.
+    storageRole: "release",
+    filename: "video.toml",
+    relativePath: `${releaseRelativePath}/videos/${video.id}/video.toml`,
+    content,
+    validated: true,
+  };
 }
 
 export async function prepareIngestReleaseBuild(
@@ -2590,9 +2787,17 @@ export async function prepareIngestReleaseBuild(
         right.trackNumber,
     );
 
-  if (includedTracks.length === 0 && !existingReceipt) {
+  const includedVideoDrafts = (draft.videos ?? []).filter(
+    (video) => video.include,
+  );
+
+  if (
+    includedTracks.length === 0 &&
+    includedVideoDrafts.length === 0 &&
+    !existingReceipt
+  ) {
     throw new Error(
-      "At least one audio track must be included when creating a release.",
+      "At least one audio track or video must be included when creating a release.",
     );
   }
 
@@ -2810,6 +3015,149 @@ export async function prepareIngestReleaseBuild(
       track.id,
     );
   }
+
+  const existingVideoBySource = new Map(
+    (existingReceipt?.videos ?? []).map((video) => [
+      video.sourceRelativePath,
+      video,
+    ]),
+  );
+  const existingVideoById = new Map(
+    (existingReceipt?.videos ?? []).map((video) => [
+      video.id,
+      video,
+    ]),
+  );
+  const claimedExistingVideoIds = new Set<string>();
+  const usedVideoIds = new Set(
+    (existingReceipt?.videos ?? []).map((video) => video.id),
+  );
+  const trackBySource = new Map(
+    tracks.map((track) => [
+      track.draft.sourceRelativePath,
+      track,
+    ]),
+  );
+
+  const candidateVideos = includedVideoDrafts.map(
+    (video): PreparedIngestVideo => {
+      const file = fileMap.get(video.sourceRelativePath);
+      if (!file) {
+        throw new Error(
+          `Video source was not found in the inspected candidate: ${video.sourceRelativePath}`,
+        );
+      }
+      if (file.mediaKind !== "video") {
+        throw new Error(
+          `Video source is not probe-verified as video: ${video.sourceRelativePath}`,
+        );
+      }
+
+      const expectedDestination = expectedVideoDestination(file);
+      if (video.destinationFilename !== expectedDestination) {
+        throw new Error(
+          `${video.sourceRelativePath}: destination filename must remain ${expectedDestination} so the Library retains one canonical video master.`,
+        );
+      }
+
+      const existingVideo = existingVideoBySource.get(
+        video.sourceRelativePath,
+      );
+      const requestedId = video.videoId.trim();
+      if (existingVideo && existingVideo.id !== requestedId) {
+        throw new Error(
+          `${video.sourceRelativePath}: existing video identity is stable as ${existingVideo.id}; rename/re-identification is a separate reviewed workflow.`,
+        );
+      }
+      if (!existingVideo && existingVideoById.has(requestedId)) {
+        throw new Error(
+          `${video.sourceRelativePath}: video ID ${requestedId} already belongs to another Library video. Choose a unique video ID.`,
+        );
+      }
+      if (existingVideo && claimedExistingVideoIds.has(existingVideo.id)) {
+        throw new Error(
+          `${video.sourceRelativePath}: existing video ${existingVideo.id} is already claimed by another source.`,
+        );
+      }
+      if (existingVideo) {
+        claimedExistingVideoIds.add(existingVideo.id);
+      } else if (usedVideoIds.has(requestedId)) {
+        throw new Error(`Duplicate video ID: ${requestedId}`);
+      } else {
+        usedVideoIds.add(requestedId);
+      }
+
+      const relatedTrackSource =
+        video.relatedTrackSourceRelativePath.trim();
+      const relatedTrack = relatedTrackSource
+        ? trackBySource.get(relatedTrackSource)
+        : undefined;
+      if (relatedTrackSource && !relatedTrack) {
+        throw new Error(
+          `${video.sourceRelativePath}: related track is not available in the resulting release: ${relatedTrackSource}`,
+        );
+      }
+
+      const id = existingVideo?.id ?? requestedId;
+      const relativePath = existingVideo
+        ? path.posix.dirname(existingVideo.destinationRelativePath)
+        : `${releaseRelativePath}/videos/${id}`;
+      const videoDestination = existingVideo
+        ? path.posix.basename(existingVideo.destinationRelativePath)
+        : expectedDestination;
+
+      if (relativePath !== `${releaseRelativePath}/videos/${id}`) {
+        throw new Error(
+          `${video.sourceRelativePath}: existing video destination is outside the canonical videos/<id> layout.`,
+        );
+      }
+      if (existingVideo && videoDestination !== expectedDestination) {
+        throw new Error(
+          `${video.sourceRelativePath}: existing canonical video extension differs from the inspected source; video replacement is not enabled in Video V1.`,
+        );
+      }
+
+      return {
+        draft: video,
+        id,
+        relativePath,
+        videoDestination,
+        file,
+        ...(relatedTrack ? { relatedTrackId: relatedTrack.id } : {}),
+        ...(existingVideo ? { existingVideo } : {}),
+      };
+    },
+  );
+
+  const preservedExistingVideos: PreparedIngestVideo[] =
+    (existingReceipt?.videos ?? [])
+      .filter((video) => !claimedExistingVideoIds.has(video.id))
+      .map((video) => ({
+        draft: {
+          sourceRelativePath: video.sourceRelativePath,
+          include: true,
+          videoId: video.id,
+          title: video.title,
+          videoType: video.videoType,
+          relatedTrackSourceRelativePath: "",
+          destinationFilename:
+            path.posix.basename(video.destinationRelativePath),
+        },
+        id: video.id,
+        relativePath: path.posix.dirname(video.destinationRelativePath),
+        videoDestination:
+          path.posix.basename(video.destinationRelativePath),
+        ...(video.relatedTrackId
+          ? { relatedTrackId: video.relatedTrackId }
+          : {}),
+        existingVideo: video,
+        preserveOnly: true,
+      }));
+
+  const videos = [
+    ...candidateVideos,
+    ...preservedExistingVideos,
+  ];
 
   const includedAssets = draft.assets.filter(
     (asset) => asset.include,
@@ -3042,6 +3390,14 @@ export async function prepareIngestReleaseBuild(
       tracks,
       artworkPlacements,
       releaseRelativePath,
+    );
+  const videoDocuments = videos
+    .filter((video) => !video.existingVideo)
+    .map((video) =>
+      videoMetadataDocument(
+        releaseRelativePath,
+        video,
+      ),
     );
   const copies: PreparedCopy[] = [];
   const preservedCopies: PreparedCopy[] = [];
@@ -3325,6 +3681,122 @@ export async function prepareIngestReleaseBuild(
         action: "blocked",
         reason:
           "The staged audio master no longer matches its ingest receipt. Resolve the modified or missing destination before applying an incremental update.",
+      });
+      continue;
+    }
+
+    preservedCopies.push(preparedCopy);
+  }
+
+  for (const video of videos) {
+    if (video.preserveOnly) {
+      const receiptCopy = existingCopyByDestination.get(
+        video.existingVideo!.destinationRelativePath,
+      );
+      if (
+        !receiptCopy ||
+        receiptCopy.mediaKind !== "video" ||
+        !(await verifyExistingCopy(receiptCopy))
+      ) {
+        blockedItems.push({
+          kind: "copy",
+          sourceRelativePath: video.existingVideo!.sourceRelativePath,
+          destinationRelativePath:
+            video.existingVideo!.destinationRelativePath,
+          mediaKind: receiptCopy?.mediaKind ?? "video",
+          sizeBytes: receiptCopy?.bytes,
+          sha256: receiptCopy?.sourceSha256,
+          logicalRoles: receiptCopy?.logicalRoles,
+          action: "blocked",
+          reason:
+            "An untouched existing video no longer matches its ingest receipt. Resolve the canonical Library copy before applying this update.",
+        });
+        continue;
+      }
+
+      preservedCopyItems.push({
+        kind: "copy",
+        sourceRelativePath: receiptCopy.sourceRelativePath,
+        destinationRelativePath: receiptCopy.destinationRelativePath,
+        mediaKind: "video",
+        sizeBytes: receiptCopy.bytes,
+        sha256: receiptCopy.sourceSha256,
+        logicalRoles: receiptCopy.logicalRoles,
+        action: "preserve",
+        adjustment: `Stable video ID: ${video.id}`,
+        reason:
+          "This existing canonical video is outside the current ingest candidate and will be preserved unchanged.",
+      });
+      continue;
+    }
+
+    if (!video.file) {
+      throw new Error(
+        `Included video is missing its inspected source: ${video.draft.sourceRelativePath}`,
+      );
+    }
+
+    const preparedCopy = await prepareCopy(
+      canonicalIngestRoot,
+      video.file,
+      `videos/${video.id}/${video.videoDestination}`,
+      `${video.relativePath}/${video.videoDestination}`,
+      ["video-master"],
+    );
+
+    if (!video.existingVideo) {
+      copies.push(preparedCopy);
+      continue;
+    }
+
+    const receiptCopy = existingCopyByMapping.get(
+      copyMappingKey(
+        video.draft.sourceRelativePath,
+        preparedCopy.destinationRelativePath,
+      ),
+    );
+    if (!receiptCopy || receiptCopy.mediaKind !== "video") {
+      blockedItems.push({
+        kind: "copy",
+        sourceRelativePath: preparedCopy.sourceRelativePath,
+        destinationRelativePath: preparedCopy.destinationRelativePath,
+        mediaKind: "video",
+        sizeBytes: preparedCopy.bytes,
+        sha256: preparedCopy.sha256,
+        logicalRoles: preparedCopy.logicalRoles,
+        action: "blocked",
+        reason:
+          "The existing ingest receipt does not contain the expected canonical video-master mapping.",
+      });
+      continue;
+    }
+    if (receiptCopy.sourceSha256 !== preparedCopy.sha256) {
+      blockedItems.push({
+        kind: "copy",
+        sourceRelativePath: preparedCopy.sourceRelativePath,
+        destinationRelativePath: preparedCopy.destinationRelativePath,
+        mediaKind: "video",
+        sizeBytes: preparedCopy.bytes,
+        sha256: preparedCopy.sha256,
+        logicalRoles: preparedCopy.logicalRoles,
+        action: "blocked",
+        reason:
+          "The video source bytes changed after the original staging build. Canonical video replacement will be added as a separate reviewed workflow rather than overwriting the Library master.",
+      });
+      continue;
+    }
+    if (!(await verifyExistingCopy(receiptCopy))) {
+      blockedItems.push({
+        kind: "copy",
+        sourceRelativePath: preparedCopy.sourceRelativePath,
+        destinationRelativePath: preparedCopy.destinationRelativePath,
+        mediaKind: "video",
+        sizeBytes: preparedCopy.bytes,
+        sha256: preparedCopy.sha256,
+        logicalRoles: preparedCopy.logicalRoles,
+        action: "blocked",
+        reason:
+          "The canonical Library video no longer matches its ingest receipt. Resolve the modified or missing destination before applying an incremental update.",
       });
       continue;
     }
@@ -3664,7 +4136,10 @@ export async function prepareIngestReleaseBuild(
   const preservedDocumentPaths = new Set<string>();
 
   if (!existingReceipt) {
-    for (const document of generatedDocuments) {
+    for (const document of [
+      ...generatedDocuments,
+      ...videoDocuments,
+    ]) {
       documents.push({
         ...document,
         writeAction: "create",
@@ -3708,6 +4183,46 @@ export async function prepareIngestReleaseBuild(
             `New track ${track.draft.trackNumber}`,
           reason:
             "A starter metadata document will be added for the new track.",
+        });
+      }
+    }
+
+    for (const document of videoDocuments) {
+      documents.push({
+        ...document,
+        writeAction: "create",
+      });
+      documentItems.push({
+        kind: "toml",
+        destinationRelativePath: document.relativePath,
+        action: "add",
+        adjustment: "New canonical video metadata",
+        reason:
+          "A parse-validated video.toml document will be added beside the canonical video master.",
+      });
+    }
+
+    for (const video of videos.filter((item) => item.existingVideo)) {
+      const relativePath = `${video.relativePath}/video.toml`;
+      const target = assertPathWithinRoot(
+        releasePath,
+        path.join(
+          releasePath,
+          ...withinReleasePath(
+            releaseRelativePath,
+            relativePath,
+          ).split("/"),
+        ),
+      );
+      if (await pathExists(target)) {
+        preservedDocumentPaths.add(relativePath);
+      } else {
+        blockedItems.push({
+          kind: "toml",
+          destinationRelativePath: relativePath,
+          action: "blocked",
+          reason:
+            "An existing receipt video is missing video.toml. Repair the canonical Library video metadata before updating the release.",
         });
       }
     }
@@ -4186,6 +4701,23 @@ export async function prepareIngestReleaseBuild(
           : "A new track directory will be added.",
       }),
     ),
+    ...videos.map(
+      (video): IngestBuildPlanItem => ({
+        kind: "directory",
+        destinationRelativePath: video.relativePath,
+        action: video.existingVideo
+          ? "preserve"
+          : operation === "create"
+            ? "create"
+            : "add",
+        adjustment: video.existingVideo
+          ? `Stable video ID: ${video.id}`
+          : `New video: ${video.draft.title}`,
+        reason: video.existingVideo
+          ? "The existing canonical video directory and stable ID will be retained."
+          : "A release-scoped canonical video directory will be added.",
+      }),
+    ),
     ...preservedCopyItems,
     ...preservedCopies.map(
       (copy): IngestBuildPlanItem => ({
@@ -4224,13 +4756,21 @@ export async function prepareIngestReleaseBuild(
         adjustment: copy.writeAction === "replace"
           ? copy.mediaKind === "image"
             ? "Explicit canonical-artwork replacement"
-            : "Explicit canonical-audio replacement"
-          : undefined,
+            : copy.mediaKind === "video"
+              ? "Explicit canonical-video replacement"
+              : "Explicit canonical-audio replacement"
+          : copy.mediaKind === "video"
+            ? "Canonical video master"
+            : undefined,
         reason: copy.writeAction === "replace"
           ? copy.mediaKind === "image"
             ? "The reviewed ingest artwork will replace the verified canonical Library artwork target after explicit confirmation."
-            : "The reviewed ingest source will replace the verified canonical Library master while preserving the stable track identity."
-          : "Source bytes will be copied and hash-verified without changing the ingest source.",
+            : copy.mediaKind === "video"
+              ? "The reviewed ingest video will replace the verified canonical Library video master."
+              : "The reviewed ingest source will replace the verified canonical Library master while preserving the stable track identity."
+          : copy.mediaKind === "video"
+            ? "Video source bytes will be copied and hash-verified without transcoding or changing the ingest source."
+            : "Source bytes will be copied and hash-verified without changing the ingest source.",
       }),
     ),
     ...removals.map(
@@ -4267,6 +4807,7 @@ export async function prepareIngestReleaseBuild(
         draft,
         releaseRelativePath,
         tracks,
+        videos,
         copies,
         new Set(
           copies.flatMap((copy) =>
@@ -4281,6 +4822,7 @@ export async function prepareIngestReleaseBuild(
         draft,
         releaseRelativePath,
         tracks,
+        videos,
         copies,
       );
   const preservedFiles = items
@@ -4295,6 +4837,10 @@ export async function prepareIngestReleaseBuild(
     );
   const summary = {
     trackCount: tracks.length,
+    videoCount: videos.length,
+    addedVideoCount: videos.filter(
+      (video) => !video.existingVideo,
+    ).length,
     copiedFileCount: copies.length,
     tomlCount: documents.length,
     totalCopyBytes: copies.reduce(
@@ -4354,12 +4900,14 @@ export async function prepareIngestReleaseBuild(
             "Source audio is copied byte-for-byte; embedded metadata is not rewritten.",
             "Canonical audio is stored as audio-master.<original-extension> while retaining the source container extension.",
             "No playback derivative is created during Staging. Library playback MP3s and website HLS streams are prepared separately from the canonical Library master.",
+            "Probe-verified video is copied byte-for-byte into videos/<stable-id>/video-master.<original-extension> with a companion video.toml; public video streaming derivatives are not generated yet.",
           ]
         : [
             "Existing authored metadata and stable track IDs are preserved. Existing Library tracks omitted from the current ingest candidate remain untouched automatically.",
             "An explicit Replace canonical audio choice may supersede one verified master; generated Library playback MP3, HLS, and waveform derivatives for that track are removed so Prepare release can regenerate them from the new canonical audio.",
             "Track directory IDs remain stable when the displayed track order changes or canonical audio is replaced.",
             "New artwork can be added from a later ingest candidate. Replacing occupied canonical artwork requires explicit confirmation and preserves unrelated authored metadata.",
+            "New canonical videos may be added to an existing release and existing verified videos are preserved when absent from the current candidate. Canonical video replacement remains a separate reviewed workflow.",
             "Intentional track removal and general text-sidecar replacement remain separate future workflows.",
           ],
       confirmationPhrase:

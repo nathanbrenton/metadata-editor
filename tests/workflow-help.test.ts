@@ -288,7 +288,7 @@ test("documents Ingest Source files media previews", () => {
 });
 
 
-test("documents guarded Build and Update public-package snapshots", () => {
+test("documents guarded Publish and Update public-package snapshots", () => {
   const publish = workflowStages.find(
     ({ id }) => id === "publish",
   );
@@ -302,7 +302,7 @@ test("documents guarded Build and Update public-package snapshots", () => {
     ),
   ].join(" ");
 
-  assert.match(text, /Build public package/i);
+  assert.match(text, /Publish public package/i);
   assert.match(text, /Update public package/i);
   assert.match(text, /atomically/i);
   assert.match(text, /obsolete files cannot survive/i);

@@ -50,6 +50,7 @@ function inspection(
       displayTitle: "Session",
       fileCount: files.length,
       audioCount: files.filter((item) => item.mediaKind === "audio").length,
+      videoCount: 0,
       imageCount: files.filter((item) => item.mediaKind === "image").length,
       textCount: files.filter((item) => item.mediaKind === "text").length,
       unknownCount: 0,

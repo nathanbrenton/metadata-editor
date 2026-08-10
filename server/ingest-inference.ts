@@ -29,6 +29,23 @@ const audioExtensions = new Set([
   ".wv",
 ]);
 
+const videoExtensions = new Set([
+  ".3gp",
+  ".avi",
+  ".m2ts",
+  ".m4v",
+  ".mkv",
+  ".mov",
+  ".mp4",
+  ".mpeg",
+  ".mpg",
+  ".mts",
+  ".mxf",
+  ".ogv",
+  ".ts",
+  ".webm",
+]);
+
 const imageExtensions = new Set([
   ".avif",
   ".bmp",
@@ -189,6 +206,10 @@ export function classifyIngestExtension(
 
   if (audioExtensions.has(normalized)) {
     return "audio";
+  }
+
+  if (videoExtensions.has(normalized)) {
+    return "video";
   }
 
   if (imageExtensions.has(normalized)) {

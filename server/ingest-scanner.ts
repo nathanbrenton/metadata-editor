@@ -259,6 +259,7 @@ async function buildCandidateSummary(
   );
   const counts: Record<IngestMediaKind, number> = {
     audio: 0,
+    video: 0,
     image: 0,
     text: 0,
     unknown: 0,
@@ -362,6 +363,7 @@ async function buildCandidateSummary(
     displayTitle,
     fileCount: files.length,
     audioCount: counts.audio,
+    videoCount: counts.video,
     imageCount: counts.image,
     textCount: counts.text,
     unknownCount: counts.unknown,
@@ -464,6 +466,9 @@ type FfprobeStream = {
   duration?: string;
   width?: number;
   height?: number;
+  avg_frame_rate?: string;
+  r_frame_rate?: string;
+  pix_fmt?: string;
   tags?: Record<string, unknown>;
   disposition?: {
     attached_pic?: number;
@@ -535,6 +540,20 @@ function classifyFromFfprobe(
   payload: FfprobePayload,
   fallback: IngestMediaKind,
 ): IngestMediaKind {
+  if (fallback === "image") {
+    return "image";
+  }
+
+  if (
+    payload.streams?.some(
+      (stream) =>
+        stream.codec_type === "video" &&
+        stream.disposition?.attached_pic !== 1,
+    )
+  ) {
+    return "video";
+  }
+
   if (
     payload.streams?.some(
       (stream) => stream.codec_type === "audio",
@@ -543,17 +562,38 @@ function classifyFromFfprobe(
     return "audio";
   }
 
-  if (
-    payload.streams?.some(
-      (stream) => stream.codec_type === "video",
-    )
-  ) {
-    return fallback === "image"
-      ? "image"
-      : "unknown";
+  return fallback;
+}
+
+function frameRateFromFfprobe(
+  stream: FfprobeStream | undefined,
+): number | undefined {
+  const raw =
+    stream?.avg_frame_rate ??
+    stream?.r_frame_rate;
+
+  if (!raw) {
+    return undefined;
   }
 
-  return fallback;
+  const [numeratorRaw, denominatorRaw] =
+    raw.split("/");
+  const numerator = Number(numeratorRaw);
+  const denominator =
+    denominatorRaw === undefined
+      ? 1
+      : Number(denominatorRaw);
+
+  if (
+    !Number.isFinite(numerator) ||
+    !Number.isFinite(denominator) ||
+    denominator === 0
+  ) {
+    return undefined;
+  }
+
+  const value = numerator / denominator;
+  return value > 0 ? value : undefined;
 }
 
 function technicalFromFfprobe(
@@ -570,7 +610,7 @@ function technicalFromFfprobe(
       stream.codec_type === "video" &&
       stream.disposition?.attached_pic !== 1,
   );
-  const primaryStream = audioStream ?? videoStream;
+  const primaryStream = videoStream ?? audioStream;
   const bitDepth =
     finiteNumber(primaryStream?.bits_per_raw_sample) ??
     finiteNumber(primaryStream?.bits_per_sample);
@@ -641,6 +681,20 @@ function technicalFromFfprobe(
       ...(videoStream?.height !== undefined
         ? { height: videoStream.height }
         : {}),
+      ...(frameRateFromFfprobe(videoStream) !== undefined
+        ? {
+            frameRate: frameRateFromFfprobe(videoStream),
+          }
+        : {}),
+      ...(videoStream?.pix_fmt
+        ? { pixelFormat: videoStream.pix_fmt }
+        : {}),
+      ...(videoStream && audioStream?.codec_name
+        ? { audioCodec: audioStream.codec_name }
+        : {}),
+      ...(videoStream && audioStream?.codec_long_name
+        ? { audioCodecLongName: audioStream.codec_long_name }
+        : {}),
     },
     embeddedMetadata: mergeEmbeddedTags(
       stringTags(payload.format?.tags),
@@ -672,10 +726,13 @@ function technicalFromMediaInfo(
   const audio = tracks.find(
     (track) => track["@type"] === "Audio",
   );
+  const video = tracks.find(
+    (track) => track["@type"] === "Video",
+  );
   const image = tracks.find(
     (track) => track["@type"] === "Image",
   );
-  const primary = audio ?? image;
+  const primary = video ?? audio ?? image;
 
   return {
     ...(typeof general?.Format === "string"
@@ -707,11 +764,17 @@ function technicalFromMediaInfo(
     ...(finiteNumber(audio?.BitRate) !== undefined
       ? { bitRate: finiteNumber(audio?.BitRate) }
       : {}),
-    ...(finiteNumber(image?.Width) !== undefined
-      ? { width: finiteNumber(image?.Width) }
+    ...(finiteNumber(video?.Width ?? image?.Width) !== undefined
+      ? { width: finiteNumber(video?.Width ?? image?.Width) }
       : {}),
-    ...(finiteNumber(image?.Height) !== undefined
-      ? { height: finiteNumber(image?.Height) }
+    ...(finiteNumber(video?.Height ?? image?.Height) !== undefined
+      ? { height: finiteNumber(video?.Height ?? image?.Height) }
+      : {}),
+    ...(finiteNumber(video?.FrameRate) !== undefined
+      ? { frameRate: finiteNumber(video?.FrameRate) }
+      : {}),
+    ...(video && typeof audio?.Format === "string"
+      ? { audioCodecLongName: audio.Format }
       : {}),
   };
 }
@@ -947,7 +1010,7 @@ async function inspectFile(
     const extensionLabel = extension || "(no extension)";
     warnings.unshift(
       mediaKind === "unknown"
-        ? `Extension ${JSON.stringify(extensionLabel)} is not recognized by the ingest classifier, and probing did not classify this file as supported audio, image, or text.`
+        ? `Extension ${JSON.stringify(extensionLabel)} is not recognized by the ingest classifier, and probing did not classify this file as supported audio, video, image, or text.`
         : `Extension ${JSON.stringify(extensionLabel)} is not recognized by the ingest classifier; inspection classified this file as ${mediaKind}.`,
     );
   }

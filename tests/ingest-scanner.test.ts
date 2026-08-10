@@ -219,7 +219,7 @@ test("offers only loose image and text files as attachable sidecars", async () =
 });
 
 
-test("names files that are unknown by extension in candidate and file warnings", async () => {
+test("recognizes and probe-verifies video sources with video technical metadata", async () => {
   const root = await createIngestFixture();
   const candidateId =
     "2016-07-26_CrazyEights_TravisBedroom_GuitarDrums";
@@ -229,7 +229,7 @@ test("names files that are unknown by extension in candidate and file warnings",
     "video",
   );
 
-  const videoOnlyRunner: IngestCommandRunner = async (
+  const videoRunner: IngestCommandRunner = async (
     command,
     args,
   ) => {
@@ -259,10 +259,23 @@ test("names files that are unknown by extension in candidate and file warnings",
               {
                 codec_type: "video",
                 codec_name: "h264",
+                codec_long_name: "H.264 / AVC",
+                width: 1280,
+                height: 720,
+                avg_frame_rate: "30000/1001",
+                pix_fmt: "yuv420p",
+              },
+              {
+                codec_type: "audio",
+                codec_name: "aac",
+                codec_long_name: "AAC",
+                sample_rate: "48000",
+                channels: 2,
               },
             ],
             format: {
               format_name: "mov,mp4,m4a,3gp,3g2,mj2",
+              duration: "57.5",
             },
           }),
           stderr: "",
@@ -272,6 +285,36 @@ test("names files that are unknown by extension in candidate and file warnings",
       return {
         exitCode: 0,
         stdout: ffprobePayload,
+        stderr: "",
+      };
+    }
+
+    const inputPath = args.at(-1) ?? "";
+    if (inputPath.endsWith("session-camera.mp4")) {
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          media: {
+            track: [
+              {
+                "@type": "General",
+                Format: "MPEG-4",
+                Duration: "57.5",
+              },
+              {
+                "@type": "Video",
+                Format: "AVC",
+                Width: "1280",
+                Height: "720",
+                FrameRate: "29.970",
+              },
+              {
+                "@type": "Audio",
+                Format: "AAC",
+              },
+            ],
+          },
+        }),
         stderr: "",
       };
     }
@@ -286,13 +329,14 @@ test("names files that are unknown by extension in candidate and file warnings",
   const scan = await scanIngestDrop(
     root,
     "../ingest-drop",
-    videoOnlyRunner,
+    videoRunner,
   );
   const candidate = scan.candidates.find(
     (item) => item.id === candidateId,
   );
   assert.ok(candidate);
-  assert.match(
+  assert.equal(candidate.videoCount, 1);
+  assert.doesNotMatch(
     candidate.warnings.join(" "),
     /session-camera\.mp4/i,
   );
@@ -301,15 +345,24 @@ test("names files that are unknown by extension in candidate and file warnings",
     root,
     candidateId,
     "../ingest-drop",
-    videoOnlyRunner,
+    videoRunner,
   );
-  const unknown = inspection.files.find(
+  const video = inspection.files.find(
     (file) => file.filename === "session-camera.mp4",
   );
-  assert.ok(unknown);
-  assert.equal(unknown.mediaKind, "unknown");
-  assert.match(
-    unknown.warnings.join(" "),
-    /not recognized by the ingest classifier/i,
+  assert.ok(video);
+  assert.equal(video.mediaKind, "video");
+  assert.equal(video.detectedBy, "ffprobe");
+  assert.equal(video.technical.codec, "h264");
+  assert.equal(video.technical.audioCodec, "aac");
+  assert.equal(video.technical.width, 1280);
+  assert.equal(video.technical.height, 720);
+  assert.ok(video.technical.frameRate);
+  assert.equal(
+    Math.round(video.technical.frameRate * 1000) / 1000,
+    29.97,
   );
+  assert.equal(video.technical.pixelFormat, "yuv420p");
+  assert.equal(video.technical.durationSeconds, 57.5);
+  assert.equal(video.warnings.length, 0);
 });

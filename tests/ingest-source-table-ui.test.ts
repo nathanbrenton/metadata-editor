@@ -7,10 +7,10 @@ const appSource = await readFile(
   "utf8",
 );
 
-test("shows duration only for audio rows in the ingest source table", () => {
+test("shows duration for audio and video rows in the ingest source table", () => {
   assert.match(
     appSource,
-    /file\.mediaKind === "audio" &&\s*file\.technical\.durationSeconds !==\s*undefined/,
+    /\(file\.mediaKind === "audio" \|\|\s*file\.mediaKind === "video"\) &&\s*file\.technical\.durationSeconds !==\s*undefined/,
   );
 });
 
@@ -24,6 +24,8 @@ test("uses the first ingest source column for media preview instead of probe pro
   assert.match(appSource, /file\.mediaKind === "image"/);
   assert.match(appSource, /buildIngestArtworkPreviewUrl/);
   assert.match(appSource, /file\.mediaKind === "audio"/);
+  assert.match(appSource, /file\.mediaKind === "video"/);
+  assert.match(appSource, /ingest-source-video-indicator/);
   assert.match(appSource, /buildIngestAudioPreviewUrl/);
   assert.match(appSource, /aria-pressed=\{playing\}/);
   assert.match(appSource, /<th scope="row">Probe<\/th>/);
@@ -98,5 +100,17 @@ test("continues ingest source preview to the next available audio file", () => {
   assert.match(
     appSource,
     /handleEnded[\s\S]*getNextIngestAudioFile\([\s\S]*inspection\.files[\s\S]*startSourceAudioPreview\(audio, nextFile\)/,
+  );
+});
+
+
+test("allows detected video to continue into reviewed canonical Staging", () => {
+  assert.doesNotMatch(
+    appSource,
+    /disabled=\{\s*candidate\.videoCount\s*>\s*0\s*\|\|/,
+  );
+  assert.match(
+    appSource,
+    /Continue to Staging to confirm each canonical video[\s\S]*stable ID/,
   );
 });

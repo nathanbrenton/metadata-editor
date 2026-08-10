@@ -4,6 +4,7 @@ export type IngestCandidateKind =
 
 export type IngestMediaKind =
   | "audio"
+  | "video"
   | "image"
   | "text"
   | "unknown";
@@ -46,6 +47,10 @@ export type IngestTechnicalMetadata = {
   bitRate?: number;
   width?: number;
   height?: number;
+  frameRate?: number;
+  pixelFormat?: string;
+  audioCodec?: string;
+  audioCodecLongName?: string;
 };
 
 export type IngestEmbeddedMetadata = Record<
@@ -88,6 +93,7 @@ export type IngestCandidateSummary = {
   displayTitle: string;
   fileCount: number;
   audioCount: number;
+  videoCount: number;
   imageCount: number;
   textCount: number;
   unknownCount: number;

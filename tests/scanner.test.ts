@@ -324,3 +324,122 @@ test(
     });
   },
 );
+test(
+  "discovers canonical release-scoped videos and their metadata identity",
+  async () => {
+    await withTemporaryLibrary(async (mediaRoot) => {
+      const releasePath = path.join(
+        mediaRoot,
+        "releases",
+        "2026-08-09_video-release",
+      );
+      const trackPath = path.join(
+        releasePath,
+        "tracks",
+        "artist_01_track",
+      );
+      const videoPath = path.join(
+        releasePath,
+        "videos",
+        "video_wednesday-night",
+      );
+
+      await mkdir(trackPath, { recursive: true });
+      await mkdir(videoPath, { recursive: true });
+      await writeFile(
+        path.join(trackPath, "audio-master.wav"),
+        "",
+      );
+      await writeFile(
+        path.join(videoPath, "video-master.mp4"),
+        "",
+      );
+      await writeFile(
+        path.join(videoPath, "video.toml"),
+        [
+          "[schema]",
+          'name = "video-metadata"',
+          "version = 1",
+          "",
+          "[video]",
+          'id = "video_wednesday-night"',
+          'title = "Wednesday Night Visualizer"',
+          'type = "visualizer"',
+          'master_path = "video-master.mp4"',
+          'related_track_id = "artist_01_track"',
+          "",
+        ].join("\n"),
+      );
+
+      const result = await scanMediaLibrary(mediaRoot);
+      const release = result.releases[0];
+      const video = release?.videos?.[0];
+
+      assert.ok(video);
+      assert.equal(video.id, "video_wednesday-night");
+      assert.equal(video.title, "Wednesday Night Visualizer");
+      assert.equal(video.videoType, "visualizer");
+      assert.equal(video.relatedTrackId, "artist_01_track");
+      assert.equal(video.masterPath, "video-master.mp4");
+      assert.equal(
+        video.metadataFiles.find(
+          (file) => file.filename === "video.toml",
+        )?.exists,
+        true,
+      );
+      assert.deepEqual(
+        video.videoMasters.map((asset) => asset.filename),
+        ["video-master.mp4"],
+      );
+      assert.equal(
+        result.warnings.some((warning) =>
+          warning.includes("video_wednesday-night"),
+        ),
+        false,
+      );
+    });
+  },
+);
+
+test(
+  "reports incomplete or broken canonical video relationships",
+  async () => {
+    await withTemporaryLibrary(async (mediaRoot) => {
+      const videoPath = path.join(
+        mediaRoot,
+        "releases",
+        "2026-08-09_broken-video",
+        "videos",
+        "video_orphaned",
+      );
+
+      await mkdir(videoPath, { recursive: true });
+      await writeFile(
+        path.join(videoPath, "video.toml"),
+        [
+          "[video]",
+          'id = "video_orphaned"',
+          'title = "Orphaned"',
+          'type = "studio_footage"',
+          'related_track_id = "missing_track"',
+          "",
+        ].join("\n"),
+      );
+
+      const result = await scanMediaLibrary(mediaRoot);
+
+      assert.ok(
+        result.warnings.some((warning) =>
+          warning.includes("no video master detected"),
+        ),
+      );
+      assert.ok(
+        result.warnings.some((warning) =>
+          warning.includes(
+            "related track missing_track was not found",
+          ),
+        ),
+      );
+    });
+  },
+);

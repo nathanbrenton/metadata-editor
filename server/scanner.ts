@@ -22,6 +22,7 @@ import type {
   MetadataFileStatus,
   ReleaseScanResult,
   TrackScanResult,
+  VideoScanResult,
 } from "./types.js";
 
 const releaseMetadataFiles = [
@@ -34,6 +35,10 @@ const trackMetadataFiles = [
   "track.toml",
   "track-credits.toml",
   "track-production-notes.toml",
+] as const;
+
+const videoMetadataFiles = [
+  "video.toml",
 ] as const;
 
 const audioAssetExtensions = new Set([
@@ -69,6 +74,23 @@ const artworkMasterExtensions = new Set([
   ".tif",
   ".tiff",
   ".webp",
+]);
+
+const videoAssetExtensions = new Set([
+  ".3gp",
+  ".avi",
+  ".m2ts",
+  ".m4v",
+  ".mkv",
+  ".mov",
+  ".mp4",
+  ".mpeg",
+  ".mpg",
+  ".mts",
+  ".mxf",
+  ".ogv",
+  ".ts",
+  ".webm",
 ]);
 
 function isRecord(
@@ -166,6 +188,77 @@ async function readReleaseLibraryIdentity(
     };
   } catch {
     // The full metadata-detail reader reports malformed TOML on open.
+    return {};
+  }
+}
+
+async function readVideoLibraryIdentity(
+  mediaRoot: string,
+  videoPath: string,
+  metadataFiles: MetadataFileStatus[],
+): Promise<
+  Pick<
+    VideoScanResult,
+    "title" | "videoType" | "relatedTrackId" | "masterPath"
+  >
+> {
+  const videoDocument = metadataFiles.find(
+    (file) => file.filename === "video.toml",
+  );
+
+  if (!videoDocument?.exists) {
+    return {};
+  }
+
+  try {
+    const candidatePath = assertPathWithinRoot(
+      mediaRoot,
+      path.join(videoPath, "video.toml"),
+    );
+    const stats = await lstat(candidatePath);
+
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+      return {};
+    }
+
+    const canonicalMediaRoot = await realpath(mediaRoot);
+    const canonicalFilePath = await realpath(candidatePath);
+
+    assertPathWithinRoot(
+      canonicalMediaRoot,
+      canonicalFilePath,
+    );
+
+    const parsed = parse(
+      await readFile(canonicalFilePath, "utf8"),
+    );
+    const videoTable =
+      isRecord(parsed) && isRecord(parsed.video)
+        ? parsed.video
+        : null;
+
+    if (!videoTable) {
+      return {};
+    }
+
+    const title = readNonBlankString(videoTable.title);
+    const videoType = readNonBlankString(videoTable.type);
+    const relatedTrackId = readNonBlankString(
+      videoTable.related_track_id,
+    );
+    const masterPath = readNonBlankString(
+      videoTable.master_path,
+    );
+
+    return {
+      ...(title ? { title } : {}),
+      ...(videoType ? { videoType } : {}),
+      ...(relatedTrackId ? { relatedTrackId } : {}),
+      ...(masterPath ? { masterPath } : {}),
+    };
+  } catch {
+    // Malformed video.toml remains visible as a missing identity detail;
+    // canonical metadata diagnostics can report the parse failure separately.
     return {};
   }
 }
@@ -365,6 +458,44 @@ async function scanTrack(
   };
 }
 
+async function scanVideo(
+  mediaRoot: string,
+  videoPath: string,
+): Promise<VideoScanResult> {
+  const files = await walkFiles(mediaRoot, videoPath);
+  const metadataFiles = await scanExpectedMetadataFiles(
+    mediaRoot,
+    videoPath,
+    videoMetadataFiles,
+  );
+  const identity = await readVideoLibraryIdentity(
+    mediaRoot,
+    videoPath,
+    metadataFiles,
+  );
+
+  return {
+    id: path.basename(videoPath),
+    relativePath: toLibraryRelativePath(
+      mediaRoot,
+      videoPath,
+    ),
+    ...identity,
+    metadataFiles,
+    videoMasters: files
+      .filter((filePath) =>
+        matchesMasterAsset(
+          filePath,
+          "video-master",
+          videoAssetExtensions,
+        ),
+      )
+      .map((filePath) =>
+        toDiscoveredAsset(mediaRoot, filePath),
+      ),
+  };
+}
+
 async function scanRelease(
   mediaRoot: string,
   releasePath: string,
@@ -373,9 +504,15 @@ async function scanRelease(
     mediaRoot,
     path.join(releasePath, "tracks"),
   );
+  const videosPath = assertPathWithinRoot(
+    mediaRoot,
+    path.join(releasePath, "videos"),
+  );
 
   const trackDirectoryNames =
     await listRealDirectories(tracksPath);
+  const videoDirectoryNames =
+    await listRealDirectories(videosPath);
 
   const releaseFiles = await walkFiles(
     mediaRoot,
@@ -431,6 +568,20 @@ async function scanRelease(
         ),
       ),
     ),
+    videos: await Promise.all(
+      videoDirectoryNames.map((videoDirectoryName) =>
+        scanVideo(
+          mediaRoot,
+          assertPathWithinRoot(
+            mediaRoot,
+            path.join(
+              videosPath,
+              videoDirectoryName,
+            ),
+          ),
+        ),
+      ),
+    ),
   };
 }
 
@@ -456,6 +607,53 @@ function buildScannerWarnings(
           ? `${release.relativePath}: multiple release artwork masters detected; suggested ${preferred.filename} (${describeArtworkPreference(preferred)})`
           : `${release.relativePath}: multiple release artwork masters detected`,
       );
+    }
+
+    const trackIds = new Set(
+      release.tracks.map((track) => track.id),
+    );
+
+    for (const video of release.videos ?? []) {
+      const videoMetadata = video.metadataFiles.find(
+        (file) => file.filename === "video.toml",
+      );
+
+      if (!videoMetadata?.exists) {
+        warnings.push(
+          `${video.relativePath}: video.toml is missing`,
+        );
+      }
+
+      if (video.videoMasters.length === 0) {
+        warnings.push(
+          `${video.relativePath}: no video master detected`,
+        );
+      }
+
+      if (video.videoMasters.length > 1) {
+        warnings.push(
+          `${video.relativePath}: multiple video masters detected`,
+        );
+      }
+
+      if (
+        video.masterPath &&
+        video.videoMasters.length === 1 &&
+        video.videoMasters[0]?.filename !== video.masterPath
+      ) {
+        warnings.push(
+          `${video.relativePath}: video.toml master_path ${video.masterPath} does not match ${video.videoMasters[0]?.filename}`,
+        );
+      }
+
+      if (
+        video.relatedTrackId &&
+        !trackIds.has(video.relatedTrackId)
+      ) {
+        warnings.push(
+          `${video.relativePath}: related track ${video.relatedTrackId} was not found in this release`,
+        );
+      }
     }
 
     for (const track of release.tracks) {

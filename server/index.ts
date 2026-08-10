@@ -72,6 +72,14 @@ import {
   renderTiffArtworkPreview,
 } from "./library-artwork-preview.js";
 import {
+  getVideoPreviewContentType,
+  selectVideoPreviewMaster,
+} from "./video-preview.js";
+import {
+  readVideoMetadataForEdit,
+  saveVideoMetadataEdits,
+} from "./video-metadata.js";
+import {
   resolveIngestAudioPreviewSource,
 } from "./ingest-audio.js";
 import {
@@ -806,6 +814,146 @@ async function sendLibraryAudioPreview(
   );
 }
 
+async function sendLibraryVideoPreview(
+  request: IncomingMessage,
+  response: ServerResponse,
+  releaseId: string,
+  videoId: string,
+): Promise<void> {
+  const mediaRoot = await resolveMediaRoot();
+  const release = await scanReleaseById(
+    mediaRoot,
+    releaseId,
+  );
+
+  if (!release) {
+    throw new Error(
+      `Release not found: ${releaseId}`,
+    );
+  }
+
+  const video = (release.videos ?? []).find(
+    (candidate) => candidate.id === videoId,
+  );
+
+  if (!video) {
+    throw new Error(
+      `Video not found: ${videoId}`,
+    );
+  }
+
+  const master = selectVideoPreviewMaster(video);
+  const contentType =
+    getVideoPreviewContentType(master.extension);
+
+  if (!contentType) {
+    sendJson(response, 415, {
+      error:
+        "Browser-direct preview is not available for this canonical video container. The master remains intact; a future derivative workflow can provide a browser-compatible preview.",
+    });
+    return;
+  }
+
+  const candidatePath = assertPathWithinRoot(
+    mediaRoot,
+    path.join(
+      mediaRoot,
+      master.relativePath,
+    ),
+  );
+  const canonicalPath = await realpath(
+    candidatePath,
+  );
+  assertPathWithinRoot(
+    mediaRoot,
+    canonicalPath,
+  );
+
+  const fileStats = await stat(canonicalPath);
+
+  if (!fileStats.isFile()) {
+    throw new Error(
+      "Video preview source is not a regular file.",
+    );
+  }
+
+  if (fileStats.size <= 0) {
+    throw new Error(
+      "Video preview source is empty.",
+    );
+  }
+
+  let range = null;
+
+  try {
+    range = parseSingleByteRange(
+      request.headers.range,
+      fileStats.size,
+    );
+  } catch {
+    response.statusCode = 416;
+    response.setHeader(
+      "Content-Range",
+      `bytes */${fileStats.size}`,
+    );
+    response.end();
+    return;
+  }
+
+  const start = range?.start ?? 0;
+  const end =
+    range?.end ?? Math.max(0, fileStats.size - 1);
+  const contentLength = end - start + 1;
+
+  response.statusCode = range ? 206 : 200;
+  response.setHeader(
+    "Content-Type",
+    contentType,
+  );
+  response.setHeader(
+    "Content-Length",
+    String(contentLength),
+  );
+  response.setHeader(
+    "Accept-Ranges",
+    "bytes",
+  );
+  response.setHeader(
+    "Cache-Control",
+    "no-store",
+  );
+  response.setHeader(
+    "X-Metadata-Editor-Source",
+    "canonical-video-master",
+  );
+
+  if (range) {
+    response.setHeader(
+      "Content-Range",
+      `bytes ${start}-${end}/${fileStats.size}`,
+    );
+  }
+
+  if (request.method === "HEAD") {
+    response.end();
+    return;
+  }
+
+  const stream = createReadStream(
+    canonicalPath,
+    { start, end },
+  );
+
+  stream.on("error", () => {
+    if (!response.headersSent) {
+      response.statusCode = 500;
+    }
+
+    response.destroy();
+  });
+  stream.pipe(response);
+}
+
 function assertIngestSourcesReviewed(
   body: Record<string, unknown>,
   draft: ReturnType<
@@ -1429,6 +1577,186 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Audio preview not found",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/library/video-metadata"
+    ) {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+      const videoId =
+        requestUrl.searchParams.get("video");
+
+      if (!releaseId || !videoId) {
+        sendJson(response, 400, {
+          error:
+            "Missing release or video query parameter",
+        });
+        return;
+      }
+
+      try {
+        const mediaRoot = await resolveMediaRoot();
+        const release = await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        sendJson(
+          response,
+          200,
+          await readVideoMetadataForEdit(
+            mediaRoot,
+            release,
+            videoId,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to read video metadata",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/save-video-metadata"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : null;
+        const videoId =
+          "videoId" in body &&
+          typeof body.videoId === "string"
+            ? body.videoId
+            : null;
+        const originalSha256 =
+          "originalSha256" in body &&
+          typeof body.originalSha256 === "string"
+            ? body.originalSha256
+            : null;
+
+        if (
+          !releaseId ||
+          !videoId ||
+          !originalSha256 ||
+          !("title" in body) ||
+          !("videoType" in body) ||
+          !("relatedTrackId" in body)
+        ) {
+          sendJson(response, 400, {
+            error:
+              "releaseId, videoId, originalSha256, title, videoType, and relatedTrackId are required",
+          });
+          return;
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        const release = await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        sendJson(
+          response,
+          200,
+          await saveVideoMetadataEdits(
+            mediaRoot,
+            release,
+            {
+              videoId,
+              originalSha256,
+              title: body.title,
+              videoType: body.videoType,
+              relatedTrackId: body.relatedTrackId,
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 409, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to save video metadata",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      (request.method === "GET" ||
+        request.method === "HEAD") &&
+      requestUrl.pathname ===
+        "/api/library/video-preview"
+    ) {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+      const videoId =
+        requestUrl.searchParams.get("video");
+
+      if (!releaseId || !videoId) {
+        sendJson(response, 400, {
+          error:
+            "Missing release or video query parameter",
+        });
+        return;
+      }
+
+      try {
+        await sendLibraryVideoPreview(
+          request,
+          response,
+          releaseId,
+          videoId,
+        );
+      } catch (error) {
+        sendJson(response, 404, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Video preview not found",
         });
       }
 

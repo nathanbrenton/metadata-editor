@@ -18,7 +18,7 @@ test("Workflow & Help explains the segmented web-stream publish model", () => {
   assert.match(helpSource, /waveform-peaks\.json/);
   assert.match(helpSource, /private audio-playback\.mp3/);
   assert.match(helpSource, /Prepare Library MP3s/);
-  assert.match(helpSource, /never blocks Build or Update public package/);
+  assert.match(helpSource, /never blocks Publish or Update public package/);
 });
 
 test("README documents the host-ready HLS resource contract", () => {

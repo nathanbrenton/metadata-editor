@@ -20,6 +20,7 @@ import {
   type IngestBuildAssetDraft,
   type IngestBuildDraft,
   type IngestBuildTrackDraft,
+  type IngestBuildVideoDraft,
 } from "../shared/ingest-builder.js";
 
 const projectRoot = path.resolve(
@@ -107,6 +108,52 @@ function parseStoredTrack(
   };
 }
 
+
+function parseStoredVideo(
+  value: unknown,
+  index: number,
+): IngestBuildVideoDraft {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    throw new Error(`Video ${index + 1} must be an object.`);
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return {
+    sourceRelativePath: draftString(
+      record.sourceRelativePath,
+      `Video ${index + 1} source path`,
+    ),
+    include: draftBoolean(
+      record.include,
+      `Video ${index + 1} include`,
+    ),
+    videoId: draftString(
+      record.videoId,
+      `Video ${index + 1} ID`,
+    ),
+    title: draftString(
+      record.title,
+      `Video ${index + 1} title`,
+    ),
+    videoType: draftString(
+      record.videoType,
+      `Video ${index + 1} type`,
+    ),
+    relatedTrackSourceRelativePath:
+      typeof record.relatedTrackSourceRelativePath === "string"
+        ? record.relatedTrackSourceRelativePath
+        : "",
+    destinationFilename: draftString(
+      record.destinationFilename,
+      `Video ${index + 1} destination filename`,
+    ),
+  };
+}
 
 function parseStoredArtworkAssignment(
   value: unknown,
@@ -229,8 +276,12 @@ function parseDraftForStorage(
 
   const record = value as Record<string, unknown>;
 
-  if (!Array.isArray(record.tracks) || !Array.isArray(record.assets)) {
-    throw new Error("Stored ingest draft tracks and assets must be arrays.");
+  if (
+    !Array.isArray(record.tracks) ||
+    (record.videos !== undefined && !Array.isArray(record.videos)) ||
+    !Array.isArray(record.assets)
+  ) {
+    throw new Error("Stored ingest draft tracks, videos, and assets must be arrays when present.");
   }
 
   return {
@@ -241,6 +292,9 @@ function parseDraftForStorage(
     releaseDate: draftString(record.releaseDate, "Release date"),
     releaseType: draftString(record.releaseType, "Release type"),
     tracks: record.tracks.map(parseStoredTrack),
+    videos: Array.isArray(record.videos)
+      ? record.videos.map(parseStoredVideo)
+      : [],
     assets: record.assets.map(parseStoredAsset),
   };
 }
@@ -318,6 +372,7 @@ function parseStatus(
     ].includes(String(state)) ||
     ![
       "audio",
+      "video",
       "image",
       "text",
       "unknown",

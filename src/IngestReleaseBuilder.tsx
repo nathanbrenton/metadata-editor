@@ -12,6 +12,7 @@ import {
   createArtworkAssignmentId,
   defaultReleaseArtworkAssignment,
   ingestArtworkRoleOptions,
+  ingestVideoTypeOptions,
   shouldSynchronizeReleaseDirectoryId,
   type IngestArtworkAssignmentDraft,
   type IngestBuildAssetDraft,
@@ -20,6 +21,7 @@ import {
   type IngestBuildPreview,
   type IngestBuildResult,
   type IngestBuildTrackDraft,
+  type IngestBuildVideoDraft,
   type IngestStagingTargetStatus,
 } from "../shared/ingest-builder.js";
 import {
@@ -70,7 +72,8 @@ type GuidedStep =
   | 1
   | 2
   | 3
-  | 4;
+  | 4
+  | 5;
 
 type IngestAudioPreviewControls = {
   sourceRelativePath: string | null;
@@ -372,9 +375,11 @@ function PlanKindIcon({
           ? "receipt"
           : mediaKind === "audio"
             ? "audio"
-            : mediaKind === "image"
-              ? "image"
-              : "file";
+            : mediaKind === "video"
+              ? "video"
+              : mediaKind === "image"
+                ? "image"
+                : "file";
   const label =
     iconKind === "directory"
       ? "Directory"
@@ -382,8 +387,10 @@ function PlanKindIcon({
         ? "TOML document"
         : iconKind === "audio"
           ? "Audio file"
-          : iconKind === "image"
-            ? "Image file"
+          : iconKind === "video"
+            ? "Video file"
+            : iconKind === "image"
+              ? "Image file"
             : iconKind === "receipt"
               ? "Receipt document"
               : "File";
@@ -402,6 +409,10 @@ function PlanKindIcon({
       ) : iconKind === "audio" ? (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M10 5v10.2a3.5 3.5 0 1 1-2-3.16V7l11-2v8.2a3.5 3.5 0 1 1-2-3.16V3.5z" />
+        </svg>
+      ) : iconKind === "video" ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 5h16v14H4zm5 3v8l7-4z" />
         </svg>
       ) : iconKind === "image" ? (
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1661,6 +1672,20 @@ export function IngestReleaseBuilder({
     }));
   };
 
+  const updateVideo = (
+    sourceRelativePath: string,
+    patch: Partial<IngestBuildVideoDraft>,
+  ) => {
+    updateDraft((current) => ({
+      ...current,
+      videos: (current.videos ?? []).map((video) =>
+        video.sourceRelativePath === sourceRelativePath
+          ? { ...video, ...patch }
+          : video,
+      ),
+    }));
+  };
+
   const applyTrackSourceDate = (
     sourceRelativePaths: string[],
     sourceDate: string,
@@ -1802,6 +1827,11 @@ export function IngestReleaseBuilder({
         item.sourceRelativePath ===
         status.sourceRelativePath,
     );
+    const video = (draft.videos ?? []).find(
+      (item) =>
+        item.sourceRelativePath ===
+        status.sourceRelativePath,
+    );
     const asset = draft.assets.find(
       (item) =>
         item.sourceRelativePath ===
@@ -1810,6 +1840,12 @@ export function IngestReleaseBuilder({
 
     if (track) {
       updateTrack(status.sourceRelativePath, {
+        include,
+      });
+    }
+
+    if (video) {
+      updateVideo(status.sourceRelativePath, {
         include,
       });
     }
@@ -1844,9 +1880,14 @@ export function IngestReleaseBuilder({
         track.sourceRelativePath ===
         status.sourceRelativePath,
     );
+    const isVideo = (draft.videos ?? []).some(
+      (video) =>
+        video.sourceRelativePath ===
+        status.sourceRelativePath,
+    );
 
     setMode("guided");
-    setGuidedStep(isTrack ? 2 : 3);
+    setGuidedStep(isTrack ? 2 : isVideo ? 3 : 4);
     setFocusedSourcePath(
       status.sourceRelativePath,
     );
@@ -2218,6 +2259,7 @@ export function IngestReleaseBuilder({
           onStepChange={setGuidedStep}
           onReleaseChange={updateRelease}
           onTrackChange={updateTrack}
+          onVideoChange={updateVideo}
           trackSourceFiles={trackSourceFiles}
           onApplyTrackTitles={applyTrackTitles}
           onApplySourceDate={applyTrackSourceDate}
@@ -2260,6 +2302,7 @@ export function IngestReleaseBuilder({
           targetStatus={targetStatus}
           onReleaseChange={updateRelease}
           onTrackChange={updateTrack}
+          onVideoChange={updateVideo}
           trackSourceFiles={trackSourceFiles}
           onApplyTrackTitles={applyTrackTitles}
           onApplySourceDate={applyTrackSourceDate}
@@ -2308,6 +2351,7 @@ function GuidedIngestBuilder({
   onStepChange,
   onReleaseChange,
   onTrackChange,
+  onVideoChange,
   trackSourceFiles,
   onApplyTrackTitles,
   onApplySourceDate,
@@ -2352,6 +2396,10 @@ function GuidedIngestBuilder({
   onTrackChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildTrackDraft>,
+  ) => void;
+  onVideoChange: (
+    sourceRelativePath: string,
+    patch: Partial<IngestBuildVideoDraft>,
   ) => void;
   trackSourceFiles: IngestFileInspection[];
   onApplyTrackTitles: (
@@ -2407,10 +2455,14 @@ function GuidedIngestBuilder({
     },
     {
       number: 3 as const,
-      label: "Artwork & files",
+      label: "Videos",
     },
     {
       number: 4 as const,
+      label: "Artwork & files",
+    },
+    {
+      number: 5 as const,
       label: "Review",
     },
   ];
@@ -2449,7 +2501,7 @@ function GuidedIngestBuilder({
         <section className="ingest-questionnaire-panel">
           <header>
             <p className="eyebrow">
-              Step 1 of 4
+              Step 1 of 5
             </p>
             <h3>Confirm release identity</h3>
             <p>
@@ -2469,7 +2521,7 @@ function GuidedIngestBuilder({
         <section className="ingest-questionnaire-panel">
           <header>
             <p className="eyebrow">
-              Step 2 of 4
+              Step 2 of 5
             </p>
             <h3>Confirm tracks</h3>
             <p>
@@ -2498,7 +2550,32 @@ function GuidedIngestBuilder({
         <section className="ingest-questionnaire-panel">
           <header>
             <p className="eyebrow">
-              Step 3 of 4
+              Step 3 of 5
+            </p>
+            <h3>Confirm videos</h3>
+            <p>
+              Review every probe-verified video before it becomes a canonical
+              release asset. Choose a stable ID, descriptive type, and optional
+              related track; source bytes remain unchanged.
+            </p>
+          </header>
+          <VideoDraftTable
+            videos={draft.videos ?? []}
+            tracks={draft.tracks}
+            sourceStatuses={sourceStatuses}
+            existingVideos={targetStatus?.existingVideos ?? []}
+            onChange={onVideoChange}
+            onSourceReviewed={onSourceReviewed}
+            focusedSourcePath={focusedSourcePath}
+          />
+        </section>
+      )}
+
+      {step === 4 && (
+        <section className="ingest-questionnaire-panel">
+          <header>
+            <p className="eyebrow">
+              Step 4 of 5
             </p>
             <h3>Assign artwork & other files</h3>
             <p>
@@ -2529,11 +2606,11 @@ function GuidedIngestBuilder({
         </section>
       )}
 
-      {step === 4 && (
+      {step === 5 && (
         <section className="ingest-questionnaire-panel">
           <header>
             <p className="eyebrow">
-              Step 4 of 4
+              Step 5 of 5
             </p>
             <h3>
               Review destination and {operation === "update" ? "update" : "create"}
@@ -2581,14 +2658,14 @@ function GuidedIngestBuilder({
         >
           Previous
         </button>
-        {step < 4 && (
+        {step < 5 && (
           <button
             type="button"
             className="primary-button"
             onClick={() =>
               onStepChange(
                 Math.min(
-                  4,
+                  5,
                   step + 1,
                 ) as GuidedStep,
               )
@@ -2612,6 +2689,7 @@ function QuickIngestBuilder({
   targetStatus,
   onReleaseChange,
   onTrackChange,
+  onVideoChange,
   trackSourceFiles,
   onApplyTrackTitles,
   onApplySourceDate,
@@ -2654,6 +2732,10 @@ function QuickIngestBuilder({
   onTrackChange: (
     sourceRelativePath: string,
     patch: Partial<IngestBuildTrackDraft>,
+  ) => void;
+  onVideoChange: (
+    sourceRelativePath: string,
+    patch: Partial<IngestBuildVideoDraft>,
   ) => void;
   trackSourceFiles: IngestFileInspection[];
   onApplyTrackTitles: (
@@ -2731,6 +2813,27 @@ function QuickIngestBuilder({
           onApplyTrackTitles={onApplyTrackTitles}
           onApplySourceDate={onApplySourceDate}
           audioPreviewControls={audioPreviewControls}
+          onSourceReviewed={onSourceReviewed}
+          focusedSourcePath={focusedSourcePath}
+        />
+      </section>
+
+      <section className="ingest-table-panel">
+        <header className="ingest-table-panel-header">
+          <div>
+            <h3>Videos</h3>
+            <p>
+              Confirm canonical release-level video assets, stable IDs, types,
+              and optional track relationships before writing the Library copy.
+            </p>
+          </div>
+        </header>
+        <VideoDraftTable
+          videos={draft.videos ?? []}
+          tracks={draft.tracks}
+          sourceStatuses={sourceStatuses}
+          existingVideos={targetStatus?.existingVideos ?? []}
+          onChange={onVideoChange}
           onSourceReviewed={onSourceReviewed}
           focusedSourcePath={focusedSourcePath}
         />
@@ -3801,6 +3904,231 @@ function TrackDraftTable({
               </tr>
             );
             })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function VideoDraftTable({
+  videos,
+  tracks,
+  sourceStatuses,
+  existingVideos,
+  onChange,
+  onSourceReviewed,
+  focusedSourcePath,
+}: {
+  videos: IngestBuildVideoDraft[];
+  tracks: IngestBuildTrackDraft[];
+  sourceStatuses: IngestDraftSourceStatus[];
+  existingVideos: IngestStagingTargetStatus["existingVideos"];
+  onChange: (
+    sourceRelativePath: string,
+    patch: Partial<IngestBuildVideoDraft>,
+  ) => void;
+  onSourceReviewed: (
+    sourceRelativePath: string,
+    reviewed: boolean,
+  ) => void;
+  focusedSourcePath: string | null;
+}) {
+  const statusByPath = new Map(
+    sourceStatuses.map((status) => [
+      status.sourceRelativePath,
+      status,
+    ]),
+  );
+  const existingBySource = new Map(
+    existingVideos.map((video) => [
+      video.sourceRelativePath,
+      video,
+    ]),
+  );
+  const includedTracks = tracks
+    .filter((track) => track.include)
+    .slice()
+    .sort(
+      (left, right) =>
+        left.trackNumber - right.trackNumber ||
+        left.title.localeCompare(right.title),
+    );
+
+  return (
+    <div className="ingest-video-table-workflow">
+      <div className="ingest-video-guidance">
+        <strong>Canonical release video</strong>
+        <span>
+          Each selected source is stored under videos/&lt;stable-id&gt;/ as
+          video-master.&lt;original-extension&gt; plus video.toml. The video remains
+          release-scoped; optionally relate it to one track without moving it into
+          the track directory. Staging does not transcode video.
+        </span>
+      </div>
+
+      {existingVideos.length > 0 && (
+        <div className="ingest-video-existing-summary">
+          <strong>
+            {existingVideos.length} existing Library video
+            {existingVideos.length === 1 ? "" : "s"}
+          </strong>
+          <span>
+            Existing verified videos absent from this candidate are preserved
+            automatically. Canonical video replacement is intentionally not enabled
+            in Video V1.
+          </span>
+        </div>
+      )}
+
+      <datalist id="ingest-video-type-options">
+        {ingestVideoTypeOptions.map((value) => (
+          <option key={value} value={value} />
+        ))}
+      </datalist>
+
+      <div className="ingest-table-scroll">
+        <table className="ingest-draft-table ingest-video-draft-table">
+          <thead>
+            <tr>
+              <th scope="col">Use</th>
+              <th scope="col">Source</th>
+              <th scope="col">Title</th>
+              <th scope="col">Type</th>
+              <th scope="col">Related track</th>
+              <th scope="col">Stable video ID</th>
+              <th scope="col">Destination</th>
+            </tr>
+          </thead>
+          <tbody>
+            {videos.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="metadata-empty-value">
+                  No probe-verified video sources are available in this candidate.
+                </td>
+              </tr>
+            ) : (
+              videos.map((video) => {
+                const status = statusByPath.get(video.sourceRelativePath);
+                const sourceMissing = status?.state === "missing";
+                const existing = existingBySource.get(video.sourceRelativePath);
+                const controlsDisabled = !video.include || sourceMissing;
+
+                return (
+                  <tr
+                    key={video.sourceRelativePath}
+                    data-ingest-source-path={video.sourceRelativePath}
+                    tabIndex={
+                      focusedSourcePath === video.sourceRelativePath
+                        ? -1
+                        : undefined
+                    }
+                    className={[
+                      focusedSourcePath === video.sourceRelativePath
+                        ? "is-focused-source"
+                        : "",
+                      sourceMissing ? "is-missing-source" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={video.include}
+                        disabled={sourceMissing}
+                        aria-label={`Include video ${video.sourceRelativePath}`}
+                        onChange={(event) => {
+                          onChange(video.sourceRelativePath, {
+                            include: event.target.checked,
+                          });
+                          onSourceReviewed(video.sourceRelativePath, true);
+                        }}
+                      />
+                    </td>
+                    <th scope="row">
+                      <code>{video.sourceRelativePath}</code>
+                      {existing && (
+                        <small className="ingest-inline-success">
+                          Existing · {existing.id}
+                        </small>
+                      )}
+                      {status && status.state !== "unchanged" && (
+                        <small className="ingest-inline-warning">
+                          {status.state}
+                        </small>
+                      )}
+                    </th>
+                    <td>
+                      <input
+                        type="text"
+                        value={video.title}
+                        disabled={controlsDisabled || Boolean(existing)}
+                        aria-label={`Video title for ${video.sourceRelativePath}`}
+                        onChange={(event) =>
+                          onChange(video.sourceRelativePath, {
+                            title: event.target.value,
+                          })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        list="ingest-video-type-options"
+                        value={video.videoType}
+                        disabled={controlsDisabled || Boolean(existing)}
+                        aria-label={`Video type for ${video.sourceRelativePath}`}
+                        onChange={(event) =>
+                          onChange(video.sourceRelativePath, {
+                            videoType: event.target.value,
+                          })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={video.relatedTrackSourceRelativePath}
+                        disabled={controlsDisabled || Boolean(existing)}
+                        aria-label={`Related track for ${video.sourceRelativePath}`}
+                        onChange={(event) =>
+                          onChange(video.sourceRelativePath, {
+                            relatedTrackSourceRelativePath: event.target.value,
+                          })
+                        }
+                      >
+                        <option value="">Release-level only</option>
+                        {includedTracks.map((track) => (
+                          <option
+                            key={track.sourceRelativePath}
+                            value={track.sourceRelativePath}
+                          >
+                            {`${track.trackNumber}. ${track.title}`}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={video.videoId}
+                        disabled={controlsDisabled || Boolean(existing)}
+                        pattern="[a-z0-9][a-z0-9_-]*"
+                        aria-label={`Stable video ID for ${video.sourceRelativePath}`}
+                        onChange={(event) =>
+                          onChange(video.sourceRelativePath, {
+                            videoId: event.target.value,
+                          })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <code>{`videos/${video.videoId}/${video.destinationFilename}`}</code>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
@@ -5156,6 +5484,11 @@ function BuildReview({
       asset.sourceRelativePath,
     ),
   );
+  const videoPaths = new Set(
+    (draft.videos ?? []).map((video) =>
+      video.sourceRelativePath,
+    ),
+  );
   const missingAssets = sourceStatuses.filter(
     (status) =>
       status.state === "missing" &&
@@ -5168,6 +5501,22 @@ function BuildReview({
     .sort((left, right) =>
       left.trackNumber - right.trackNumber,
     );
+  const includedVideos = [...(draft.videos ?? [])]
+    .filter((video) => video.include);
+  const missingVideoSources = includedVideos.filter(
+    (video) =>
+      sourceStatusForPath(
+        sourceStatuses,
+        video.sourceRelativePath,
+      )?.state === "missing",
+  );
+  const pendingVideoReviewPaths = new Set(
+    blockingSources
+      .filter((status) =>
+        videoPaths.has(status.sourceRelativePath),
+      )
+      .map((status) => status.sourceRelativePath),
+  );
   const includedArtwork = reviewIncludedArtwork(draft);
   const releaseFrontArtwork =
     reviewReleaseFrontArtwork(draft);
@@ -5250,6 +5599,9 @@ function BuildReview({
             <span>{draft.releaseType || "No release type"}</span>
             <span>
               {includedTracks.length} track{includedTracks.length === 1 ? "" : "s"}
+            </span>
+            <span>
+              {includedVideos.length} video{includedVideos.length === 1 ? "" : "s"}
             </span>
             <span>
               {includedArtwork.length} artwork source{includedArtwork.length === 1 ? "" : "s"}
@@ -5381,6 +5733,91 @@ function BuildReview({
         )}
       </section>
 
+      <section className="ingest-review-video-panel">
+        <header className="ingest-review-section-header">
+          <div>
+            <h4>Videos</h4>
+            <p>
+              Confirm canonical video identity, type, source, and any optional
+              relationship to a track. Video remains release-scoped.
+            </p>
+          </div>
+          <span className="badge">
+            {includedVideos.length} included
+          </span>
+        </header>
+
+        {includedVideos.length === 0 ? (
+          <p className="metadata-empty-value ingest-review-empty-state">
+            No videos are included in this staging draft.
+          </p>
+        ) : (
+          <div className="ingest-table-scroll">
+            <table className="ingest-table ingest-review-video-table">
+              <thead>
+                <tr>
+                  <th scope="col">Video</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Related track</th>
+                  <th scope="col">Source</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {includedVideos.map((video) => {
+                  const sourceStatus = sourceStatusForPath(
+                    sourceStatuses,
+                    video.sourceRelativePath,
+                  );
+                  const sourceMissing = sourceStatus?.state === "missing";
+                  const reviewPending = pendingVideoReviewPaths.has(
+                    video.sourceRelativePath,
+                  );
+                  const relatedTrack = draft.tracks.find(
+                    (track) =>
+                      track.sourceRelativePath ===
+                      video.relatedTrackSourceRelativePath,
+                  );
+
+                  return (
+                    <tr key={video.sourceRelativePath}>
+                      <th scope="row">
+                        <strong>{video.title || "Untitled video"}</strong>
+                        <small><code>{video.videoId}</code></small>
+                      </th>
+                      <td>{video.videoType || "other"}</td>
+                      <td>
+                        {relatedTrack
+                          ? `${relatedTrack.trackNumber}. ${relatedTrack.title || "Untitled"}`
+                          : "Release-level only"}
+                      </td>
+                      <td><code>{reviewSourceFilename(video.sourceRelativePath)}</code></td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            sourceMissing
+                              ? "missing"
+                              : reviewPending
+                                ? "ingest-review-status-pending"
+                                : "complete"
+                          }`}
+                        >
+                          {sourceMissing
+                            ? "Missing source"
+                            : reviewPending
+                              ? "Review source"
+                              : "Ready"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
       <section className="ingest-review-preflight">
         <header className="ingest-review-section-header">
           <div>
@@ -5431,6 +5868,17 @@ function BuildReview({
               {missingTrackSources.length === 0
                 ? `${includedTracks.length} included source${includedTracks.length === 1 ? "" : "s"} available`
                 : `${missingTrackSources.length} included source${missingTrackSources.length === 1 ? " is" : "s are"} missing`}
+            </small>
+          </div>
+          <div>
+            <span className={`ingest-review-preflight-icon ${missingVideoSources.length === 0 ? "ready" : "blocked"}`} aria-hidden="true">
+              {missingVideoSources.length === 0 ? "✓" : "×"}
+            </span>
+            <strong>Video sources</strong>
+            <small>
+              {missingVideoSources.length === 0
+                ? `${includedVideos.length} included video source${includedVideos.length === 1 ? "" : "s"} available`
+                : `${missingVideoSources.length} included video source${missingVideoSources.length === 1 ? " is" : "s are"} missing`}
             </small>
           </div>
           <div>
@@ -5593,6 +6041,9 @@ function BuildReview({
                   const isTrack = trackPaths.has(
                     status.sourceRelativePath,
                   );
+                  const isVideo = videoPaths.has(
+                    status.sourceRelativePath,
+                  );
                   const isAsset = assetPaths.has(
                     status.sourceRelativePath,
                   );
@@ -5600,12 +6051,16 @@ function BuildReview({
                     status.state !== "missing";
                   const acceptLabel = isTrack
                     ? "Accept track source"
+                    : isVideo
+                      ? "Accept video source"
                     : status.mediaKind === "image"
                       ? "Include as artwork"
                       : "Include file";
                   const reviewLabel = isTrack
                     ? "Review in Tracks"
-                    : "Review in Artwork & files";
+                    : isVideo
+                      ? "Review in Videos"
+                      : "Review in Artwork & files";
 
                   return (
                     <tr key={status.sourceRelativePath}>
@@ -5694,7 +6149,7 @@ function BuildReview({
                                 <span aria-hidden="true">×</span>
                               </button>
                             )}
-                          {(isTrack || isAsset) && (
+                          {(isTrack || isVideo || isAsset) && (
                             <button
                               type="button"
                               onClick={() =>
@@ -5794,6 +6249,14 @@ function BuildReview({
                   <div>
                     <dt>Tracks added</dt>
                     <dd>{preview.summary.addedTrackCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Videos</dt>
+                    <dd>{preview.summary.videoCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Videos added</dt>
+                    <dd>{preview.summary.addedVideoCount}</dd>
                   </div>
                   <div>
                     <dt>Tracks replaced</dt>

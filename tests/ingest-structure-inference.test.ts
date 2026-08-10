@@ -76,6 +76,7 @@ function killchainInspection(): IngestCandidateInspection {
       displayTitle: "KILLCHAIN",
       fileCount: files.length,
       audioCount: 8,
+      videoCount: 0,
       imageCount: 9,
       textCount: 0,
       unknownCount: 0,

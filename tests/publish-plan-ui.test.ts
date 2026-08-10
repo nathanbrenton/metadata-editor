@@ -15,13 +15,24 @@ test("Publish exposes guided preflight, preparation, and guarded package writes"
   assert.match(appSource, /Continue to preflight/);
   assert.match(appSource, /Preflight result/);
   assert.match(appSource, /Technical package plan/);
-  assert.match(appSource, /Build public package/);
+  assert.match(appSource, /Publish public package/);
   assert.match(appSource, /Update public package/);
   assert.match(serverSource, /\/api\/publish\/plan/);
   assert.match(serverSource, /\/api\/publish\/prepare/);
   assert.match(serverSource, /\/api\/publish\/build/);
   assert.match(serverSource, /prepareReleaseMedia/);
   assert.match(serverSource, /publishReleasePackage/);
+});
+
+test("uses Publish for first publication and Update for later publication", () => {
+  assert.match(
+    appSource,
+    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update public package[\s\S]*?Publish public package/,
+  );
+  assert.doesNotMatch(
+    appSource,
+    /:\s*"Build public package"/,
+  );
 });
 
 test("Publish readiness table groups source and public-media readiness", () => {
@@ -89,7 +100,7 @@ test("Publish preflight keeps technical detail collapsed behind one next-step re
   assert.match(publishWorkspaceSource, /publishNextStepLabel/);
   assert.match(publishWorkspaceSource, /Resolve blockers/);
   assert.match(publishWorkspaceSource, /Prepare release/);
-  assert.match(publishWorkspaceSource, /Build public package/);
+  assert.match(publishWorkspaceSource, /Publish public package/);
   assert.match(publishWorkspaceSource, /Update public package/);
   assert.match(publishWorkspaceSource, /HLS/);
   assert.match(publishWorkspaceSource, /selectedPlan\.webStreams/);

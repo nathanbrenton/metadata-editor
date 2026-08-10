@@ -47,6 +47,7 @@ function inspection(
       displayTitle: "Crazy Eights",
       fileCount: files.length,
       audioCount: files.length,
+      videoCount: 0,
       imageCount: 0,
       textCount: 0,
       unknownCount: 0,
