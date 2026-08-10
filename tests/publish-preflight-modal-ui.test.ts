@@ -33,7 +33,7 @@ test("opens Publish preflight from the whole release row without an action colum
   );
 
   const overviewStart = publishWorkspaceSource.indexOf(
-    "<h3>Release readiness overview</h3>",
+    '<table className="workflow-workspace-table publish-readiness-table">',
   );
   const overviewEnd = publishWorkspaceSource.indexOf(
     "{selectedPlan && (",

@@ -2275,30 +2275,15 @@ export function App() {
                     </Suspense>
                   )}
 
-                  <section className="release-list">
-                    {scan.releases.map(
-                      (release) => (
-                        <ReleaseCard
-                          key={
-                            release.relativePath
-                          }
-                          release={release}
-                          onLibraryChanged={
-                            refreshLibrary
-                          }
-                          onOpenMetadata={() =>
-                            void openReleaseDetail(
-                              release.id,
-                            )
-                          }
-                          showAdminTools={
-                            showAdminTools
-                          }
-                          onNotify={notify}
-                        />
-                      ),
-                    )}
-                  </section>
+                  <LibraryReleaseBrowser
+                    releases={scan.releases}
+                    onLibraryChanged={refreshLibrary}
+                    onOpenMetadata={(releaseId) =>
+                      void openReleaseDetail(releaseId)
+                    }
+                    showAdminTools={showAdminTools}
+                    onNotify={notify}
+                  />
 
                 </>
               )}
@@ -4337,6 +4322,13 @@ function StagingWorkspace({
     tone?: ToastMessage["tone"],
   ) => void;
 }) {
+  const [sortMode, setSortMode] =
+    useState<LibraryReleaseSortMode>("date-desc");
+  const sortedReleases = useMemo(
+    () => sortLibraryReleases(releases, sortMode),
+    [releases, sortMode],
+  );
+
   if (inspection) {
     return (
       <Suspense
@@ -4407,66 +4399,138 @@ function StagingWorkspace({
               is configured in the staging builder.
             </p>
           </div>
-          <strong>{releases.length} releases</strong>
+          <div className="workflow-release-table-controls">
+            <label className="workspace-release-sort-control">
+              <span>Sort by</span>
+              <select
+                value={sortMode}
+                onChange={(event) =>
+                  setSortMode(
+                    event.target.value as LibraryReleaseSortMode,
+                  )
+                }
+              >
+                <option value="date-desc">Release date · newest</option>
+                <option value="date-asc">Release date · oldest</option>
+                <option value="title">Title · A–Z</option>
+                <option value="artist">Artist · A–Z</option>
+                <option value="library">Library order</option>
+              </select>
+            </label>
+            <strong>{releases.length} releases</strong>
+          </div>
         </header>
 
-        <div className="workflow-table-scroll">
+        <div className="workflow-table-scroll staging-release-table-scroll">
           <table className="workflow-workspace-table staging-release-table">
             <thead>
               <tr>
+                <th scope="col" className="staging-artwork-column">Artwork</th>
                 <th scope="col">Release</th>
                 <th scope="col" className="numeric">Tracks</th>
-                <th scope="col" className="numeric">Videos</th>
                 <th scope="col" className="numeric">Audio masters</th>
+                <th scope="col" className="numeric">Videos</th>
                 <th scope="col">Metadata</th>
-                <th scope="col">Update behavior</th>
-                <th scope="col" className="action-column">Action</th>
+                <th scope="col">Update mode</th>
+                <th scope="col" className="action-column">Next step</th>
               </tr>
             </thead>
             <tbody>
               {releases.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="workflow-empty-cell">
+                  <td colSpan={8} className="workflow-empty-cell">
                     No staged release workspaces were found in the configured library root.
                   </td>
                 </tr>
               ) : (
-                releases.map((release) => {
+                sortedReleases.map((release) => {
                   const readiness =
                     summarizeReleaseScanReadiness(release);
+                  const metadataReadinessTone =
+                    readinessTone(readiness);
+                  const metadataReadinessLabel =
+                    readinessBadgeLabel(readiness);
+                  const metadataReadinessIcon =
+                    metadataReadinessTone === "complete"
+                      ? "✓"
+                      : metadataReadinessTone === "missing"
+                        ? "×"
+                        : "!";
                   const masterCount = release.tracks.reduce(
                     (count, track) =>
                       count + track.audioMasters.length,
                     0,
                   );
+                  const releaseArtwork =
+                    selectReleaseFrontArtwork(
+                      release.artworkMasters,
+                    ) ??
+                    selectPreferredReleaseArtwork(
+                      release.artworkMasters,
+                    );
 
                   return (
                     <tr key={release.id}>
+                      <td className="staging-release-artwork-cell">
+                        <span
+                          className="staging-release-artwork"
+                          aria-hidden="true"
+                        >
+                          {releaseArtwork ? (
+                            <img
+                              src={artworkPreviewUrl(
+                                releaseArtwork.relativePath,
+                              )}
+                              alt=""
+                              loading="lazy"
+                            />
+                          ) : (
+                            <span className="staging-release-artwork-placeholder">
+                              No art
+                            </span>
+                          )}
+                        </span>
+                      </td>
                       <th scope="row">
-                        <strong>{formatReleaseTitle(release.id)}</strong>
-                        <code>{release.relativePath}</code>
+                        <span
+                          className="staging-release-identity"
+                          title={`Library path: ${release.relativePath}`}
+                        >
+                          <strong>
+                            {release.releaseTitle ??
+                              formatReleaseTitle(release.id)}
+                          </strong>
+                          {release.primaryArtistName && (
+                            <small>{release.primaryArtistName}</small>
+                          )}
+                        </span>
                       </th>
                       <td className="numeric">{release.tracks.length}</td>
-                      <td className="numeric">{release.videos.length}</td>
                       <td className="numeric">{masterCount}</td>
+                      <td className="numeric">{release.videos.length}</td>
                       <td>
                         <span
-                          className={`badge ${readinessTone(readiness)}`}
+                          className={`badge staging-metadata-readiness-icon ${metadataReadinessTone}`}
+                          title={metadataReadinessLabel}
+                          aria-label={`Metadata readiness: ${metadataReadinessLabel}`}
                         >
-                          {readinessBadgeLabel(readiness)}
+                          {metadataReadinessIcon}
                         </span>
                       </td>
                       <td>
-                        Preserve authored files; add new
-                        tracks/videos and apply validated
-                        track numbering changes only.
+                        <span
+                          className="badge preview staging-update-mode"
+                          title="Guarded update: preserve authored files and omitted existing tracks/videos; apply only reviewed additions, replacements, and validated numbering changes."
+                        >
+                          Guarded
+                        </span>
                       </td>
                       <td className="action-column">
                         <button
                           type="button"
                           onClick={() => onOpenRelease(release.id)}
                         >
-                          Open Library
+                          Open in Library
                         </button>
                       </td>
                     </tr>
@@ -4588,6 +4652,107 @@ const mediaPreparationAllowedPublishBlockers = new Set([
   "waveform-not-current",
   "browser-artwork-preparation-required",
 ]);
+
+type LibraryHealthBucket =
+  | "blocked"
+  | "warning"
+  | "preparation";
+
+type LibraryHealthSummary = {
+  blocked: number;
+  warning: number;
+  preparation: number;
+};
+
+function libraryHealthBucket(
+  issue: PublishPlanIssue,
+): LibraryHealthBucket {
+  if (
+    mediaPreparationAllowedPublishBlockers.has(issue.code) ||
+    issue.code.startsWith("derivative-") ||
+    /(?:playback|waveform|web[- ]?stream|browser artwork|derivative)/i.test(
+      `${issue.code} ${issue.message}`,
+    )
+  ) {
+    return "preparation";
+  }
+
+  return issue.severity === "blocked"
+    ? "blocked"
+    : "warning";
+}
+
+function summarizeLibraryHealthIssues(
+  issues: readonly PublishPlanIssue[],
+): LibraryHealthSummary {
+  return issues.reduce<LibraryHealthSummary>(
+    (summary, issue) => {
+      summary[libraryHealthBucket(issue)] += 1;
+      return summary;
+    },
+    {
+      blocked: 0,
+      warning: 0,
+      preparation: 0,
+    },
+  );
+}
+
+function libraryHealthTone(
+  summary: LibraryHealthSummary,
+): string {
+  if (summary.blocked > 0) {
+    return "missing";
+  }
+
+  if (summary.warning > 0) {
+    return "warning";
+  }
+
+  if (summary.preparation > 0) {
+    return "preview";
+  }
+
+  return "success";
+}
+
+function libraryHealthCompactLabel(
+  summary: LibraryHealthSummary,
+): string {
+  if (summary.blocked > 0) {
+    return `!${summary.blocked}`;
+  }
+
+  if (summary.warning > 0) {
+    return `⚠${summary.warning}`;
+  }
+
+  if (summary.preparation > 0) {
+    return `◌${summary.preparation}`;
+  }
+
+  return "✓";
+}
+
+function libraryHealthTitle(
+  summary: LibraryHealthSummary,
+): string {
+  const parts = [
+    summary.blocked > 0
+      ? `${summary.blocked} blocker${summary.blocked === 1 ? "" : "s"}`
+      : "",
+    summary.warning > 0
+      ? `${summary.warning} warning${summary.warning === 1 ? "" : "s"}`
+      : "",
+    summary.preparation > 0
+      ? `${summary.preparation} preparation item${summary.preparation === 1 ? "" : "s"}`
+      : "",
+  ].filter(Boolean);
+
+  return parts.length > 0
+    ? parts.join(" · ")
+    : "Up to date";
+}
 
 function browserArtworkNeedsPreparation(
   plan: PublishPlan,
@@ -4881,6 +5046,12 @@ function PublishWorkspace({
     useState<MediaPreparationProgress | null>(null);
   const [publishLoading, setPublishLoading] =
     useState(false);
+  const [sortMode, setSortMode] =
+    useState<LibraryReleaseSortMode>("date-desc");
+  const sortedReleases = useMemo(
+    () => sortLibraryReleases(releases, sortMode),
+    [releases, sortMode],
+  );
 
   const loadPublishPlan = useCallback(async (
     releaseId: string,
@@ -5086,15 +5257,18 @@ function PublishWorkspace({
           <p className="eyebrow">Step 4 · Publish</p>
           <h2>Preflight and package releases</h2>
           <p>
-            Validate one private canonical release and review
-            the exact sanitized package intended for
-            audio-player. Preflight is read-only; Prepare release
-            can generate private HLS web-stream and waveform derivatives.
-            Publish public package writes a validated sanitized snapshot to
-            published-media without exposing canonical masters.
+            Review canonical readiness, prepare reproducible web media when
+            needed, then publish or update the sanitized audio-player snapshot.
           </p>
         </div>
-        <div className="workflow-workspace-actions">
+        <div className="workflow-workspace-actions publish-workspace-actions">
+          <span
+            className="badge warning publish-read-only-status"
+            role="status"
+            title="Preflight planning is read-only. Choose a release row to open its preflight; planning itself writes nothing."
+          >
+            Read-only preflight
+          </span>
           <button
             type="button"
             disabled={loading}
@@ -5110,23 +5284,6 @@ function PublishWorkspace({
           </button>
         </div>
       </header>
-
-      <div className="workflow-workspace-notice planned">
-        <strong>Preflight planning is read-only</strong>
-        <span>
-          Choose a release row to open its preflight.
-          Preflight validates the canonical release, requires
-          current segmented HLS web-stream and waveform derivatives,
-          selects browser-compatible front artwork, and lists
-          every public asset and generated JSON destination.
-          Preflight itself writes nothing. After review, Prepare
-          release may create or replace only reproducible HLS stream
-          and waveform derivatives inside the private Library. Once
-          those are current, Publish or Update public package stages,
-          validates, and atomically promotes the complete sanitized
-          release snapshot.
-        </span>
-      </div>
 
       <section className="publish-location-boundary" aria-label="Publish storage boundary">
         <div>
@@ -5153,17 +5310,28 @@ function PublishWorkspace({
       )}
 
       <section className="workflow-table-panel">
-        <header>
-          <div>
-            <h3>Release readiness overview</h3>
-            <p>
-              Compare canonical sources with the lightweight
-              media audio-player needs. Review preflight checks
-              waveform freshness and exact destinations without
-              writing files.
-            </p>
+        <header className="publish-release-list-header">
+          <h3>Releases</h3>
+          <div className="workflow-release-table-controls">
+            <label className="workspace-release-sort-control">
+              <span>Sort by</span>
+              <select
+                value={sortMode}
+                onChange={(event) =>
+                  setSortMode(
+                    event.target.value as LibraryReleaseSortMode,
+                  )
+                }
+              >
+                <option value="date-desc">Release date · newest</option>
+                <option value="date-asc">Release date · oldest</option>
+                <option value="title">Title · A–Z</option>
+                <option value="artist">Artist · A–Z</option>
+                <option value="library">Library order</option>
+              </select>
+            </label>
+            <strong>{releases.length} releases</strong>
           </div>
-          <strong>{releases.length} releases</strong>
         </header>
 
         <div className="workflow-table-scroll">
@@ -5184,7 +5352,7 @@ function PublishWorkspace({
                   </td>
                 </tr>
               ) : (
-                releases.map((release) => {
+                sortedReleases.map((release) => {
                   const assessment =
                     assessPublishReadiness(release);
                   const loadingPlan =
@@ -5817,7 +5985,7 @@ function IngestCandidateTable({
                 Size
               </th>
               <th scope="col">Extensions</th>
-              <th scope="col">Date evidence</th>
+              <th scope="col">Date</th>
               <th scope="col" className="action-column">
                 Action
               </th>
@@ -5898,9 +6066,33 @@ function IngestCandidateTable({
                     : "—"}
                 </td>
                 <td>
-                  {candidate.dateCandidates.length > 0
-                    ? candidate.dateCandidates.join(", ")
-                    : "—"}
+                  {candidate.dateCandidates.length > 0 ? (
+                    <span
+                      className={`badge ingest-date-evidence ${
+                        candidate.dateCandidates.length > 1
+                          ? "warning"
+                          : "optional"
+                      }`}
+                      title={`${candidate.dateCandidates.length} inferred date${
+                        candidate.dateCandidates.length === 1 ? "" : "s"
+                      }: ${candidate.dateCandidates.join(", ")}`}
+                      aria-label={`${candidate.dateCandidates.length} inferred date${
+                        candidate.dateCandidates.length === 1 ? "" : "s"
+                      }: ${candidate.dateCandidates.join(", ")}`}
+                    >
+                      {candidate.dateCandidates.length === 1
+                        ? "1"
+                        : `? ${candidate.dateCandidates.length}`}
+                    </span>
+                  ) : (
+                    <span
+                      className="ingest-date-evidence-empty"
+                      title="No inferred date evidence"
+                      aria-label="No inferred date evidence"
+                    >
+                      —
+                    </span>
+                  )}
                 </td>
                 <td className="action-column">
                   <button
@@ -7081,6 +7273,322 @@ function formatIngestTechnicalValue(
 }
 
 
+type LibraryReleaseViewMode =
+  | "rows"
+  | "cards"
+  | "tiles";
+
+type LibraryReleaseSortMode =
+  | "library"
+  | "date-desc"
+  | "date-asc"
+  | "title"
+  | "artist";
+
+const LIBRARY_RELEASE_VIEW_STORAGE_KEY =
+  "metadata-editor.library-release-view";
+const LIBRARY_RELEASE_SORT_STORAGE_KEY =
+  "metadata-editor.library-release-sort";
+
+function readLibraryReleaseViewMode(): LibraryReleaseViewMode {
+  if (typeof window === "undefined") {
+    return "cards";
+  }
+
+  try {
+    const stored = window.localStorage.getItem(
+      LIBRARY_RELEASE_VIEW_STORAGE_KEY,
+    );
+
+    return stored === "rows" ||
+      stored === "cards" ||
+      stored === "tiles"
+      ? stored
+      : "cards";
+  } catch {
+    return "cards";
+  }
+}
+
+function readLibraryReleaseSortMode(): LibraryReleaseSortMode {
+  if (typeof window === "undefined") {
+    return "date-desc";
+  }
+
+  try {
+    const stored = window.localStorage.getItem(
+      LIBRARY_RELEASE_SORT_STORAGE_KEY,
+    );
+
+    return stored === "library" ||
+      stored === "date-desc" ||
+      stored === "date-asc" ||
+      stored === "title" ||
+      stored === "artist"
+      ? stored
+      : "date-desc";
+  } catch {
+    return "date-desc";
+  }
+}
+
+function libraryReleaseSortDate(
+  release: ReleaseScanResult,
+): string {
+  const explicit = release.releaseDate?.trim();
+  if (explicit) {
+    return explicit.slice(0, 10);
+  }
+
+  return release.id.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? "";
+}
+
+function libraryReleaseSortTitle(
+  release: ReleaseScanResult,
+): string {
+  return resolveReleaseDisplayTitle(
+    release.releaseTitle,
+    formatReleaseTitle(release.id),
+  );
+}
+
+function sortLibraryReleases(
+  releases: readonly ReleaseScanResult[],
+  mode: LibraryReleaseSortMode,
+): ReleaseScanResult[] {
+  if (mode === "library") {
+    return [...releases];
+  }
+
+  const sorted = [...releases];
+  sorted.sort((a, b) => {
+    if (mode === "title") {
+      return libraryReleaseSortTitle(a).localeCompare(
+        libraryReleaseSortTitle(b),
+        undefined,
+        { sensitivity: "base" },
+      );
+    }
+
+    if (mode === "artist") {
+      const aArtist = a.primaryArtistName?.trim() ?? "";
+      const bArtist = b.primaryArtistName?.trim() ?? "";
+
+      if (!aArtist && bArtist) return 1;
+      if (aArtist && !bArtist) return -1;
+
+      return aArtist.localeCompare(
+        bArtist,
+        undefined,
+        { sensitivity: "base" },
+      ) || libraryReleaseSortTitle(a).localeCompare(
+        libraryReleaseSortTitle(b),
+        undefined,
+        { sensitivity: "base" },
+      );
+    }
+
+    const aDate = libraryReleaseSortDate(a);
+    const bDate = libraryReleaseSortDate(b);
+
+    if (!aDate && bDate) return 1;
+    if (aDate && !bDate) return -1;
+
+    const comparison = aDate.localeCompare(bDate);
+    return mode === "date-desc"
+      ? -comparison
+      : comparison;
+  });
+
+  return sorted;
+}
+
+function LibraryReleaseViewIcon({
+  mode,
+}: {
+  mode: LibraryReleaseViewMode;
+}) {
+  if (mode === "rows") {
+    return (
+      <svg viewBox="0 0 18 18" aria-hidden="true">
+        <rect x="1.5" y="2.5" width="3" height="3" rx="0.4" />
+        <rect x="1.5" y="7.5" width="3" height="3" rx="0.4" />
+        <rect x="1.5" y="12.5" width="3" height="3" rx="0.4" />
+        <path d="M6 4h10M6 9h10M6 14h10" />
+      </svg>
+    );
+  }
+
+  if (mode === "cards") {
+    return (
+      <svg viewBox="0 0 18 18" aria-hidden="true">
+        <rect x="1.5" y="2" width="15" height="5.5" rx="0.8" />
+        <rect x="1.5" y="10.5" width="15" height="5.5" rx="0.8" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 18 18" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="6" height="6" rx="0.8" />
+      <rect x="10.5" y="1.5" width="6" height="6" rx="0.8" />
+      <rect x="1.5" y="10.5" width="6" height="6" rx="0.8" />
+      <rect x="10.5" y="10.5" width="6" height="6" rx="0.8" />
+    </svg>
+  );
+}
+
+function LibraryReleaseBrowser({
+  releases,
+  onLibraryChanged,
+  onOpenMetadata,
+  showAdminTools,
+  onNotify,
+}: {
+  releases: ReleaseScanResult[];
+  onLibraryChanged: () => Promise<void>;
+  onOpenMetadata: (releaseId: string) => void;
+  showAdminTools: boolean;
+  onNotify: (
+    message: string,
+    tone?: ToastMessage["tone"],
+  ) => void;
+}) {
+  const [viewMode, setViewMode] =
+    useState<LibraryReleaseViewMode>(
+      readLibraryReleaseViewMode,
+    );
+  const [sortMode, setSortMode] =
+    useState<LibraryReleaseSortMode>(
+      readLibraryReleaseSortMode,
+    );
+
+  const sortedReleases = useMemo(
+    () => sortLibraryReleases(releases, sortMode),
+    [releases, sortMode],
+  );
+
+  const chooseSortMode = (
+    mode: LibraryReleaseSortMode,
+  ) => {
+    setSortMode(mode);
+
+    try {
+      window.localStorage.setItem(
+        LIBRARY_RELEASE_SORT_STORAGE_KEY,
+        mode,
+      );
+    } catch {
+      // Sort preference persistence is optional UI convenience.
+    }
+  };
+
+  const chooseViewMode = (
+    mode: LibraryReleaseViewMode,
+  ) => {
+    setViewMode(mode);
+
+    try {
+      window.localStorage.setItem(
+        LIBRARY_RELEASE_VIEW_STORAGE_KEY,
+        mode,
+      );
+    } catch {
+      // View preference persistence is optional UI convenience.
+    }
+  };
+
+  return (
+    <section className="library-release-browser">
+      <header className="library-release-browser-toolbar">
+        <div>
+          <strong>Library releases</strong>
+          <small>
+            {releases.length} {releases.length === 1 ? "release" : "releases"}
+          </small>
+        </div>
+
+        <div className="library-release-browser-controls">
+          <label className="library-release-sort-control">
+            <span>Sort by</span>
+            <select
+              value={sortMode}
+              onChange={(event) =>
+                chooseSortMode(
+                  event.target.value as LibraryReleaseSortMode,
+                )
+              }
+            >
+              <option value="library">Library order</option>
+              <option value="date-desc">Release date · newest</option>
+              <option value="date-asc">Release date · oldest</option>
+              <option value="title">Title · A–Z</option>
+              <option value="artist">Artist · A–Z</option>
+            </select>
+          </label>
+
+          <div
+            className="library-release-view-switcher"
+            role="group"
+            aria-label="Library release view"
+          >
+            {(
+              [
+                ["rows", "Rows", "Dense column view"],
+                ["cards", "Cards", "Expanded release cards"],
+                ["tiles", "Tiles", "Artwork-first browsing"],
+              ] as const
+            ).map(([mode, label, description]) => (
+              <button
+                key={mode}
+                type="button"
+                aria-label={`${label} view`}
+                aria-pressed={viewMode === mode}
+                title={description}
+                onClick={() => chooseViewMode(mode)}
+              >
+                <LibraryReleaseViewIcon mode={mode} />
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <section
+        className={`release-list library-release-list library-release-list--${viewMode}`}
+        aria-label={`Library releases in ${viewMode} view`}
+      >
+        {sortedReleases.map((release) => (
+          <ReleaseCard
+            key={release.relativePath}
+            release={release}
+            onLibraryChanged={onLibraryChanged}
+            onOpenMetadata={() =>
+              onOpenMetadata(release.id)
+            }
+            showAdminTools={showAdminTools}
+            onNotify={onNotify}
+          />
+        ))}
+      </section>
+    </section>
+  );
+}
+
+function libraryMetadataReadinessLabel(
+  readiness: {
+    core: number;
+    credits: number;
+    supplemental: number;
+  },
+): string {
+  const label = readinessBadgeLabel(readiness);
+
+  return label === "Core complete"
+    ? "Metadata complete"
+    : label;
+}
+
 function ReleaseCard({
   release,
   onLibraryChanged,
@@ -7578,7 +8086,7 @@ function ReleaseCard({
                 : "All expected metadata documents are present"
             }
           >
-            {readinessBadgeLabel(
+            {libraryMetadataReadinessLabel(
               metadataReadiness,
             )}
           </span>
@@ -7598,13 +8106,6 @@ function ReleaseCard({
             </button>
           )}
 
-          <button
-            type="button"
-            className="primary-button"
-            onClick={onOpenMetadata}
-          >
-            View metadata
-          </button>
         </div>
       </header>
 
@@ -13470,6 +13971,14 @@ function ReleaseMetadataDetailView({
     useState(false);
   const [releaseRenameError, setReleaseRenameError] =
     useState<string | null>(null);
+  const [libraryHealthPlan, setLibraryHealthPlan] =
+    useState<PublishPlan | null>(null);
+  const [libraryHealthLoading, setLibraryHealthLoading] =
+    useState(true);
+  const [libraryHealthError, setLibraryHealthError] =
+    useState<string | null>(null);
+  const [libraryHealthOpen, setLibraryHealthOpen] =
+    useState(false);
   const [
     addingFieldsPath,
     setAddingFieldsPath,
@@ -16578,6 +17087,72 @@ function ReleaseMetadataDetailView({
       releaseRenameTitle || releaseDisplayTitle,
     );
 
+  useEffect(() => {
+    let cancelled = false;
+
+    setLibraryHealthLoading(true);
+    setLibraryHealthError(null);
+    setLibraryHealthOpen(false);
+
+    void fetch(
+      `/api/publish/plan?release=${encodeURIComponent(detail.releaseId)}`,
+    )
+      .then(async (response) => {
+        const payload = (await response.json()) as
+          | PublishPlan
+          | { error?: string };
+
+        if (
+          !response.ok ||
+          !("releaseId" in payload)
+        ) {
+          throw new Error(
+            "error" in payload && payload.error
+              ? payload.error
+              : "Unable to load Library health checks.",
+          );
+        }
+
+        if (!cancelled) {
+          setLibraryHealthPlan(payload);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLibraryHealthPlan(null);
+          setLibraryHealthError(
+            error instanceof Error
+              ? error.message
+              : "Unable to load Library health checks.",
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLibraryHealthLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [detail.releaseId, detail.documents]);
+
+  const libraryHealthIssues =
+    libraryHealthPlan?.issues ?? [];
+  const libraryHealthSummary =
+    summarizeLibraryHealthIssues(
+      libraryHealthIssues,
+    );
+  const releaseRenameChangedItems =
+    releaseRenamePlan?.items.filter(
+      (item) => item.action !== "unchanged",
+    ) ?? [];
+  const releaseRenameUnchangedItems =
+    releaseRenamePlan?.items.filter(
+      (item) => item.action === "unchanged",
+    ) ?? [];
+
   const openReleaseRename = () => {
     if (dirtyCount > 0) {
       setSaveError(
@@ -16896,7 +17471,7 @@ function ReleaseMetadataDetailView({
         ? "Needs review"
         : metadataReadiness?.actionableCount
           ? "Partial"
-          : "Core complete";
+          : "Metadata complete";
 
   const metadataHealthTone =
     isMetadataEmpty
@@ -17299,8 +17874,36 @@ function ReleaseMetadataDetailView({
                 )}
               </span>
               <span className="metadata-health-count">
-                {detail.warnings.length} warnings
+                {detail.warnings.length} metadata warnings
               </span>
+
+              <button
+                type="button"
+                className={`library-health-toggle badge ${libraryHealthTone(
+                  libraryHealthSummary,
+                )}`}
+                aria-expanded={libraryHealthOpen}
+                disabled={libraryHealthLoading}
+                title={
+                  libraryHealthError ??
+                  libraryHealthTitle(
+                    libraryHealthSummary,
+                  )
+                }
+                onClick={() =>
+                  setLibraryHealthOpen(
+                    (current) => !current,
+                  )
+                }
+              >
+                {libraryHealthLoading
+                  ? "Checking health…"
+                  : libraryHealthError
+                    ? "Health unavailable"
+                    : libraryHealthTitle(
+                        libraryHealthSummary,
+                      )}
+              </button>
             </div>
           </div>
         </div>
@@ -17470,6 +18073,137 @@ function ReleaseMetadataDetailView({
           </aside>
         )}
       </header>
+
+      {libraryHealthOpen && (
+        <section
+          className="library-health-panel"
+          aria-label="Release health details"
+        >
+          <header className="library-health-panel-header">
+            <div>
+              <h2>Release health</h2>
+              <p>
+                Read-only checks from the same current release plan used by
+                Publish preflight. Health describes actionable state; source
+                provenance remains separate.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() =>
+                navigateFromRelease("publish")
+              }
+            >
+              Open Publish preflight
+            </button>
+          </header>
+
+          <div className="library-health-bubbles">
+            <span
+              className={`badge ${
+                libraryHealthSummary.blocked > 0
+                  ? "missing"
+                  : "success"
+              }`}
+            >
+              {libraryHealthSummary.blocked} blocking issue
+              {libraryHealthSummary.blocked === 1 ? "" : "s"}
+            </span>
+            <span
+              className={`badge ${
+                libraryHealthSummary.warning > 0
+                  ? "warning"
+                  : "success"
+              }`}
+            >
+              {libraryHealthSummary.warning} warning
+              {libraryHealthSummary.warning === 1 ? "" : "s"}
+            </span>
+            <span
+              className={`badge ${
+                libraryHealthSummary.preparation > 0
+                  ? "preview"
+                  : "success"
+              }`}
+            >
+              {libraryHealthSummary.preparation} preparation item
+              {libraryHealthSummary.preparation === 1 ? "" : "s"}
+            </span>
+          </div>
+
+          {libraryHealthError ? (
+            <p className="message warning">
+              {libraryHealthError}
+            </p>
+          ) : libraryHealthIssues.length === 0 ? (
+            <p className="library-health-empty">
+              No current structural, warning, or preparation issues were found.
+            </p>
+          ) : (
+            <div className="library-health-groups">
+              {(
+                [
+                  ["blocked", "Blocking issues"],
+                  ["warning", "Warnings"],
+                  ["preparation", "Preparation / freshness"],
+                ] as const
+              ).map(([bucket, label]) => {
+                const issues =
+                  libraryHealthIssues.filter(
+                    (issue) =>
+                      libraryHealthBucket(issue) ===
+                      bucket,
+                  );
+
+                if (issues.length === 0) {
+                  return null;
+                }
+
+                return (
+                  <details
+                    key={bucket}
+                    open={bucket === "blocked"}
+                  >
+                    <summary>
+                      <span>{label}</span>
+                      <small>{issues.length}</small>
+                    </summary>
+                    <ul>
+                      {issues.map((issue, index) => (
+                        <li
+                          key={`${issue.code}:${issue.relativePath}:${index}`}
+                        >
+                          <span
+                            className={`badge ${
+                              bucket === "blocked"
+                                ? "missing"
+                                : bucket === "warning"
+                                  ? "warning"
+                                  : "preview"
+                            }`}
+                          >
+                            {issue.code}
+                          </span>
+                          <div>
+                            <strong>{issue.message}</strong>
+                            <code>{issue.relativePath}</code>
+                            {issue.suggestion && (
+                              <small>
+                                {issue.suggestion}
+                              </small>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       <WorkflowNavigation
         activeView="library"
@@ -17961,37 +18695,157 @@ function ReleaseMetadataDetailView({
                   </code>
                 </div>
 
-                <div className="track-directory-rename-review-table-wrap">
-                  <table className="track-directory-rename-review-table release-rename-plan-table">
-                    <thead>
-                      <tr>
-                        <th>Kind</th>
-                        <th>Action</th>
-                        <th>Current</th>
-                        <th>Target</th>
-                        <th>Reason</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {releaseRenamePlan.items.map((item) => (
-                        <tr
+                <section className="release-rename-change-set">
+                  <header>
+                    <div>
+                      <h3>Changes</h3>
+                      <p>
+                        Only files that will move, change, or block the
+                        operation are expanded here.
+                      </p>
+                    </div>
+                    <span className="metadata-health-count">
+                      {releaseRenameChangedItems.length} actionable
+                    </span>
+                  </header>
+
+                  {releaseRenameChangedItems.length === 0 ? (
+                    <p className="release-rename-no-changes">
+                      ✓ No file or metadata changes are required.
+                    </p>
+                  ) : (
+                    <div className="release-rename-change-list">
+                      {releaseRenameChangedItems.map((item) => (
+                        <article
                           key={`${item.kind}:${item.relativePath}`}
-                          className={item.action === "blocked" ? "blocked" : undefined}
+                          className={[
+                            "release-rename-change-card",
+                            item.action === "blocked"
+                              ? "is-blocked"
+                              : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
                         >
-                          <td>{item.kind}</td>
-                          <td>
-                            <span className={`badge ${item.action === "blocked" ? "blocked" : item.action === "unchanged" ? "optional" : "preview"}`}>
+                          <div className="release-rename-change-card-heading">
+                            <span
+                              className={`badge ${
+                                item.action === "blocked"
+                                  ? "missing"
+                                  : "preview"
+                              }`}
+                            >
                               {item.action}
                             </span>
-                          </td>
-                          <td><code>{item.relativePath}</code></td>
-                          <td><code>{item.targetRelativePath}</code></td>
-                          <td>{item.reason}</td>
-                        </tr>
+                            <strong>{item.kind}</strong>
+                          </div>
+
+                          <div className="release-rename-change-paths">
+                            <code>{item.relativePath}</code>
+                            {item.targetRelativePath !==
+                              item.relativePath && (
+                              <>
+                                <span aria-hidden="true">→</span>
+                                <code>
+                                  {item.targetRelativePath}
+                                </code>
+                              </>
+                            )}
+                          </div>
+
+                          <p>{item.reason}</p>
+                        </article>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
+                    </div>
+                  )}
+                </section>
+
+                {releaseRenameUnchangedItems.length > 0 && (
+                  <details className="release-rename-verified">
+                    <summary>
+                      <span>
+                        ✓ Verified unchanged files
+                      </span>
+                      <small>
+                        {releaseRenameUnchangedItems.length}
+                      </small>
+                    </summary>
+                    <div>
+                      <ul>
+                        {releaseRenameUnchangedItems.map(
+                          (item) => (
+                            <li
+                              key={`${item.kind}:${item.relativePath}`}
+                            >
+                              <code>
+                                {item.relativePath}
+                              </code>
+                              <span>{item.reason}</span>
+                            </li>
+                          ),
+                        )}
+                      </ul>
+                    </div>
+                  </details>
+                )}
+
+                <details className="release-rename-technical-plan">
+                  <summary>
+                    <span>Technical plan details</span>
+                    <small>
+                      {releaseRenamePlan.items.length} items
+                    </small>
+                  </summary>
+                  <div className="track-directory-rename-review-table-wrap">
+                    <table className="track-directory-rename-review-table release-rename-plan-table">
+                      <thead>
+                        <tr>
+                          <th>Kind</th>
+                          <th>Action</th>
+                          <th>Current</th>
+                          <th>Target</th>
+                          <th>Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {releaseRenamePlan.items.map((item) => (
+                          <tr
+                            key={`${item.kind}:${item.relativePath}`}
+                            className={
+                              item.action === "blocked"
+                                ? "blocked"
+                                : undefined
+                            }
+                          >
+                            <td>{item.kind}</td>
+                            <td>
+                              <span
+                                className={`badge ${
+                                  item.action === "blocked"
+                                    ? "blocked"
+                                    : item.action === "unchanged"
+                                      ? "optional"
+                                      : "preview"
+                                }`}
+                              >
+                                {item.action}
+                              </span>
+                            </td>
+                            <td>
+                              <code>{item.relativePath}</code>
+                            </td>
+                            <td>
+                              <code>
+                                {item.targetRelativePath}
+                              </code>
+                            </td>
+                            <td>{item.reason}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </details>
 
                 <p>
                   Apply revalidates this exact plan, creates an operation
@@ -18568,6 +19422,25 @@ function ReleaseMetadataDetailView({
             <small>{releaseDisplayTitle}</small>
           </span>
 
+          {!libraryHealthLoading &&
+            !libraryHealthError && (
+              <small
+                className={`badge library-health-row-badge ${libraryHealthTone(
+                  libraryHealthSummary,
+                )}`}
+                title={libraryHealthTitle(
+                  libraryHealthSummary,
+                )}
+                aria-label={libraryHealthTitle(
+                  libraryHealthSummary,
+                )}
+              >
+                {libraryHealthCompactLabel(
+                  libraryHealthSummary,
+                )}
+              </small>
+            )}
+
           <small
             className="document-count"
             title={`${releaseDocuments.length} metadata documents`}
@@ -18630,6 +19503,21 @@ function ReleaseMetadataDetailView({
           const scannedTrack =
             release?.tracks.find(
               (track) => track.id === trackId,
+            );
+          const trackHealthIssues =
+            scannedTrack
+              ? libraryHealthIssues.filter(
+                  (issue) =>
+                    issue.relativePath ===
+                      scannedTrack.relativePath ||
+                    issue.relativePath.startsWith(
+                      `${scannedTrack.relativePath}/`,
+                    ),
+                )
+              : [];
+          const trackHealthSummary =
+            summarizeLibraryHealthIssues(
+              trackHealthIssues,
             );
           const trackPlayable = Boolean(
             scannedTrack &&
@@ -18761,6 +19649,26 @@ function ReleaseMetadataDetailView({
                         className="track-navigation-badges"
                         aria-label="Track metadata status"
                       >
+                        {!libraryHealthLoading &&
+                          !libraryHealthError &&
+                          trackHealthIssues.length > 0 && (
+                            <small
+                              className={`badge library-health-row-badge ${libraryHealthTone(
+                                trackHealthSummary,
+                              )}`}
+                              title={libraryHealthTitle(
+                                trackHealthSummary,
+                              )}
+                              aria-label={libraryHealthTitle(
+                                trackHealthSummary,
+                              )}
+                            >
+                              {libraryHealthCompactLabel(
+                                trackHealthSummary,
+                              )}
+                            </small>
+                          )}
+
                         <small
                           className="document-count"
                           title={`${trackDocumentCount} metadata documents`}
@@ -20589,6 +21497,37 @@ function isMultilineLyricsPath(
 }
 
 
+type MetadataProvenanceKind =
+  | "stored"
+  | "inherited"
+  | "generated";
+
+function MetadataProvenanceChip({
+  kind,
+  detail,
+}: {
+  kind: MetadataProvenanceKind;
+  detail: string;
+}) {
+  const label =
+    kind === "stored"
+      ? "Stored"
+      : kind === "inherited"
+        ? "Inherited"
+        : "Generated";
+
+  return (
+    <span
+      className={`metadata-provenance-chip is-${kind}`}
+      data-provenance={kind}
+      title={detail}
+      aria-label={`${label} provenance: ${detail}`}
+    >
+      {label}
+    </span>
+  );
+}
+
 function MetadataValueCell({
   document,
   row,
@@ -20620,7 +21559,13 @@ function MetadataValueCell({
   if (!isEditableMetadataValue(row.value)) {
     return (
       <span className="metadata-value readonly-complex">
-        {formatMetadataValue(row.value)}
+        <span>{formatMetadataValue(row.value)}</span>
+        <span className="metadata-value-provenance">
+          <MetadataProvenanceChip
+            kind="stored"
+            detail={`Stored in ${document.filename} at ${row.path}`}
+          />
+        </span>
       </span>
     );
   }
@@ -20762,23 +21707,29 @@ function MetadataValueCell({
             : formatMetadataValue(displayCurrentValue)}
         </span>
 
-        {usingGeneratedValue && (
-          <small className="metadata-provenance-note metadata-derived-note">
-            {generatedNote}
-          </small>
-        )}
-
-        {usingInheritedValue && (
-          <small
-            className="metadata-provenance-note metadata-inherited-note"
-            title={
-              inheritedSourcePath
-                ? `Inherited from ${inheritedSourcePath}`
-                : "Inherited from release metadata"
-            }
-          >
-            Inherited from release
-          </small>
+        {!isBlankMetadataValue(currentValue) && (
+          <span className="metadata-value-provenance">
+            {usingInheritedValue ? (
+              <MetadataProvenanceChip
+                kind="inherited"
+                detail={
+                  inheritedSourcePath
+                    ? `Inherited from ${inheritedSourcePath}`
+                    : "Inherited from release metadata"
+                }
+              />
+            ) : usingGeneratedValue ? (
+              <MetadataProvenanceChip
+                kind="generated"
+                detail={generatedNote || "Generated value"}
+              />
+            ) : (
+              <MetadataProvenanceChip
+                kind="stored"
+                detail={`Stored in ${document.filename} at ${row.path}`}
+              />
+            )}
+          </span>
         )}
       </span>
     );
@@ -25990,12 +26941,12 @@ function MetadataDocumentTable({
                 inherited.value,
               )}
             </span>
-            <small
-              className="metadata-provenance-note metadata-inherited-note"
-              title={`Inherited from ${inherited.sourcePath}`}
-            >
-              Inherited from release
-            </small>
+            <span className="metadata-value-provenance">
+              <MetadataProvenanceChip
+                kind="inherited"
+                detail={`Inherited from ${inherited.sourcePath}`}
+              />
+            </span>
           </span>
 
           <button
@@ -26155,9 +27106,15 @@ function MetadataDocumentTable({
           {presentation.generatedValue && (
             <span className="metadata-value metadata-derived-default-value">
               <span>{presentation.generatedValue}</span>
-              <small className="metadata-provenance-note metadata-derived-note">
-                {presentation.generatedNote}
-              </small>
+              <span className="metadata-value-provenance">
+                <MetadataProvenanceChip
+                  kind="generated"
+                  detail={
+                    presentation.generatedNote ??
+                    "Generated value"
+                  }
+                />
+              </span>
             </span>
           )}
 

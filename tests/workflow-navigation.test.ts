@@ -55,7 +55,7 @@ test("renders desktop-first staging and publish workspaces", () => {
   assert.match(appSource, /function StagingWorkspace/);
   assert.match(appSource, /function PublishWorkspace/);
   assert.match(appSource, /Existing release workspaces/);
-  assert.match(appSource, /Release readiness overview/);
+  assert.match(appSource, /<h3>Releases<\/h3>/);
   assert.match(
     styleSource,
     /\.application-tabs\.workflow-navigation\s*\{[\s\S]*grid-template-columns:\s*repeat\(4,/,

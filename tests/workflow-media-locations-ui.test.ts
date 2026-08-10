@@ -2,17 +2,19 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("shows configured media roots under the four workflow stages", async () => {
+test("shows configured media roots as workflow-tab hover details", async () => {
   const source = await readFile(
     new URL("../src/WorkflowNavigation.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(source, /workflow-location-scroll/);
-  assert.match(source, /workflow-location-strip/);
-  assert.match(source, /Workflow media locations/);
-  assert.match(source, /Preflight only · no writes/);
+  assert.match(source, /locationById/);
+  assert.match(
+    source,
+    /title=\{[\s\S]*?location[\s\S]*?location\.label[\s\S]*?location\.displayPath[\s\S]*?location\.purpose/,
+  );
   assert.match(source, /displayPath/);
+  assert.doesNotMatch(source, /workflow-location-strip/);
 });
 
 test("explains the private-to-public publish storage boundary", async () => {
@@ -30,11 +32,12 @@ test("explains the private-to-public publish storage boundary", async () => {
 });
 
 
-test("keeps the location strip horizontally contained on narrower windows", async () => {
+test("does not reserve a second workflow row for media paths", async () => {
   const styles = await readFile(
     new URL("../src/styles.css", import.meta.url),
     "utf8",
   );
 
-  assert.match(styles, /\.workflow-location-scroll\s*\{[\s\S]*?overflow-x:\s*auto/);
+  assert.doesNotMatch(styles, /\.workflow-location-strip/);
+  assert.doesNotMatch(styles, /\.workflow-location-scroll/);
 });

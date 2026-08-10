@@ -15,6 +15,11 @@ import {
   describeArtworkPreference,
   selectPreferredArtworkCandidate,
 } from "../shared/artwork-preference.js";
+import {
+  acceptedArtworkMasterExtensions,
+  acceptedAudioMasterExtensions,
+  acceptedVideoMasterExtensions,
+} from "../shared/media-file-spec.js";
 
 import type {
   DiscoveredAsset,
@@ -41,57 +46,9 @@ const videoMetadataFiles = [
   "video.toml",
 ] as const;
 
-const audioAssetExtensions = new Set([
-  ".aac",
-  ".aif",
-  ".aiff",
-  ".alac",
-  ".ape",
-  ".au",
-  ".caf",
-  ".dff",
-  ".dsf",
-  ".flac",
-  ".m4a",
-  ".mka",
-  ".mp3",
-  ".ogg",
-  ".opus",
-  ".snd",
-  ".tta",
-  ".wav",
-  ".wave",
-  ".wma",
-  ".wv",
-]);
-
-const artworkMasterExtensions = new Set([
-  ".avif",
-  ".gif",
-  ".jpeg",
-  ".jpg",
-  ".png",
-  ".tif",
-  ".tiff",
-  ".webp",
-]);
-
-const videoAssetExtensions = new Set([
-  ".3gp",
-  ".avi",
-  ".m2ts",
-  ".m4v",
-  ".mkv",
-  ".mov",
-  ".mp4",
-  ".mpeg",
-  ".mpg",
-  ".mts",
-  ".mxf",
-  ".ogv",
-  ".ts",
-  ".webm",
-]);
+const audioAssetExtensions = acceptedAudioMasterExtensions;
+const artworkMasterExtensions = acceptedArtworkMasterExtensions;
+const videoAssetExtensions = acceptedVideoMasterExtensions;
 
 function isRecord(
   value: unknown,

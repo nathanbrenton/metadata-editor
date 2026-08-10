@@ -139,7 +139,7 @@ convention, changing the saved track number also plans a directory rename that p
 
 ## Workflow Media Locations
 
-The application reads its configured roots from the backend and displays them directly beneath the four workflow tabs:
+The application reads its configured roots from the backend and exposes each path as hover details on its corresponding workflow tab:
 
 ```text
 Ingest    → INGEST_ROOT (default ../ingest-drop)

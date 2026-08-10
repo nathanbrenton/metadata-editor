@@ -70,7 +70,7 @@ test("Publish readiness overview uses each release row as the preflight action",
   );
 
   const overviewStart = publishWorkspaceSource.indexOf(
-    "<h3>Release readiness overview</h3>",
+    '<table className="workflow-workspace-table publish-readiness-table">',
   );
   const overviewEnd = publishWorkspaceSource.indexOf(
     "{selectedPlan && (",

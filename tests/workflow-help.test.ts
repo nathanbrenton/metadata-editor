@@ -135,14 +135,14 @@ test("documents release audio preview controls", () => {
 });
 
 
-test("documents the active-tab summary in the sticky footer", () => {
+test("documents the active-workspace summary in the page footer", () => {
   const combinedText = workflowFaqItems
     .map(({ question, answer }) =>
       `${question} ${answer}`,
     )
     .join(" ");
 
-  assert.match(combinedText, /sticky footer/i);
+  assert.match(combinedText, /page footer/i);
   assert.match(combinedText, /Ingest displays the drop point/i);
   assert.match(combinedText, /Publish displays readiness counts/i);
 });
