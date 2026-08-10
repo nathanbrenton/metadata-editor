@@ -8,6 +8,9 @@ import type {
 import {
   analyzeIngestStructure,
 } from "./ingest-structure-inference.js";
+import {
+  sidecarSuggestionValue,
+} from "./ffmetadata-sidecar.js";
 
 export const INGEST_BUILD_CONFIRMATION_PHRASE =
   "CREATE_STAGING_RELEASE";
@@ -192,6 +195,12 @@ export type IngestBuildPreview = {
     | typeof INGEST_UPDATE_CONFIRMATION_PHRASE;
 };
 
+export type IngestStagingMetadataValue =
+  | string
+  | number
+  | boolean
+  | string[];
+
 export type IngestStagingTrackTarget = {
   id: string;
   number: number;
@@ -201,6 +210,7 @@ export type IngestStagingTrackTarget = {
   sourceDate: string;
   sourceRelativePath: string;
   destinationRelativePath: string;
+  metadataValues?: Record<string, IngestStagingMetadataValue>;
 };
 
 export type IngestStagingArtworkTarget = {
@@ -217,6 +227,13 @@ export type IngestStagingTargetStatus = {
   exists: boolean;
   operation: IngestBuildOperation;
   releaseRelativePath: string;
+  existingRelease?: {
+    title: string;
+    artist: string;
+    date: string;
+    type: string;
+    metadataValues?: Record<string, IngestStagingMetadataValue>;
+  };
   existingTracks: IngestStagingTrackTarget[];
   existingArtwork: IngestStagingArtworkTarget[];
 };
@@ -441,6 +458,75 @@ function selectedIdentityEvidenceValue(
   return value || undefined;
 }
 
+function metadataSidecars(
+  inspection: IngestCandidateInspection,
+): NonNullable<IngestFileInspection["metadataSidecar"]>[] {
+  return inspection.files
+    .map((file) => file.metadataSidecar)
+    .filter(
+      (sidecar): sidecar is NonNullable<IngestFileInspection["metadataSidecar"]> =>
+        sidecar !== undefined,
+    );
+}
+
+function sharedSidecarValue(
+  inspection: IngestCandidateInspection,
+  canonicalPath: string,
+): string | number | undefined {
+  const values = metadataSidecars(inspection)
+    .map((sidecar) =>
+      sidecarSuggestionValue(sidecar, canonicalPath),
+    )
+    .filter(
+      (value): value is string | number =>
+        value !== undefined && String(value).trim() !== "",
+    );
+
+  if (values.length === 0) {
+    return undefined;
+  }
+
+  const first = String(values[0]).trim();
+  return values.every(
+    (value) =>
+      String(value).trim().localeCompare(first, undefined, {
+        sensitivity: "base",
+      }) === 0,
+  )
+    ? values[0]
+    : undefined;
+}
+
+function pairedSidecar(
+  inspection: IngestCandidateInspection,
+  file: IngestFileInspection,
+): NonNullable<IngestFileInspection["metadataSidecar"]> | undefined {
+  const matches = metadataSidecars(inspection).filter(
+    (sidecar) => sidecar.pairedAudioRelativePath === file.relativePath,
+  );
+
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function completeDateFromSidecarValue(
+  value: string | number | undefined,
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = String(value).trim();
+  const match = normalized.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/,
+  );
+
+  if (!match) {
+    return undefined;
+  }
+
+  return `${match[1]}-${match[2]}-${match[3]}`;
+}
+
 function defaultReleaseTitle(
   inspection: IngestCandidateInspection,
   audioFiles: IngestFileInspection[],
@@ -450,6 +536,9 @@ function defaultReleaseTitle(
       inspection,
       "release.title",
     ) ??
+    (typeof sharedSidecarValue(inspection, "release.title") === "string"
+      ? String(sharedSidecarValue(inspection, "release.title"))
+      : undefined) ??
     sharedEmbeddedValue(
       audioFiles,
       ["album", "album_title"],
@@ -471,6 +560,17 @@ function defaultReleaseArtist(
       inspection,
       "release.artist",
     ) ??
+    (typeof sharedSidecarValue(
+      inspection,
+      "release.primary_artist.name",
+    ) === "string"
+      ? String(
+          sharedSidecarValue(
+            inspection,
+            "release.primary_artist.name",
+          ),
+        )
+      : undefined) ??
     sharedEmbeddedValue(
       audioFiles,
       [
@@ -501,6 +601,17 @@ function defaultReleaseDate(
     return candidateDate;
   }
 
+  const sidecarDate = completeDateFromSidecarValue(
+    sharedSidecarValue(
+      inspection,
+      "release.dates.release",
+    ),
+  );
+
+  if (sidecarDate) {
+    return sidecarDate;
+  }
+
   const embeddedDate = sharedEmbeddedValue(
     audioFiles,
     ["date", "year", "originaldate"],
@@ -528,9 +639,16 @@ function defaultReleaseDate(
 }
 
 function defaultTrackTitle(
+  inspection: IngestCandidateInspection,
   file: IngestFileInspection,
 ): string {
+  const sidecar = pairedSidecar(inspection, file);
+  const sidecarTitle = sidecar
+    ? sidecarSuggestionValue(sidecar, "track.title")
+    : undefined;
+
   return (
+    (typeof sidecarTitle === "string" ? sidecarTitle : undefined) ??
     embeddedValue(file, ["title"]) ??
     evidenceValue(file.evidence, "track.title") ??
     filenameStem(file.filename)
@@ -556,8 +674,20 @@ function defaultTrackVersion(
 }
 
 function defaultTrackDate(
+  inspection: IngestCandidateInspection,
   file: IngestFileInspection,
 ): string {
+  const sidecar = pairedSidecar(inspection, file);
+  const sidecarDate = completeDateFromSidecarValue(
+    sidecar
+      ? sidecarSuggestionValue(sidecar, "release.dates.release")
+      : undefined,
+  );
+
+  if (sidecarDate) {
+    return sidecarDate;
+  }
+
   const embedded = embeddedValue(
     file,
     ["date", "year", "originaldate"],
@@ -624,6 +754,30 @@ export function createDefaultIngestBuildDraft(
     usedTrackNumbers.add(trackNumber);
   }
 
+  for (const file of audioFiles) {
+    if (structurallyAssignedNumbers.has(file.relativePath)) {
+      continue;
+    }
+
+    const sidecar = pairedSidecar(inspection, file);
+    const value = sidecar
+      ? sidecarSuggestionValue(
+          sidecar,
+          "track.numbering.track_number",
+        )
+      : undefined;
+
+    if (
+      typeof value === "number" &&
+      Number.isSafeInteger(value) &&
+      value > 0 &&
+      !usedTrackNumbers.has(value)
+    ) {
+      structurallyAssignedNumbers.set(file.relativePath, value);
+      usedTrackNumbers.add(value);
+    }
+  }
+
   let nextFallbackTrackNumber = 1;
   const nextAvailableTrackNumber = () => {
     while (
@@ -652,12 +806,22 @@ export function createDefaultIngestBuildDraft(
           structurallyAssignedNumbers.get(
             file.relativePath,
           ) ?? nextAvailableTrackNumber(),
-        title: defaultTrackTitle(file),
+        title: defaultTrackTitle(inspection, file),
         version: defaultTrackVersion(file),
         artist:
-          embeddedValue(file, ["artist"]) ??
-          releaseArtist,
-        date: defaultTrackDate(file),
+          (() => {
+            const sidecar = pairedSidecar(inspection, file);
+            const value = sidecar
+              ? sidecarSuggestionValue(
+                  sidecar,
+                  "track.primary_artist.name",
+                )
+              : undefined;
+            return typeof value === "string"
+              ? value
+              : embeddedValue(file, ["artist"]) ?? releaseArtist;
+          })(),
+        date: defaultTrackDate(inspection, file),
         destinationFilename:
           `audio-master${extension}`,
       };
@@ -760,8 +924,9 @@ export function createDefaultIngestBuildDraft(
       return {
         sourceRelativePath: file.relativePath,
         include:
-          file.mediaKind === "text" ||
-          artworkAssignments.length > 0,
+          (file.mediaKind === "text"
+            ? !file.metadataSidecar
+            : artworkAssignments.length > 0),
         mediaKind: file.mediaKind,
         destinationRelativePath:
           uniquifyPath(

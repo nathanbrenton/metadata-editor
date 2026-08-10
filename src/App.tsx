@@ -6071,7 +6071,18 @@ function IngestCandidateInspectionView({
           <button
             type="button"
             className="primary-button"
-            disabled={candidate.audioCount === 0}
+            disabled={
+              candidate.audioCount === 0 &&
+              !inspection.files.some(
+                (file) => file.metadataSidecar,
+              )
+            }
+            title={
+              candidate.audioCount === 0 &&
+              inspection.files.some((file) => file.metadataSidecar)
+                ? "Continue with metadata-sidecar evidence and target an existing Library release in Staging."
+                : undefined
+            }
             onClick={() =>
               onOpenStaging(identityOverride)
             }
@@ -6100,8 +6111,7 @@ function IngestCandidateInspectionView({
           <div className="ingest-identity-tools-intro">
             <strong>Release identity detection</strong>
             <small>
-              Choose folder fields or embedded tags. These
-              selections seed Staging and remain manually editable.
+              Choose folder fields, embedded tags, or recognized metadata sidecars. These selections seed Staging and remain manually editable.
             </small>
           </div>
 
@@ -6186,8 +6196,7 @@ function IngestCandidateInspectionView({
               Source files
             </h3>
             <p>
-              Technical properties and embedded tags are
-              collected without modifying the files.
+              Technical properties, embedded tags, and recognized metadata sidecars are collected without modifying the files.
             </p>
           </div>
           <div
@@ -6424,6 +6433,68 @@ function IngestFileInspectionDetail({
           </table>
         </section>
 
+        {file.metadataSidecar && (
+          <section>
+            <h4>Metadata sidecar</h4>
+            <table className="ingest-property-table">
+              <tbody>
+                <tr>
+                  <th scope="row">Format</th>
+                  <td>FFmetadata</td>
+                </tr>
+                <tr>
+                  <th scope="row">Audio hint</th>
+                  <td>
+                    {file.metadataSidecar.audioFilenameHint ?? "—"}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Paired audio</th>
+                  <td>
+                    {file.metadataSidecar.pairedAudioRelativePath ??
+                      "No audio paired in this candidate"}
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row">Parsed entries</th>
+                  <td>{file.metadataSidecar.entries.length}</td>
+                </tr>
+                <tr>
+                  <th scope="row">Canonical suggestions</th>
+                  <td>{file.metadataSidecar.suggestions.length}</td>
+                </tr>
+              </tbody>
+            </table>
+            {file.metadataSidecar.suggestions.length > 0 && (
+              <table className="ingest-property-table">
+                <thead>
+                  <tr>
+                    <th>Source tag</th>
+                    <th>Suggested metadata field</th>
+                    <th>Value</th>
+                    <th>Review</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {file.metadataSidecar.suggestions.map((item, index) => (
+                    <tr key={`${item.sourceKey}:${item.canonicalPath}:${index}`}>
+                      <th scope="row">{item.sourceKey}</th>
+                      <td><code>{item.canonicalPath}</code></td>
+                      <td>{String(item.value)}</td>
+                      <td>{item.reviewRequired ? "Review" : "Direct suggestion"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {file.metadataSidecar.unmappedKeys.length > 0 && (
+              <p className="metadata-empty-value">
+                Preserved but not mapped yet: {file.metadataSidecar.unmappedKeys.join(", ")}
+              </p>
+            )}
+          </section>
+        )}
+
         <section>
           <h4>Embedded metadata</h4>
           {embeddedEntries.length === 0 ? (
@@ -6448,7 +6519,7 @@ function IngestFileInspectionDetail({
       </div>
 
       <section className="ingest-file-evidence">
-        <h4>Source-path, filename and embedded evidence</h4>
+        <h4>Source-path, filename, sidecar and embedded evidence</h4>
         <IngestEvidenceTable
           evidence={file.evidence}
         />

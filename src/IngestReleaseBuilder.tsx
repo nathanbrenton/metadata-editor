@@ -30,6 +30,7 @@ import {
 import type {
   IngestCandidateInspection,
   IngestFileInspection,
+  IngestMetadataSidecarSuggestion,
 } from "../shared/ingest-types.js";
 import {
   stagingDestinationPathForDisplay,
@@ -855,6 +856,382 @@ function ArtworkAssignmentSummary({
         </div>
       )}
     </section>
+  );
+}
+
+function basenameForSidecarMatch(value: string): string {
+  const normalized = value.replaceAll("\\", "/");
+  return normalized.slice(normalized.lastIndexOf("/") + 1);
+}
+
+function sidecarSuggestion(
+  file: IngestFileInspection,
+  canonicalPath: string,
+): IngestMetadataSidecarSuggestion | undefined {
+  const matches = file.metadataSidecar?.suggestions.filter(
+    (item) => item.canonicalPath === canonicalPath,
+  ) ?? [];
+
+  return matches.length === 1 ? matches[0] : undefined;
+}
+
+function sidecarTrackTarget(
+  file: IngestFileInspection,
+  draft: IngestBuildDraft,
+  targetStatus: IngestStagingTargetStatus | null,
+) {
+  const sidecar = file.metadataSidecar;
+  if (!sidecar) {
+    return undefined;
+  }
+
+  if (sidecar.pairedAudioRelativePath) {
+    const track = draft.tracks.find(
+      (candidate) =>
+        candidate.sourceRelativePath ===
+        sidecar.pairedAudioRelativePath,
+    );
+    if (track) {
+      return {
+        kind: "draft" as const,
+        track,
+        label: `Track ${track.trackNumber} · ${track.title}`,
+      };
+    }
+  }
+
+  if (sidecar.audioFilenameHint) {
+    const hint = sidecar.audioFilenameHint.toLocaleLowerCase();
+    const draftTrack = draft.tracks.find(
+      (track) =>
+        basenameForSidecarMatch(track.sourceRelativePath)
+          .toLocaleLowerCase() === hint,
+    );
+    if (draftTrack) {
+      return {
+        kind: "draft" as const,
+        track: draftTrack,
+        label: `Track ${draftTrack.trackNumber} · ${draftTrack.title}`,
+      };
+    }
+
+    const existingTrack = targetStatus?.existingTracks.find(
+      (track) =>
+        basenameForSidecarMatch(track.sourceRelativePath)
+          .toLocaleLowerCase() === hint,
+    );
+    if (existingTrack) {
+      return {
+        kind: "existing" as const,
+        track: existingTrack,
+        label: `Track ${existingTrack.number} · ${existingTrack.title}`,
+      };
+    }
+  }
+
+  const number = sidecarSuggestion(
+    file,
+    "track.numbering.track_number",
+  )?.value;
+  if (typeof number === "number") {
+    const draftTrack = draft.tracks.find(
+      (track) => track.trackNumber === number,
+    );
+    if (draftTrack) {
+      return {
+        kind: "draft" as const,
+        track: draftTrack,
+        label: `Track ${draftTrack.trackNumber} · ${draftTrack.title}`,
+      };
+    }
+
+    const existingTrack = targetStatus?.existingTracks.find(
+      (track) => track.number === number,
+    );
+    if (existingTrack) {
+      return {
+        kind: "existing" as const,
+        track: existingTrack,
+        label: `Track ${existingTrack.number} · ${existingTrack.title}`,
+      };
+    }
+  }
+
+  const title = sidecarSuggestion(file, "track.title")?.value;
+  if (typeof title === "string") {
+    const normalized = title.trim().toLocaleLowerCase();
+    const existingTrack = targetStatus?.existingTracks.find(
+      (track) => track.title.trim().toLocaleLowerCase() === normalized,
+    );
+    if (existingTrack) {
+      return {
+        kind: "existing" as const,
+        track: existingTrack,
+        label: `Track ${existingTrack.number} · ${existingTrack.title}`,
+      };
+    }
+  }
+
+  return undefined;
+}
+
+type SidecarCurrentValue =
+  | string
+  | number
+  | boolean
+  | string[]
+  | undefined;
+
+function sidecarCurrentValue(
+  suggestion: IngestMetadataSidecarSuggestion,
+  draft: IngestBuildDraft,
+  targetStatus: IngestStagingTargetStatus | null,
+  trackTarget: ReturnType<typeof sidecarTrackTarget>,
+): SidecarCurrentValue {
+  const existingRelease = targetStatus?.exists
+    ? targetStatus.existingRelease
+    : undefined;
+  const existingReleaseValue =
+    existingRelease?.metadataValues?.[suggestion.canonicalPath];
+  if (existingReleaseValue !== undefined) {
+    return existingReleaseValue;
+  }
+
+  if (trackTarget?.kind === "existing") {
+    const existingTrackValue =
+      trackTarget.track.metadataValues?.[suggestion.canonicalPath];
+    if (existingTrackValue !== undefined) {
+      return existingTrackValue;
+    }
+  }
+
+  switch (suggestion.canonicalPath) {
+    case "release.title":
+      return existingRelease?.title ?? draft.releaseTitle;
+    case "release.primary_artist.name":
+      return existingRelease?.artist ?? draft.releaseArtist;
+    case "release.dates.release":
+      return existingRelease?.date ?? draft.releaseDate;
+    case "track.title":
+      return trackTarget?.track.title;
+    case "track.primary_artist.name":
+      return trackTarget?.track.artist;
+    case "track.numbering.track_number":
+      return trackTarget?.kind === "draft"
+        ? trackTarget.track.trackNumber
+        : trackTarget?.track.number;
+    default:
+      return undefined;
+  }
+}
+
+function sidecarCurrentValueLabel(
+  current: SidecarCurrentValue,
+): string {
+  if (current === undefined) {
+    return "Not present in current metadata";
+  }
+
+  return Array.isArray(current)
+    ? current.join(" · ")
+    : String(current);
+}
+
+function sidecarComparisonLabel(
+  suggestion: IngestMetadataSidecarSuggestion,
+  current: SidecarCurrentValue,
+): string {
+  if (
+    current === undefined ||
+    (!Array.isArray(current) && String(current).trim() === "") ||
+    (Array.isArray(current) && current.length === 0)
+  ) {
+    return suggestion.reviewRequired
+      ? "Review before applying"
+      : "New suggestion";
+  }
+
+  if (Array.isArray(current)) {
+    if (
+      current.length === 1 &&
+      current[0].trim().localeCompare(
+        String(suggestion.value).trim(),
+        undefined,
+        { sensitivity: "base" },
+      ) === 0
+    ) {
+      return "Matches current";
+    }
+
+    return "Review current list";
+  }
+
+  return String(current).trim().localeCompare(
+    String(suggestion.value).trim(),
+    undefined,
+    { sensitivity: "base" },
+  ) === 0
+    ? "Matches current"
+    : "Differs from current";
+}
+
+function MetadataSidecarComparisonPanel({
+  files,
+  draft,
+  targetStatus,
+}: {
+  files: IngestFileInspection[];
+  draft: IngestBuildDraft;
+  targetStatus: IngestStagingTargetStatus | null;
+}) {
+  const sidecars = files.filter(
+    (file) => file.metadataSidecar,
+  );
+
+  if (sidecars.length === 0) {
+    return null;
+  }
+
+  const suggestionCount = sidecars.reduce(
+    (total, file) =>
+      total + (file.metadataSidecar?.suggestions.length ?? 0),
+    0,
+  );
+
+  return (
+    <details className="ingest-table-panel ingest-sidecar-comparison-panel">
+      <summary>
+        <span>
+          <strong>Metadata sidecar evidence</strong>
+          <small>
+            Compare imported FFmetadata against the current Staging draft
+            {targetStatus?.exists ? " and existing Library release" : ""}.
+          </small>
+        </span>
+        <span className="badge">
+          {sidecars.length} sidecar{sidecars.length === 1 ? "" : "s"} · {suggestionCount} suggestion{suggestionCount === 1 ? "" : "s"}
+        </span>
+      </summary>
+      <div className="ingest-review-details-body">
+        <p className="metadata-empty-value">
+          Sidecars are evidence, not authority. Initial create drafts can use
+          unambiguous paired values automatically; existing Library releases
+          are compared here without silently overwriting authored metadata.
+        </p>
+        {sidecars.map((file) => {
+          const sidecar = file.metadataSidecar!;
+          const trackTarget = sidecarTrackTarget(
+            file,
+            draft,
+            targetStatus,
+          );
+          const grouped = new Map<
+            string,
+            IngestMetadataSidecarSuggestion[]
+          >();
+
+          for (const item of sidecar.suggestions) {
+            const current = grouped.get(item.canonicalPath) ?? [];
+            current.push(item);
+            grouped.set(item.canonicalPath, current);
+          }
+
+          return (
+            <section
+              key={file.relativePath}
+              className="ingest-sidecar-comparison-item"
+            >
+              <header>
+                <div>
+                  <strong>{file.filename}</strong>
+                  <code>{file.relativePath}</code>
+                </div>
+                <span className="badge">
+                  {trackTarget?.label ?? "Release / unpaired evidence"}
+                </span>
+              </header>
+              <div className="ingest-table-scroll">
+                <table className="ingest-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Suggested field</th>
+                      <th scope="col">Sidecar value</th>
+                      <th scope="col">Current value</th>
+                      <th scope="col">Comparison</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...grouped.entries()].map(
+                      ([canonicalPath, items]) => {
+                        const distinctValues = [
+                          ...new Set(
+                            items.map((item) => String(item.value)),
+                          ),
+                        ];
+                        const first = items[0];
+                        const current = sidecarCurrentValue(
+                          first,
+                          draft,
+                          targetStatus,
+                          trackTarget,
+                        );
+                        const conflict = distinctValues.length > 1;
+
+                        return (
+                          <tr key={canonicalPath}>
+                            <th scope="row">
+                              <strong>{first.label}</strong>
+                              <code>{canonicalPath}</code>
+                            </th>
+                            <td>{distinctValues.join(" ↔ ")}</td>
+                            <td>
+                              {sidecarCurrentValueLabel(current)}
+                            </td>
+                            <td>
+                              <span
+                                className={[
+                                  "badge",
+                                  conflict
+                                    ? "missing"
+                                    : sidecarComparisonLabel(
+                                          first,
+                                          current,
+                                        ) === "Matches current"
+                                      ? "complete"
+                                      : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                              >
+                                {conflict
+                                  ? "Sidecar values conflict"
+                                  : sidecarComparisonLabel(first, current)}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      },
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {sidecar.unmappedKeys.length > 0 && (
+                <p className="metadata-empty-value">
+                  Preserved for future mapping: {sidecar.unmappedKeys.join(", ")}
+                </p>
+              )}
+              {sidecar.warnings.length > 0 && (
+                <ul className="ingest-warning-list">
+                  {sidecar.warnings.map((warning) => (
+                    <li key={warning}>{warning}</li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          );
+        })}
+      </div>
+    </details>
   );
 }
 
@@ -1765,6 +2142,12 @@ export function IngestReleaseBuilder({
         </div>
       )}
 
+      <MetadataSidecarComparisonPanel
+        files={currentInspection.files}
+        draft={draft}
+        targetStatus={targetStatus}
+      />
+
       <nav
         className="ingest-builder-mode-tabs"
         aria-label="Ingest builder mode"
@@ -2120,8 +2503,9 @@ function GuidedIngestBuilder({
             <h3>Assign artwork & other files</h3>
             <p>
               Review folder-derived artwork assignments, then drag or
-              select images for the release and individual tracks. Text
-              sidecars remain optional reviewed copies.
+              select images for the release and individual tracks. Recognized
+              metadata sidecars contribute evidence independently; keeping an
+              archival copy under notes/imported remains optional.
             </p>
           </header>
           <AssetDraftTable
@@ -4256,8 +4640,7 @@ function AssetDraftTable({
             <div>
               <h4>Other files</h4>
               <p>
-                Text sidecars remain simple reviewed copies. Their
-                contents are not interpreted during ingest.
+                Ordinary text sidecars remain optional reviewed copies. Recognized FFmetadata sidecars are also parsed as non-destructive metadata evidence and compared above; preserving the original text file is optional.
               </p>
             </div>
             <span className="badge">
@@ -4392,9 +4775,7 @@ function AssetDraftTable({
           <div>
             <h4>Loose files available to attach</h4>
             <p>
-              Root-level images and text files remain separate ingest
-              candidates until you attach them to this draft. Attaching
-              does not move or modify the source.
+              Root-level images and text files remain separate ingest candidates until you attach them to this draft. Recognized FFmetadata text can contribute metadata evidence after attachment; attaching never moves or modifies the source.
             </p>
           </div>
           <span className="badge">

@@ -1351,6 +1351,265 @@ async function pathExists(
   }
 }
 
+type SidecarComparableMetadataValue =
+  | string
+  | number
+  | boolean
+  | string[];
+
+function comparableMetadataValue(
+  value: unknown,
+): SidecarComparableMetadataValue | undefined {
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+
+  if (
+    Array.isArray(value) &&
+    value.every((item) => typeof item === "string")
+  ) {
+    return value as string[];
+  }
+
+  return undefined;
+}
+
+function recordNames(
+  value: unknown,
+): string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const names = value
+    .map((item) =>
+      isRecord(item) && typeof item.name === "string"
+        ? item.name.trim()
+        : "",
+    )
+    .filter(Boolean);
+
+  return names.length > 0 ? names : undefined;
+}
+
+function addComparableMetadataValue(
+  destination: Record<string, SidecarComparableMetadataValue>,
+  canonicalPath: string,
+  document: Record<string, unknown> | undefined,
+  pathSegments: string[],
+): void {
+  if (!document) {
+    return;
+  }
+
+  const value = comparableMetadataValue(
+    readNestedRecordValue(document, pathSegments),
+  );
+
+  if (value !== undefined) {
+    destination[canonicalPath] = value;
+  }
+}
+
+async function optionalTomlRecordForComparison(
+  releasePath: string,
+  releaseRelativePath: string,
+  relativePath: string,
+): Promise<Record<string, unknown> | undefined> {
+  const withinRelease = withinReleasePath(
+    releaseRelativePath,
+    relativePath,
+  );
+  const target = assertPathWithinRoot(
+    releasePath,
+    path.join(
+      releasePath,
+      ...withinRelease.split("/"),
+    ),
+  );
+
+  if (!(await pathExists(target))) {
+    return undefined;
+  }
+
+  try {
+    return (
+      await readTomlRecordForUpdate(
+        releasePath,
+        releaseRelativePath,
+        relativePath,
+      )
+    ).data;
+  } catch {
+    // Sidecar comparison is advisory. Existing Library validation remains
+    // responsible for surfacing malformed or unsafe canonical metadata.
+    return undefined;
+  }
+}
+
+async function releaseSidecarComparisonValues(
+  releasePath: string,
+  releaseRelativePath: string,
+): Promise<Record<string, SidecarComparableMetadataValue>> {
+  const document = await optionalTomlRecordForComparison(
+    releasePath,
+    releaseRelativePath,
+    `${releaseRelativePath}/release.toml`,
+  );
+  const values: Record<string, SidecarComparableMetadataValue> = {};
+
+  addComparableMetadataValue(
+    values,
+    "release.title",
+    document,
+    ["release", "title"],
+  );
+  addComparableMetadataValue(
+    values,
+    "release.primary_artist.name",
+    document,
+    ["release", "primary_artist", "name"],
+  );
+  addComparableMetadataValue(
+    values,
+    "release.dates.release",
+    document,
+    ["release", "dates", "release"],
+  );
+  addComparableMetadataValue(
+    values,
+    "release.genres",
+    document,
+    ["release", "genres"],
+  );
+  addComparableMetadataValue(
+    values,
+    "release.rights.publisher",
+    document,
+    ["release", "rights", "publisher"],
+  );
+  addComparableMetadataValue(
+    values,
+    "release.rights.copyright",
+    document,
+    ["release", "rights", "copyright"],
+  );
+  addComparableMetadataValue(
+    values,
+    "release.rights.phonographic_copyright",
+    document,
+    ["release", "rights", "phonographic_copyright"],
+  );
+
+  return values;
+}
+
+async function trackSidecarComparisonValues(
+  releasePath: string,
+  releaseRelativePath: string,
+  track: ExistingReceiptTrack,
+): Promise<Record<string, SidecarComparableMetadataValue>> {
+  const trackRelativePath = path.posix.dirname(
+    track.destinationRelativePath,
+  );
+  const trackDocument = await optionalTomlRecordForComparison(
+    releasePath,
+    releaseRelativePath,
+    `${trackRelativePath}/track.toml`,
+  );
+  const creditsDocument = await optionalTomlRecordForComparison(
+    releasePath,
+    releaseRelativePath,
+    `${trackRelativePath}/track-credits.toml`,
+  );
+  const values: Record<string, SidecarComparableMetadataValue> = {};
+
+  addComparableMetadataValue(
+    values,
+    "track.title",
+    trackDocument,
+    ["track", "title"],
+  );
+  addComparableMetadataValue(
+    values,
+    "track.language",
+    trackDocument,
+    ["track", "language"],
+  );
+  addComparableMetadataValue(
+    values,
+    "track.numbering.track_number",
+    trackDocument,
+    ["track", "numbering", "track_number"],
+  );
+  addComparableMetadataValue(
+    values,
+    "track.numbering.track_total",
+    trackDocument,
+    ["track", "numbering", "track_total"],
+  );
+  addComparableMetadataValue(
+    values,
+    "track.numbering.disc_number",
+    trackDocument,
+    ["track", "numbering", "disc_number"],
+  );
+  addComparableMetadataValue(
+    values,
+    "track.numbering.disc_total",
+    trackDocument,
+    ["track", "numbering", "disc_total"],
+  );
+  addComparableMetadataValue(
+    values,
+    "track.text.lyrics",
+    trackDocument,
+    ["track", "text", "lyrics"],
+  );
+  addComparableMetadataValue(
+    values,
+    "track.text.comment",
+    trackDocument,
+    ["track", "text", "comment"],
+  );
+  addComparableMetadataValue(
+    values,
+    "track.primary_artist.name",
+    creditsDocument,
+    ["track", "primary_artist", "name"],
+  );
+
+  const composers = recordNames(
+    creditsDocument
+      ? readNestedRecordValue(
+          creditsDocument,
+          ["track", "composers"],
+        )
+      : undefined,
+  );
+  if (composers) {
+    values["track.composers[].name"] = composers;
+  }
+
+  const lyricists = recordNames(
+    creditsDocument
+      ? readNestedRecordValue(
+          creditsDocument,
+          ["track", "lyricists"],
+        )
+      : undefined,
+  );
+  if (lyricists) {
+    values["track.lyricists[].name"] = lyricists;
+  }
+
+  return values;
+}
+
 export async function inspectIngestStagingTarget(
   outputRoot: string,
   releaseIdInput: string,
@@ -1463,11 +1722,56 @@ export async function inspectIngestStagingTarget(
       }];
     });
 
+  const receiptRelease = existingReceipt?.raw.release;
+  const existingReleaseMetadataValues = exists
+    ? await releaseSidecarComparisonValues(
+        releasePath,
+        releaseRelativePath,
+      )
+    : {};
+  const existingTrackMetadataValues = new Map(
+    await Promise.all(
+      existingTracks.map(async (track) => [
+        track.id,
+        await trackSidecarComparisonValues(
+          releasePath,
+          releaseRelativePath,
+          track,
+        ),
+      ] as const),
+    ),
+  );
+  const existingRelease =
+    isRecord(receiptRelease)
+      ? {
+          title:
+            typeof receiptRelease.title === "string"
+              ? receiptRelease.title
+              : "",
+          artist:
+            typeof receiptRelease.artist === "string"
+              ? receiptRelease.artist
+              : "",
+          date:
+            typeof receiptRelease.date === "string"
+              ? receiptRelease.date
+              : "",
+          type:
+            typeof receiptRelease.type === "string"
+              ? receiptRelease.type
+              : "",
+          ...(Object.keys(existingReleaseMetadataValues).length > 0
+            ? { metadataValues: existingReleaseMetadataValues }
+            : {}),
+        }
+      : undefined;
+
   return {
     releaseId,
     exists,
     operation: exists ? "update" : "create",
     releaseRelativePath,
+    ...(existingRelease ? { existingRelease } : {}),
     existingTracks: existingTracks.map((track) => ({
       id: track.id,
       number: track.number,
@@ -1477,6 +1781,14 @@ export async function inspectIngestStagingTarget(
       sourceDate: track.sourceDate,
       sourceRelativePath: track.sourceRelativePath,
       destinationRelativePath: track.destinationRelativePath,
+      ...(Object.keys(
+        existingTrackMetadataValues.get(track.id) ?? {},
+      ).length > 0
+        ? {
+            metadataValues:
+              existingTrackMetadataValues.get(track.id),
+          }
+        : {}),
     })),
     existingArtwork,
   };
@@ -1976,6 +2288,8 @@ function createReceiptContent(
             evidence: file.evidence,
             embeddedMetadata:
               file.embeddedMetadata,
+            metadataSidecar:
+              file.metadataSidecar ?? null,
             embeddedArtwork:
               file.embeddedArtwork ?? [],
           }),
@@ -2143,12 +2457,11 @@ function buildUpdatedReceiptContent(
         kind: inspection.candidate.kind,
       },
       release: {
+        ...(isRecord(existingReceipt.raw.release)
+          ? existingReceipt.raw.release
+          : {}),
         id: draft.releaseId,
         relativePath: releaseRelativePath,
-        title: draft.releaseTitle,
-        artist: draft.releaseArtist,
-        date: draft.releaseDate,
-        type: draft.releaseType,
       },
       tracks: tracks.map((track) => ({
         id: track.id,
@@ -2192,6 +2505,12 @@ function buildUpdatedReceiptContent(
             id: track.id,
             number: track.draft.trackNumber,
           })),
+          metadataSidecars: inspection.files
+            .filter((file) => file.metadataSidecar)
+            .map((file) => ({
+              sourceRelativePath: file.relativePath,
+              metadataSidecar: file.metadataSidecar,
+            })),
         },
       ],
       createdBy: {
@@ -2674,6 +2993,7 @@ export async function prepareIngestReleaseBuild(
       normalizedAssets.filter(
         (asset) =>
           asset.draft.mediaKind === "text" &&
+          !asset.file.metadataSidecar &&
           !existingCopySourcePaths.has(
             asset.draft.sourceRelativePath,
           ),
@@ -3220,6 +3540,40 @@ export async function prepareIngestReleaseBuild(
         }
 
         copies.push(preparedCopy);
+        continue;
+      }
+
+      if (asset.file.metadataSidecar) {
+        const sidecarDestination = assertPathWithinRoot(
+          releasePath,
+          path.join(
+            releasePath,
+            ...withinReleasePath(
+              releaseRelativePath,
+              preparedCopy.destinationRelativePath,
+            ).split("/"),
+          ),
+        );
+
+        if (await pathExists(sidecarDestination)) {
+          blockedItems.push({
+            kind: "copy",
+            sourceRelativePath:
+              preparedCopy.sourceRelativePath,
+            destinationRelativePath:
+              preparedCopy.destinationRelativePath,
+            mediaKind: preparedCopy.mediaKind,
+            sizeBytes: preparedCopy.bytes,
+            sha256: preparedCopy.sha256,
+            logicalRoles:
+              preparedCopy.logicalRoles,
+            action: "blocked",
+            reason:
+              "The requested FFmetadata archival destination already exists independently of this source mapping. Refusing to overwrite the existing Library sidecar.",
+          });
+        } else {
+          copies.push(preparedCopy);
+        }
         continue;
       }
 

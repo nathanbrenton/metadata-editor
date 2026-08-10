@@ -719,3 +719,7 @@ Recognized full-date metadata fields use native calendar controls throughout the
 application and continue to store ISO `YYYY-MM-DD` strings in TOML. Existing
 partial legacy values remain preserved until they are deliberately replaced with
 a complete date.
+
+### Metadata evidence sidecars
+
+Recognized FFmpeg `;FFMETADATA1` sidecars are first-class ingest evidence rather than opaque text-only copies. They may accompany a new release, be attached later, or be staged by themselves against an existing canonical Library release. The parser preserves raw tags, maps known aliases to canonical metadata-editor paths, pairs sidecars to audio/tracks by encoded audio filename and track hints, surfaces conflicts instead of silently choosing a winner, and preserves unknown keys for future mappings. Unambiguous paired identity/track values can seed a new Staging draft; existing Library metadata is compared non-destructively against canonical TOML values when available and is never silently overwritten. Preserving the original sidecar file under `notes/imported/` remains optional because parsed provenance is recorded in the ingest receipt.

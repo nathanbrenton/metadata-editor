@@ -16,7 +16,7 @@ export type InferenceConfidence =
 export type IngestEvidence = {
   field: string;
   value: string | number;
-  source: "foldername" | "filename" | "embedded-tag";
+  source: "foldername" | "filename" | "embedded-tag" | "sidecar";
   rawValue: string;
   confidence: InferenceConfidence;
   rule: string;
@@ -52,6 +52,33 @@ export type IngestEmbeddedMetadata = Record<
   string,
   string
 >;
+
+export type IngestMetadataSidecarSuggestion = {
+  sourceKey: string;
+  canonicalPath: string;
+  label: string;
+  value: string | number;
+  scope: "release" | "track" | "credit" | "unmapped";
+  confidence: InferenceConfidence;
+  reviewRequired: boolean;
+};
+
+export type IngestMetadataSidecarInspection = {
+  format: "ffmetadata";
+  filename: string;
+  audioFilenameHint?: string;
+  pairedAudioRelativePath?: string;
+  entries: Array<{
+    key: string;
+    normalizedKey: string;
+    value: string;
+    line: number;
+    section?: string;
+  }>;
+  suggestions: IngestMetadataSidecarSuggestion[];
+  unmappedKeys: string[];
+  warnings: string[];
+};
 
 export type IngestCandidateSummary = {
   id: string;
@@ -106,6 +133,7 @@ export type IngestFileInspection = {
   detectedBy: string;
   technical: IngestTechnicalMetadata;
   embeddedMetadata: IngestEmbeddedMetadata;
+  metadataSidecar?: IngestMetadataSidecarInspection;
   embeddedArtwork?: IngestEmbeddedArtworkInspection[];
   evidence: IngestEvidence[];
   warnings: string[];

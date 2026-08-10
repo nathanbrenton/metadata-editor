@@ -13,7 +13,7 @@ export type IngestIdentitySourceOption = {
   id: string;
   label: string;
   value: string;
-  origin: "current" | "folder" | "embedded" | "blank";
+  origin: "current" | "folder" | "embedded" | "sidecar" | "blank";
   source?: IngestEvidence["source"];
   rawValue?: string;
   confidence?: InferenceConfidence;
@@ -230,6 +230,60 @@ function embeddedIdentityOptions(
     }));
 }
 
+function sidecarIdentityOptions(
+  inspection: IngestCandidateInspection,
+  canonicalPath: string,
+): IngestIdentitySourceOption[] {
+  const sidecars = inspection.files.filter(
+    (file) => file.metadataSidecar,
+  );
+  const values = new Map<
+    string,
+    { value: string; count: number; sourceKey: string }
+  >();
+
+  for (const file of sidecars) {
+    for (const item of file.metadataSidecar?.suggestions ?? []) {
+      if (item.canonicalPath !== canonicalPath) {
+        continue;
+      }
+
+      const value = String(item.value).trim();
+      if (!value) {
+        continue;
+      }
+
+      const key = value.toLocaleLowerCase();
+      const current = values.get(key);
+      values.set(key, {
+        value,
+        count: (current?.count ?? 0) + 1,
+        sourceKey: current?.sourceKey ?? item.sourceKey,
+      });
+    }
+  }
+
+  return [...values.values()]
+    .sort(
+      (left, right) =>
+        right.count - left.count ||
+        left.value.localeCompare(right.value, undefined, {
+          sensitivity: "base",
+        }),
+    )
+    .map((item) => ({
+      id: `sidecar:${canonicalPath}:${encodeURIComponent(item.value)}`,
+      label: `FFmetadata ${item.sourceKey.toUpperCase()} (${item.count}/${sidecars.length}) — ${item.value}`,
+      value: item.value,
+      origin: "sidecar" as const,
+      source: "sidecar" as const,
+      rawValue: item.value,
+      confidence:
+        item.count === sidecars.length ? "high" : "medium",
+      rule: "ffmetadata-release-identity-v1",
+    }));
+}
+
 function currentEvidenceOption(
   evidence: IngestEvidence[],
   field: IngestIdentityField,
@@ -277,6 +331,14 @@ export function buildIngestIdentitySourcePlan(
   inspection: IngestCandidateInspection,
 ): IngestIdentitySourcePlan {
   const folderOptions = folderRangeOptions(inspection);
+  const sidecarArtistOptions = sidecarIdentityOptions(
+    inspection,
+    "release.primary_artist.name",
+  );
+  const sidecarTitleOptions = sidecarIdentityOptions(
+    inspection,
+    "release.title",
+  );
   const embeddedArtistOptions = embeddedIdentityOptions(
     inspection.files,
     artistTagKeys,
@@ -315,16 +377,21 @@ export function buildIngestIdentitySourcePlan(
   const artistOptions = [
     blankArtist,
     ...(currentArtist ? [currentArtist] : []),
+    ...sidecarArtistOptions,
     ...embeddedArtistOptions,
     ...folderOptions,
   ];
   const titleOptions = [
     ...(currentTitle ? [currentTitle] : []),
+    ...sidecarTitleOptions,
     ...embeddedTitleOptions,
     ...folderOptions,
     fallbackTitle,
   ];
   const preferredArtist =
+    (sidecarArtistOptions.length === 1
+      ? sidecarArtistOptions[0]
+      : undefined) ??
     findPreferredEmbeddedOption(embeddedArtistOptions, [
       "album_artist",
       "albumartist",
@@ -332,6 +399,9 @@ export function buildIngestIdentitySourcePlan(
       "artist",
     ]) ?? currentArtist;
   const preferredTitle =
+    (sidecarTitleOptions.length === 1
+      ? sidecarTitleOptions[0]
+      : undefined) ??
     findPreferredEmbeddedOption(embeddedTitleOptions, [
       "album",
       "album_title",

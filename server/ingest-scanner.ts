@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   lstat,
+  readFile,
   readdir,
   realpath,
 } from "node:fs/promises";
@@ -11,6 +12,10 @@ import { promisify } from "node:util";
 import {
   addIngestStructureEvidence,
 } from "../shared/ingest-structure-inference.js";
+import {
+  pairFfmetadataSidecars,
+  parseFfmetadataSidecar,
+} from "../shared/ffmetadata-sidecar.js";
 import type {
   IngestAttachmentOptions,
   IngestCandidateInspection,
@@ -818,6 +823,7 @@ async function inspectFile(
   let detectedBy = "extension";
   let technical: IngestTechnicalMetadata = {};
   let embeddedMetadata: IngestEmbeddedMetadata = {};
+  let metadataSidecar: IngestFileInspection["metadataSidecar"];
   let embeddedArtwork: IngestEmbeddedArtworkInspection[] = [];
 
   if (
@@ -916,6 +922,27 @@ async function inspectFile(
     }
   }
 
+  if (fallbackKind === "text" && stats.size <= 2 * 1024 * 1024) {
+    try {
+      const textContent = await readFile(filePath, "utf8");
+      metadataSidecar = parseFfmetadataSidecar(
+        textContent,
+        filename,
+      );
+
+      if (metadataSidecar) {
+        detectedBy = "FFmetadata sidecar";
+        warnings.push(...metadataSidecar.warnings);
+      }
+    } catch (error) {
+      warnings.push(
+        `Text sidecar inspection failed: ${
+          error instanceof Error ? error.message : "unknown error"
+        }`,
+      );
+    }
+  }
+
   if (fallbackKind === "unknown") {
     const extensionLabel = extension || "(no extension)";
     warnings.unshift(
@@ -929,6 +956,19 @@ async function inspectFile(
     filename,
     anchorYear,
   );
+
+  if (metadataSidecar) {
+    for (const item of metadataSidecar.suggestions) {
+      evidence.push({
+        field: `sidecar.${item.canonicalPath}`,
+        value: item.value,
+        source: "sidecar",
+        rawValue: `${item.sourceKey}=${String(item.value)}`,
+        confidence: item.confidence,
+        rule: "ffmetadata-canonical-alias-v1",
+      });
+    }
+  }
 
   for (const [key, value] of Object.entries(
     embeddedMetadata,
@@ -966,6 +1006,7 @@ async function inspectFile(
     detectedBy,
     technical,
     embeddedMetadata,
+    ...(metadataSidecar ? { metadataSidecar } : {}),
     embeddedArtwork,
     evidence,
     warnings,
@@ -1029,6 +1070,7 @@ export async function inspectIngestCandidate(
     );
   }
 
+  const pairedFiles = pairFfmetadataSidecars(files);
   const warnings = [
     ...candidate.warnings,
     ...(!capabilities.ffprobe.available
@@ -1046,7 +1088,7 @@ export async function inspectIngestCandidate(
   return addIngestStructureEvidence({
     inspectedAt: new Date().toISOString(),
     candidate,
-    files,
+    files: pairedFiles,
     capabilities,
     warnings,
     readOnly: true,
@@ -1129,7 +1171,7 @@ export async function inspectIngestRelativeFiles(
     );
   }
 
-  return files;
+  return pairFfmetadataSidecars(files);
 }
 
 export async function listIngestAttachmentOptions(
