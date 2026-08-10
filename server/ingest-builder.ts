@@ -3994,18 +3994,19 @@ export async function prepareIngestReleaseBuild(
       outputRootLabel,
       items,
       summary,
-      warnings: operation === "create"
+      warnings: [],
+      notes: operation === "create"
         ? [
-            "Ingestion copies source bytes without rewriting embedded metadata.",
-            "Audio sources are renamed to audio-master while retaining their original container extension.",
-            "The copied audio master is also referenced as the initial audio-player source; no duplicate derivative is created.",
+            "Source audio is copied byte-for-byte; embedded metadata is not rewritten.",
+            "Canonical audio is stored as audio-master.<original-extension> while retaining the source container extension.",
+            "No playback derivative is created during Staging. Library playback MP3s and website HLS streams are prepared separately from the canonical Library master.",
           ]
         : [
             "Existing authored metadata and stable track IDs are preserved. Existing Library tracks omitted from the current ingest candidate remain untouched automatically.",
-            "An explicit Replace canonical audio choice may supersede one verified master; generated playback, HLS, and waveform derivatives for that track are removed so Prepare release can regenerate them from the new canonical audio.",
+            "An explicit Replace canonical audio choice may supersede one verified master; generated Library playback MP3, HLS, and waveform derivatives for that track are removed so Prepare release can regenerate them from the new canonical audio.",
             "Track directory IDs remain stable when the displayed track order changes or canonical audio is replaced.",
-            "New artwork can be added from a later ingest candidate. Replacing an occupied canonical front-artwork target requires explicit confirmation in Artwork & files; unrelated existing artwork is preserved automatically.",
-            "Track removal and general text-sidecar replacement remain separate future workflows.",
+            "New artwork can be added from a later ingest candidate. Replacing occupied canonical artwork requires explicit confirmation and preserves unrelated authored metadata.",
+            "Intentional track removal and general text-sidecar replacement remain separate future workflows.",
           ],
       confirmationPhrase:
         operation === "create"

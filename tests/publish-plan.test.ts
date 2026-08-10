@@ -412,9 +412,12 @@ test("does not require the private playback MP3 for the hosted package", async (
     );
 
     assert.notEqual(plan.status, "blocked");
+    assert.equal(plan.libraryPlayback.createCount, 1);
     assert.ok(
       plan.issues.every(
-        (item) => item.code !== "playback-not-current",
+        (item) =>
+          item.code !== "playback-not-current" &&
+          !item.code.startsWith("derivative-playback-mp3-"),
       ),
     );
     assert.ok(
@@ -547,6 +550,16 @@ test("prepares reviewed HLS stream and waveform derivatives without writing the 
 
           if (
             outputPath &&
+            outputPath.endsWith(".mp3")
+          ) {
+            await writeFile(
+              outputPath,
+              Buffer.from("prepared-mp3"),
+            );
+          }
+
+          if (
+            outputPath &&
             outputPath.endsWith("index.m3u8")
           ) {
             const outputDirectory = path.dirname(outputPath);
@@ -576,9 +589,9 @@ test("prepares reviewed HLS stream and waveform derivatives without writing the 
       },
     );
 
-    assert.equal(receipt.createdCount, 2);
+    assert.equal(receipt.createdCount, 3);
     assert.equal(receipt.replacedCount, 0);
-    assert.equal(receipt.playbackCount, 0);
+    assert.equal(receipt.playbackCount, 1);
     assert.equal(receipt.streamCount, 1);
     assert.equal(receipt.waveformCount, 1);
 
@@ -600,7 +613,7 @@ test("prepares reviewed HLS stream and waveform derivatives without writing the 
       }>;
     };
     assert.equal(manifest.status, "completed");
-    assert.equal(manifest.items.length, 2);
+    assert.equal(manifest.items.length, 3);
     assert.ok(
       manifest.items.every((item) =>
         /^[a-f0-9]{64}$/.test(item.sha256)

@@ -77,6 +77,8 @@ test("guards media preparation with reviewed fingerprints, staging, backups, and
   assert.match(source, /buildWebStreamFfmpegArgs/);
   assert.match(source, /inspectWebStreamDirectory/);
   assert.match(source, /web-stream-hls/);
+  assert.match(source, /\[track\.playback, track\.waveform\]/);
+  assert.match(source, /derivative\.kind === "playback-mp3"/);
 });
 
 

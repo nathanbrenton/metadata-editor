@@ -863,6 +863,7 @@ export function IngestReleaseBuilder({
   identitySeed,
   onCancel,
   onReleaseCreated,
+  onNotify,
 }: {
   inspection: IngestCandidateInspection;
   identitySeed?: IngestDraftIdentitySeed | null;
@@ -870,6 +871,10 @@ export function IngestReleaseBuilder({
   onReleaseCreated: (
     releaseId: string,
   ) => void | Promise<void>;
+  onNotify: (
+    message: string,
+    tone?: "success" | "info" | "error",
+  ) => void;
 }) {
   const {
     draft,
@@ -1843,6 +1848,7 @@ export function IngestReleaseBuilder({
           onDetachFile={removeAssetFromDraft}
           onRemoveAsset={removeAssetFromDraft}
           focusedSourcePath={focusedSourcePath}
+          onNotify={onNotify}
           onAcceptBlockingSource={(status) =>
             resolveBlockingSource(status, true)
           }
@@ -1884,6 +1890,7 @@ export function IngestReleaseBuilder({
           onDetachFile={removeAssetFromDraft}
           onRemoveAsset={removeAssetFromDraft}
           focusedSourcePath={focusedSourcePath}
+          onNotify={onNotify}
           onAcceptBlockingSource={(status) =>
             resolveBlockingSource(status, true)
           }
@@ -1931,6 +1938,7 @@ function GuidedIngestBuilder({
   onDetachFile,
   onRemoveAsset,
   focusedSourcePath,
+  onNotify,
   onAcceptBlockingSource,
   onSkipBlockingSource,
   onReviewBlockingSource,
@@ -1986,6 +1994,10 @@ function GuidedIngestBuilder({
   onDetachFile: (sourceRelativePath: string) => void;
   onRemoveAsset: (sourceRelativePath: string) => void;
   focusedSourcePath: string | null;
+  onNotify: (
+    message: string,
+    tone?: "success" | "info" | "error",
+  ) => void;
   onAcceptBlockingSource: (
     status: IngestDraftSourceStatus,
   ) => void;
@@ -2128,6 +2140,7 @@ function GuidedIngestBuilder({
             onDetachFile={onDetachFile}
             onRemoveAsset={onRemoveAsset}
             focusedSourcePath={focusedSourcePath}
+            onNotify={onNotify}
           />
         </section>
       )}
@@ -2228,6 +2241,7 @@ function QuickIngestBuilder({
   onDetachFile,
   onRemoveAsset,
   focusedSourcePath,
+  onNotify,
   onAcceptBlockingSource,
   onSkipBlockingSource,
   onReviewBlockingSource,
@@ -2281,6 +2295,10 @@ function QuickIngestBuilder({
   onDetachFile: (sourceRelativePath: string) => void;
   onRemoveAsset: (sourceRelativePath: string) => void;
   focusedSourcePath: string | null;
+  onNotify: (
+    message: string,
+    tone?: "success" | "info" | "error",
+  ) => void;
   onAcceptBlockingSource: (
     status: IngestDraftSourceStatus,
   ) => void;
@@ -2354,6 +2372,7 @@ function QuickIngestBuilder({
           onDetachFile={onDetachFile}
           onRemoveAsset={onRemoveAsset}
           focusedSourcePath={focusedSourcePath}
+          onNotify={onNotify}
         />
       </section>
 
@@ -3421,6 +3440,7 @@ function AssetDraftTable({
   onDetachFile,
   onRemoveAsset,
   focusedSourcePath,
+  onNotify,
 }: {
   assets: IngestBuildAssetDraft[];
   tracks: IngestBuildTrackDraft[];
@@ -3443,6 +3463,10 @@ function AssetDraftTable({
   onDetachFile: (sourceRelativePath: string) => void;
   onRemoveAsset: (sourceRelativePath: string) => void;
   focusedSourcePath: string | null;
+  onNotify: (
+    message: string,
+    tone?: "success" | "info" | "error",
+  ) => void;
 }) {
   const [selectedArtworkPath, setSelectedArtworkPath] =
     useState<string | null>(null);
@@ -3667,6 +3691,22 @@ function AssetDraftTable({
         ),
       });
     }
+
+    // Drag/drop or Assign selected is already an explicit decision to use a
+    // standalone artwork source. Do not make the user accept the same image a
+    // second time in Review. Embedded artwork shares its source status with
+    // the audio file, so that audio-source review remains independent.
+    if (!sourceAsset.embeddedArtwork) {
+      onSourceReviewed(
+        sourceAsset.sourceRelativePath,
+        true,
+      );
+    }
+
+    onNotify(
+      `${sourceFilename(sourceRelativePath)} assigned to ${targetLabel(target)}.`,
+      "success",
+    );
   };
 
   const confirmExistingArtworkReplacement = (
@@ -3713,7 +3753,19 @@ function AssetDraftTable({
           },
         ),
       });
+
+      if (!asset.embeddedArtwork) {
+        onSourceReviewed(
+          asset.sourceRelativePath,
+          true,
+        );
+      }
     }
+
+    onNotify(
+      `Artwork replacement confirmed for ${targetLabel(target)}.`,
+      "success",
+    );
   };
 
   const removeArtworkFromTarget = (
@@ -3738,6 +3790,11 @@ function AssetDraftTable({
       include: update.include,
       artworkAssignments: update.artworkAssignments,
     });
+
+    onNotify(
+      `${sourceFilename(sourceRelativePath)} removed from ${targetLabel(target)}.`,
+      "info",
+    );
   };
 
   const handleArtworkDrop = (
@@ -3835,7 +3892,7 @@ function AssetDraftTable({
                     ? replacementConfirmed
                       ? "Will replace current Library artwork"
                       : "Replacement confirmation required"
-                    : "front cover"}
+                    : "✓ Assigned · front cover"}
                 </small>
               </span>
               <button
@@ -5301,6 +5358,27 @@ function BuildReview({
       )}
 
       <div className="ingest-review-details-stack">
+        {preview && preview.notes.length > 0 && (
+          <details className="ingest-review-details">
+            <summary>
+              <span>Staging behavior</span>
+              <span className="badge">
+                {preview.notes.length} note{preview.notes.length === 1 ? "" : "s"}
+              </span>
+            </summary>
+            <div className="ingest-review-details-body">
+              <p className="metadata-empty-value">
+                Informational details about the normal staging operation. No action is required.
+              </p>
+              <ul className="ingest-warning-list">
+                {preview.notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            </div>
+          </details>
+        )}
+
         <details className="ingest-review-details">
           <summary>
             <span>Artwork placement details</span>

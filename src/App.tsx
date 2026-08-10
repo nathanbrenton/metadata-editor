@@ -369,6 +369,7 @@ type PublishPlanItem = {
     | "release-metadata"
     | "track-metadata"
     | "release-artwork"
+    | "track-artwork"
     | "track-stream-manifest"
     | "track-stream-init"
     | "track-stream-segment"
@@ -394,6 +395,13 @@ type PublishPlan = {
   sourceRoot: string;
   destinationRoot: string;
   destinationReleaseRelativePath: string;
+  destinationReleaseExists: boolean;
+  publication: {
+    state: "not-published" | "up-to-date" | "update-available";
+    currentContentFingerprint: string;
+    publishedContentFingerprint?: string;
+    publishedAt?: string;
+  };
   planFingerprint: string;
   status: "ready" | "warning" | "blocked";
   issues: PublishPlanIssue[];
@@ -404,6 +412,13 @@ type PublishPlan = {
     blockedCount: number;
   };
   derivatives: {
+    trackCount: number;
+    currentCount: number;
+    createCount: number;
+    replaceCount: number;
+    blockedCount: number;
+  };
+  libraryPlayback: {
     trackCount: number;
     currentCount: number;
     createCount: number;
@@ -466,6 +481,42 @@ type MediaPreparationReceipt = {
   playbackCount: number;
   streamCount: number;
   waveformCount: number;
+  completedAt: string;
+};
+
+type MediaPreparationProgress = {
+  operationId: string;
+  releaseId: string;
+  status: "running" | "completed" | "failed";
+  phase:
+    | "starting"
+    | "web-stream-hls"
+    | "playback-mp3"
+    | "waveform-peaks"
+    | "validating"
+    | "promoting"
+    | "completed"
+    | "failed";
+  message: string;
+  completedUnits: number;
+  totalUnits: number;
+  trackCount: number;
+  trackId?: string;
+  trackLabel?: string;
+  trackIndex?: number;
+  updatedAt: string;
+};
+
+type PublishPackageReceipt = {
+  releaseId: string;
+  operationId: string;
+  destinationRelativePath: string;
+  mode: "build" | "update";
+  resourceCount: number;
+  trackCount: number;
+  streamCount: number;
+  waveformCount: number;
+  artworkCount: number;
   completedAt: string;
 };
 
@@ -695,7 +746,7 @@ type ToastMessage = {
 
 type WorkflowLocationsResponse = {
   locations: WorkflowLocationDisplay[];
-  publishState: "planned";
+  publishState: "available";
 };
 
 type ReleaseRenamePlanItem = {
@@ -1065,10 +1116,19 @@ export function App() {
               : current,
           );
           toastTimerRef.current = null;
-        }, 2600);
+        }, 4200);
     },
     [],
   );
+
+  const dismissToast = useCallback(() => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = null;
+    }
+
+    setToast(null);
+  }, []);
 
   useEffect(
     () => () => {
@@ -2112,6 +2172,7 @@ export function App() {
                   releaseId,
                 );
               }}
+              onNotify={notify}
             />
           ) : applicationView === "publish" ? (
             <PublishWorkspace
@@ -2125,6 +2186,7 @@ export function App() {
               onOpenWorkflowHelp={
                 openWorkflowHelp
               }
+              onNotify={notify}
             />
           ) : (
             <>
@@ -2216,7 +2278,7 @@ export function App() {
         </p>
       </footer>
 
-          {toast && (
+      {toast && (
         <div
           key={toast.id}
           className={`toast-notification ${toast.tone}`}
@@ -2225,9 +2287,22 @@ export function App() {
               ? "alert"
               : "status"
           }
-          aria-live="polite"
+          aria-live={
+            toast.tone === "error"
+              ? "assertive"
+              : "polite"
+          }
+          aria-atomic="true"
         >
-          {toast.message}
+          <span>{toast.message}</span>
+          <button
+            type="button"
+            className="toast-dismiss"
+            aria-label="Dismiss notification"
+            onClick={dismissToast}
+          >
+            ×
+          </button>
         </div>
       )}
     </main>
@@ -4175,6 +4250,7 @@ function StagingWorkspace({
   onBackToInspection,
   onOpenRelease,
   onReleaseCreated,
+  onNotify,
 }: {
   inspection: IngestCandidateInspection | null;
   identitySeed: IngestIdentityOverride | null;
@@ -4186,6 +4262,10 @@ function StagingWorkspace({
   onReleaseCreated: (
     releaseId: string,
   ) => void | Promise<void>;
+  onNotify: (
+    message: string,
+    tone?: ToastMessage["tone"],
+  ) => void;
 }) {
   if (inspection) {
     return (
@@ -4204,6 +4284,7 @@ function StagingWorkspace({
           identitySeed={identitySeed}
           onCancel={onBackToInspection}
           onReleaseCreated={onReleaseCreated}
+          onNotify={onNotify}
         />
       </Suspense>
     );
@@ -4463,6 +4544,10 @@ function publishPreflightStatus(
     return { label: "Review warnings", tone: "warning" };
   }
 
+  if (publicPackageIsUpToDate(plan)) {
+    return { label: "Up to date", tone: "success" };
+  }
+
   return { label: "Ready", tone: "preview" };
 }
 
@@ -4477,6 +4562,50 @@ function canPreparePublishPlan(
       plan.derivatives.createCount > 0 ||
       plan.derivatives.replaceCount > 0
     )
+  );
+}
+
+function canPrepareLibraryPlayback(
+  plan: PublishPlan,
+): boolean {
+  return (
+    plan.libraryPlayback.blockedCount === 0 &&
+    (plan.libraryPlayback.createCount > 0 ||
+      plan.libraryPlayback.replaceCount > 0)
+  );
+}
+
+function canBuildPublishPlan(
+  plan: PublishPlan,
+): boolean {
+  return (
+    plan.validation.blockedCount === 0 &&
+    plan.derivatives.blockedCount === 0 &&
+    !hasNonDerivativePublishBlockers(plan) &&
+    plan.derivatives.createCount === 0 &&
+    plan.derivatives.replaceCount === 0 &&
+    plan.summary.blockedCount === 0 &&
+    plan.publication.state !== "up-to-date"
+  );
+}
+
+function publicReleaseAlreadyExists(
+  plan: PublishPlan,
+): boolean {
+  return plan.destinationReleaseExists;
+}
+
+function publicPackageIsUpToDate(
+  plan: PublishPlan,
+): boolean {
+  return (
+    plan.publication.state === "up-to-date" &&
+    plan.validation.blockedCount === 0 &&
+    plan.derivatives.blockedCount === 0 &&
+    !hasNonDerivativePublishBlockers(plan) &&
+    plan.derivatives.createCount === 0 &&
+    plan.derivatives.replaceCount === 0 &&
+    plan.summary.blockedCount === 0
   );
 }
 
@@ -4527,6 +4656,10 @@ function publishPreflightHeadline(
     return "Review warnings before continuing";
   }
 
+  if (publicPackageIsUpToDate(plan)) {
+    return "Public package is up to date";
+  }
+
   return "Preflight passed";
 }
 
@@ -4552,6 +4685,10 @@ function publishPreflightGuidance(
     return "No blocking issue was found, but the remaining warnings should be reviewed before building the public package.";
   }
 
+  if (publicPackageIsUpToDate(plan)) {
+    return "The current canonical metadata and public media inputs match the published snapshot. No public-package update is required.";
+  }
+
   return "The release passed preflight and is ready for the host-ready audio-player stream package.";
 }
 
@@ -4573,7 +4710,13 @@ function publishNextStepLabel(
     return "Prepare release";
   }
 
-  return "Build public package";
+  if (publicPackageIsUpToDate(plan)) {
+    return "Public package is up to date";
+  }
+
+  return publicReleaseAlreadyExists(plan)
+    ? "Update public package"
+    : "Build public package";
 }
 
 function PublishWorkspace({
@@ -4583,6 +4726,7 @@ function PublishWorkspace({
   error,
   onRefresh,
   onOpenWorkflowHelp,
+  onNotify,
 }: {
   releases: ReleaseScanResult[];
   workflowLocations: WorkflowLocationDisplay[];
@@ -4590,6 +4734,10 @@ function PublishWorkspace({
   error: string | null;
   onRefresh: () => void;
   onOpenWorkflowHelp: () => void;
+  onNotify: (
+    message: string,
+    tone?: ToastMessage["tone"],
+  ) => void;
 }) {
   const [selectedPlan, setSelectedPlan] =
     useState<PublishPlan | null>(null);
@@ -4599,15 +4747,16 @@ function PublishWorkspace({
     useState<string | null>(null);
   const [prepareLoading, setPrepareLoading] =
     useState(false);
-  const [prepareMessage, setPrepareMessage] =
-    useState<string | null>(null);
+  const [prepareProgress, setPrepareProgress] =
+    useState<MediaPreparationProgress | null>(null);
+  const [publishLoading, setPublishLoading] =
+    useState(false);
 
   const loadPublishPlan = useCallback(async (
     releaseId: string,
   ) => {
     setPlanLoadingReleaseId(releaseId);
     setPlanError(null);
-    setPrepareMessage(null);
 
     try {
       const response = await fetch(
@@ -4640,9 +4789,49 @@ function PublishWorkspace({
   const prepareRelease = useCallback(async (
     plan: PublishPlan,
   ) => {
+    const operationId =
+      `media-preparation-${crypto.randomUUID()}`;
+    let progressTimer: number | undefined;
+
     setPrepareLoading(true);
     setPlanError(null);
-    setPrepareMessage(null);
+    setPrepareProgress({
+      operationId,
+      releaseId: plan.releaseId,
+      status: "running",
+      phase: "starting",
+      message: "Starting media preparation…",
+      completedUnits: 0,
+      totalUnits: 0,
+      trackCount: plan.derivatives.trackCount,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const pollProgress = async () => {
+      try {
+        const progressResponse = await fetch(
+          `/api/publish/prepare-progress?operationId=${encodeURIComponent(operationId)}`,
+        );
+        if (!progressResponse.ok) {
+          return;
+        }
+
+        const progress = await progressResponse.json() as
+          MediaPreparationProgress;
+        if (progress.operationId === operationId) {
+          setPrepareProgress(progress);
+        }
+      } catch {
+        // Preparation itself remains authoritative. A transient
+        // progress-poll failure should not fail the media job.
+      }
+    };
+
+    progressTimer = window.setInterval(
+      () => void pollProgress(),
+      350,
+    );
+    void pollProgress();
 
     try {
       const response = await fetch(
@@ -4656,12 +4845,15 @@ function PublishWorkspace({
             releaseId: plan.releaseId,
             planFingerprint: plan.planFingerprint,
             planGeneratedAt: plan.generatedAt,
+            operationId,
           }),
         },
       );
       const payload = await response.json() as
         | MediaPreparationReceipt
         | { error?: string };
+
+      await pollProgress();
 
       if (!response.ok || !("operationId" in payload)) {
         throw new Error(
@@ -4673,8 +4865,21 @@ function PublishWorkspace({
 
       await loadPublishPlan(plan.releaseId);
       await Promise.resolve(onRefresh());
-      setPrepareMessage(
-        `Prepared ${payload.streamCount} HLS web ${payload.streamCount === 1 ? "stream" : "streams"} and ${payload.waveformCount} waveform derivatives. Preflight refreshed.`,
+      const preparedParts = [
+        payload.playbackCount > 0
+          ? `${payload.playbackCount} Library playback ${payload.playbackCount === 1 ? "MP3" : "MP3s"}`
+          : null,
+        payload.streamCount > 0
+          ? `${payload.streamCount} HLS web ${payload.streamCount === 1 ? "stream" : "streams"}`
+          : null,
+        payload.waveformCount > 0
+          ? `${payload.waveformCount} ${payload.waveformCount === 1 ? "waveform" : "waveforms"}`
+          : null,
+      ].filter((part): part is string => Boolean(part));
+
+      onNotify(
+        `Prepared ${preparedParts.join(", ")}.`,
+        "success",
       );
     } catch (prepareError) {
       setPlanError(
@@ -4683,9 +4888,63 @@ function PublishWorkspace({
           : "Unable to prepare release media.",
       );
     } finally {
+      if (progressTimer !== undefined) {
+        window.clearInterval(progressTimer);
+      }
       setPrepareLoading(false);
+      setPrepareProgress(null);
     }
-  }, [loadPublishPlan, onRefresh]);
+  }, [loadPublishPlan, onNotify, onRefresh]);
+
+  const publishRelease = useCallback(async (
+    plan: PublishPlan,
+  ) => {
+    setPublishLoading(true);
+    setPlanError(null);
+
+    try {
+      const response = await fetch(
+        "/api/publish/build",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: plan.releaseId,
+            planFingerprint: plan.planFingerprint,
+            planGeneratedAt: plan.generatedAt,
+          }),
+        },
+      );
+      const payload = await response.json() as
+        | PublishPackageReceipt
+        | { error?: string };
+
+      if (!response.ok || !("operationId" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to build the public package.",
+        );
+      }
+
+      await loadPublishPlan(plan.releaseId);
+      await Promise.resolve(onRefresh());
+      onNotify(
+        `Public package ${payload.mode === "update" ? "updated" : "built"} successfully.`,
+        "success",
+      );
+    } catch (publishError) {
+      setPlanError(
+        publishError instanceof Error
+          ? publishError.message
+          : "Unable to build the public package.",
+      );
+    } finally {
+      setPublishLoading(false);
+    }
+  }, [loadPublishPlan, onNotify, onRefresh]);
 
   return (
     <section className="workflow-workspace publish-workspace">
@@ -4698,7 +4957,8 @@ function PublishWorkspace({
             the exact sanitized package intended for
             audio-player. Preflight is read-only; Prepare release
             can generate private HLS web-stream and waveform derivatives.
-            Public-package writes remain disabled.
+            Build public package writes a validated sanitized snapshot to
+            published-media without exposing canonical masters.
           </p>
         </div>
         <div className="workflow-workspace-actions">
@@ -4728,7 +4988,10 @@ function PublishWorkspace({
           every public asset and generated JSON destination.
           Preflight itself writes nothing. After review, Prepare
           release may create or replace only reproducible HLS stream
-          and waveform derivatives inside the private Library.
+          and waveform derivatives inside the private Library. Once
+          those are current, Build or Update public package stages,
+          validates, and atomically promotes the complete sanitized
+          release snapshot.
         </span>
       </div>
 
@@ -4745,7 +5008,7 @@ function PublishWorkspace({
           <code>
             {workflowLocations.find((location) => location.id === "publish")?.displayPath ?? "Configured published-media root"}
           </code>
-          <small>Dry-run plan available · nothing is copied yet</small>
+          <small>Validated snapshot output · complete releases are atomically replaced</small>
         </div>
       </section>
 
@@ -4754,9 +5017,6 @@ function PublishWorkspace({
       )}
       {planError && (
         <p className="message error">{planError}</p>
-      )}
-      {prepareMessage && (
-        <p className="message success">{prepareMessage}</p>
       )}
 
       <section className="workflow-table-panel">
@@ -4934,37 +5194,92 @@ function PublishWorkspace({
 
             <div className="publish-preflight-next-step">
               <span className="eyebrow">Next step</span>
-              <button
-                type="button"
-                className={prepareLoading
-                  ? "primary-button is-loading"
-                  : "primary-button"}
-                disabled={
-                  prepareLoading ||
-                  !canPreparePublishPlan(selectedPlan)
-                }
-                onClick={() =>
-                  void prepareRelease(selectedPlan)
-                }
-                title={
-                  canPreparePublishPlan(selectedPlan)
-                    ? "Generate reviewed segmented AAC-LC HLS streams and waveform derivatives in the private Library."
-                    : publishNextStepLabel(selectedPlan) === "Build public package"
-                      ? "Public-package writes are the next milestone."
-                      : "Resolve the blocking preflight issues first."
-                }
-              >
-                {prepareLoading
-                  ? "Preparing…"
-                  : publishNextStepLabel(selectedPlan)}
-              </button>
-              <small>
-                {canPreparePublishPlan(selectedPlan)
-                  ? "Creates only reproducible HLS stream and waveform derivatives. Canonical masters are never modified; replacements are backed up and the operation is recorded before promotion."
-                  : publishNextStepLabel(selectedPlan) === "Build public package"
-                    ? "Web media is ready. Building the sanitized public package is the next implementation milestone."
-                    : "Resolve the blocking issues shown in preflight before preparing derivatives."}
-              </small>
+              {prepareLoading && (
+                <div
+                  className="publish-preparation-progress"
+                  role="status"
+                  aria-live="polite"
+                  aria-atomic="true"
+                >
+                  <strong>
+                    {prepareProgress?.message ??
+                      "Starting media preparation…"}
+                  </strong>
+                  <progress
+                    max={Math.max(
+                      prepareProgress?.totalUnits ?? 1,
+                      1,
+                    )}
+                    value={Math.min(
+                      prepareProgress?.completedUnits ?? 0,
+                      Math.max(
+                        prepareProgress?.totalUnits ?? 1,
+                        1,
+                      ),
+                    )}
+                  />
+                  <small>
+                    {prepareProgress?.trackIndex &&
+                    prepareProgress.trackCount > 0
+                      ? `Track ${prepareProgress.trackIndex} of ${prepareProgress.trackCount}`
+                      : prepareProgress?.totalUnits
+                        ? `${prepareProgress.completedUnits} of ${prepareProgress.totalUnits} preparation steps complete`
+                        : "Building the reviewed preparation plan…"}
+                  </small>
+                </div>
+              )}
+              {publicPackageIsUpToDate(selectedPlan) ? (
+                <div className="publish-package-current" role="status">
+                  <span className="badge success">✓ Up to date</span>
+                  <strong>Public package is up to date</strong>
+                  <small>
+                    {selectedPlan.publication.publishedAt
+                      ? `Published ${new Date(selectedPlan.publication.publishedAt).toLocaleString()}. `
+                      : ""}
+                    Current canonical metadata and public media inputs match the published snapshot.
+                  </small>
+                </div>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className={(prepareLoading || publishLoading)
+                      ? "primary-button is-loading"
+                      : "primary-button"}
+                    disabled={
+                      prepareLoading ||
+                      publishLoading ||
+                      (!canPreparePublishPlan(selectedPlan) &&
+                        !canBuildPublishPlan(selectedPlan))
+                    }
+                    onClick={() =>
+                      canPreparePublishPlan(selectedPlan)
+                        ? void prepareRelease(selectedPlan)
+                        : void publishRelease(selectedPlan)
+                    }
+                    title={
+                      canPreparePublishPlan(selectedPlan)
+                        ? "Generate reviewed private playback MP3s plus segmented AAC-LC HLS streams and waveform derivatives in the private Library."
+                        : canBuildPublishPlan(selectedPlan)
+                          ? "Build a complete sanitized public release snapshot, validate it, and atomically promote it into published-media."
+                          : "Resolve the blocking preflight issues first."
+                    }
+                  >
+                    {prepareLoading
+                      ? "Preparing…"
+                      : publishLoading
+                        ? "Publishing…"
+                        : publishNextStepLabel(selectedPlan)}
+                  </button>
+                  <small>
+                    {canPreparePublishPlan(selectedPlan)
+                      ? "Creates reproducible private playback MP3, HLS stream, and waveform derivatives. Canonical masters are never modified, and private MP3s are never copied into published-media."
+                      : canBuildPublishPlan(selectedPlan)
+                        ? "Builds the complete public snapshot from current Library metadata, browser artwork, waveform peaks, and HLS assets. Existing public releases are replaced as a unit so obsolete files cannot survive an update."
+                        : "Resolve the blocking issues shown in preflight before preparing derivatives or publishing."}
+                  </small>
+                </>
+              )}
             </div>
           </section>
 
@@ -4976,6 +5291,23 @@ function PublishWorkspace({
                   ? "No blockers"
                   : `${selectedPlan.validation.blockedCount} blocked`}
               </dd>
+            </div>
+            <div>
+              <dt>Library MP3</dt>
+              <dd>
+                {selectedPlan.libraryPlayback.currentCount} current · {selectedPlan.libraryPlayback.createCount} missing · {selectedPlan.libraryPlayback.replaceCount} stale
+              </dd>
+              {!canPreparePublishPlan(selectedPlan) &&
+                canPrepareLibraryPlayback(selectedPlan) && (
+                  <button
+                    type="button"
+                    disabled={prepareLoading || publishLoading}
+                    onClick={() => void prepareRelease(selectedPlan)}
+                    title="Generate or refresh private 320 kbps playback MP3s in media-library. These files are never copied into published-media."
+                  >
+                    Prepare Library MP3s
+                  </button>
+                )}
             </div>
             <div>
               <dt>Web stream</dt>
@@ -4992,7 +5324,11 @@ function PublishWorkspace({
             <div>
               <dt>Public package</dt>
               <dd>
-                {selectedPlan.summary.itemCount} planned items
+                {selectedPlan.publication.state === "up-to-date"
+                  ? "Up to date"
+                  : selectedPlan.publication.state === "update-available"
+                    ? "Update available"
+                    : "Not yet published"}
               </dd>
             </div>
             <div>
@@ -11083,6 +11419,7 @@ function MetadataFieldControls({
         <button
           type="button"
           className="metadata-field-control"
+          tabIndex={-1}
           aria-label={`Help and field information for ${label}`}
           title="Help and field information"
           onClick={() => setModalOpen(true)}
@@ -11362,6 +11699,7 @@ function MetadataFieldPairControls(
       <button
         type="button"
         className="metadata-field-control"
+        tabIndex={-1}
         aria-label={`Help and field information for ${props.title}`}
         title={`Help for ${props.title}`}
         onClick={() => setModalOpen(true)}
@@ -16950,6 +17288,10 @@ function ReleaseMetadataDetailView({
             selectPreferredReleaseArtwork(
               scannedTrack?.artworkMasters ?? [],
             );
+          const effectiveTrackArtwork =
+            trackArtwork ?? releaseArtwork;
+          const trackArtworkIsInherited =
+            !trackArtwork && Boolean(releaseArtwork);
 
           return (
             <div
@@ -16989,21 +17331,44 @@ function ReleaseMetadataDetailView({
                   <span
                     className={[
                       "track-navigation-artwork",
-                      trackArtwork ? "" : "is-empty",
+                      effectiveTrackArtwork ? "" : "is-empty",
+                      trackArtworkIsInherited ? "is-inherited" : "",
                     ]
                       .filter(Boolean)
                       .join(" ")}
-                    aria-hidden="true"
+                    role={effectiveTrackArtwork ? "img" : undefined}
+                    aria-label={
+                      effectiveTrackArtwork
+                        ? trackArtworkIsInherited
+                          ? "Inherited release artwork"
+                          : "Track-specific artwork"
+                        : undefined
+                    }
+                    title={
+                      effectiveTrackArtwork
+                        ? trackArtworkIsInherited
+                          ? "Inherited release artwork"
+                          : "Track-specific artwork"
+                        : undefined
+                    }
                   >
-                    {trackArtwork ? (
+                    {effectiveTrackArtwork ? (
                       <img
                         src={artworkPreviewUrl(
-                          trackArtwork.relativePath,
+                          effectiveTrackArtwork.relativePath,
                         )}
                         alt=""
                         loading="lazy"
                       />
                     ) : null}
+                    {trackArtworkIsInherited && (
+                      <small
+                        className="track-navigation-artwork-scope"
+                        aria-hidden="true"
+                      >
+                        R
+                      </small>
+                    )}
                   </span>
 
                   <span className="document-nav-label track-document-nav-label">
@@ -20388,6 +20753,7 @@ function PerformerRecordEditor({
                       <button
                         type="button"
                         className="performer-remove-button"
+                        tabIndex={-1}
                         aria-label={`Remove performer ${recordIndex + 1}`}
                         title="Remove performer and role"
                         onClick={() =>
@@ -20914,6 +21280,7 @@ function WritingCreditRecordEditor({
                         <button
                           type="button"
                           className="performer-remove-button"
+                          tabIndex={-1}
                           aria-label={`Remove writing credit ${recordIndex + 1}`}
                           title="Remove credited writer and role"
                           onClick={() => removeRecord(recordIndex)}
@@ -21571,6 +21938,7 @@ function ArrangementCreditRecordEditor({
                           <button
                             type="button"
                             className="performer-remove-button"
+                            tabIndex={-1}
                             aria-label={`Remove arrangement credit ${recordIndex + 1}`}
                             title="Remove credited person and role"
                             onClick={() =>
@@ -22224,6 +22592,7 @@ function TechnicalCreditRecordEditor({
                           <button
                             type="button"
                             className="performer-remove-button"
+                            tabIndex={-1}
                             aria-label={`Remove technical credit ${recordIndex + 1}`}
                             title="Remove credited person and role"
                             onClick={() =>
@@ -24181,6 +24550,7 @@ function MetadataDocumentTable({
               <button
                 type="button"
                 className="metadata-field-remove-control"
+                tabIndex={-1}
                 aria-label={`Remove ${fieldDefinition.label} field`}
                 title={`Remove ${fieldDefinition.label} field`}
                 disabled={
@@ -25102,6 +25472,7 @@ function MetadataDocumentTable({
                     <button
                       type="button"
                       className="metadata-field-control"
+                      tabIndex={-1}
                       aria-label="Help and field information for Performers"
                       title="Help for Performers"
                       onClick={(event) => {

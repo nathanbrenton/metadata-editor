@@ -11,14 +11,17 @@ const serverSource = await readFile(
   "utf8",
 );
 
-test("Publish exposes guided read-only preflight and package destinations", () => {
+test("Publish exposes guided preflight, preparation, and guarded package writes", () => {
   assert.match(appSource, /Continue to preflight/);
   assert.match(appSource, /Preflight result/);
   assert.match(appSource, /Technical package plan/);
-  assert.match(appSource, /public-package writes remain disabled/i);
+  assert.match(appSource, /Build public package/);
+  assert.match(appSource, /Update public package/);
   assert.match(serverSource, /\/api\/publish\/plan/);
   assert.match(serverSource, /\/api\/publish\/prepare/);
+  assert.match(serverSource, /\/api\/publish\/build/);
   assert.match(serverSource, /prepareReleaseMedia/);
+  assert.match(serverSource, /publishReleasePackage/);
 });
 
 test("Publish readiness table groups source and public-media readiness", () => {
@@ -87,18 +90,26 @@ test("Publish preflight keeps technical detail collapsed behind one next-step re
   assert.match(publishWorkspaceSource, /Resolve blockers/);
   assert.match(publishWorkspaceSource, /Prepare release/);
   assert.match(publishWorkspaceSource, /Build public package/);
+  assert.match(publishWorkspaceSource, /Update public package/);
   assert.match(publishWorkspaceSource, /HLS/);
   assert.match(publishWorkspaceSource, /selectedPlan\.webStreams/);
   assert.match(publishWorkspaceSource, /selectedPlan\.waveforms/);
+  assert.match(publishWorkspaceSource, /selectedPlan\.libraryPlayback/);
+  assert.match(publishWorkspaceSource, /Prepare Library MP3s/);
+  assert.match(publishWorkspaceSource, /canPrepareLibraryPlayback/);
   assert.doesNotMatch(publishWorkspaceSource, /<span>Playback<\/span>/);
   assert.match(publishWorkspaceSource, /<details className="publish-plan-disclosure publish-plan-issues">/);
   assert.match(publishWorkspaceSource, /<details className="publish-plan-disclosure publish-plan-items">/);
   assert.match(publishWorkspaceSource, /<details className="publish-plan-disclosure publish-plan-contract">/);
   assert.doesNotMatch(publishWorkspaceSource, /<details[^>]*\sopen(?:=|>)/);
   assert.match(publishWorkspaceSource, /canPreparePublishPlan/);
+  assert.match(publishWorkspaceSource, /canBuildPublishPlan/);
   assert.match(publishWorkspaceSource, /prepareRelease/);
+  assert.match(publishWorkspaceSource, /publishRelease/);
   assert.match(publishWorkspaceSource, /\/api\/publish\/prepare/);
+  assert.match(publishWorkspaceSource, /\/api\/publish\/build/);
   assert.match(publishWorkspaceSource, /Preparing…/);
+  assert.match(publishWorkspaceSource, /Publishing…/);
   assert.match(
     publishWorkspaceSource,
     /planFingerprint:\s*plan\.planFingerprint/,

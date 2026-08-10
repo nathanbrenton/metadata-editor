@@ -58,6 +58,9 @@ import {
   type WebStreamPlan,
   type WebStreamTrackPlan,
 } from "./web-stream.js";
+import type {
+  MediaPreparationProgress,
+} from "./progress.js";
 
 export type MediaPreparationReceipt = {
   releaseId: string;
@@ -83,6 +86,9 @@ export type PrepareReleaseMediaOptions = {
   processRunner?: ProcessRunner;
   now?: () => Date;
   operationId?: string;
+  onProgress?: (
+    progress: MediaPreparationProgress,
+  ) => void | Promise<void>;
 };
 
 type PreparedDerivative = {
@@ -174,12 +180,14 @@ function hashPreparationPlan(
   return createHash("sha256")
     .update(JSON.stringify({
       releaseId: mediaPlan.releaseId,
+      playbackProfile: mediaPlan.profile.playback,
       waveformProfile: mediaPlan.profile.waveform,
       webStreamProfile: webStreamPlan.profile,
       tracks: mediaPlan.items.map((item) => ({
         trackId: item.trackId,
         trackRelativePath: item.trackRelativePath,
         master: item.master,
+        playback: item.playback,
         waveform: item.waveform,
         webStream: webStreamPlan.items.find(
           (stream) => stream.trackId === item.trackId,
@@ -532,7 +540,7 @@ function preparationItems(
   derivative: MediaProcessingDerivativePlan;
 }> {
   return plan.items.flatMap((track) =>
-    [track.waveform]
+    [track.playback, track.waveform]
       .filter(
         (derivative) =>
           derivative.action === "create" ||
@@ -862,6 +870,28 @@ async function promoteDerivatives(
   }
 }
 
+function mediaPreparationTrackLabel(
+  trackId: string,
+): string {
+  const numbered = trackId.match(
+    /(?:^|_)(\d{1,3})_(.+)$/,
+  );
+  if (!numbered) {
+    return trackId;
+  }
+
+  const title = numbered[2]
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) =>
+      part.charAt(0).toUpperCase() +
+      part.slice(1)
+    )
+    .join(" ");
+
+  return `${Number(numbered[1])}. ${title}`;
+}
+
 export async function prepareReleaseMedia(
   mediaRoot: string,
   publishRoot: string,
@@ -952,7 +982,7 @@ export async function prepareReleaseMedia(
     streamsToPrepare.length === 0
   ) {
     throw new Error(
-      "No missing or stale HLS stream/waveform derivatives need preparation.",
+      "No missing or stale private playback/HLS/waveform derivatives need preparation.",
     );
   }
 
@@ -963,6 +993,53 @@ export async function prepareReleaseMedia(
   const operationId =
     options.operationId ??
     `media-preparation-${randomUUID()}`;
+  const trackCount = mediaPlan.items.length;
+  const totalUnits =
+    streamsToPrepare.length +
+    itemsToPrepare.length +
+    2;
+  let completedUnits = 0;
+  const reportProgress = async (
+    progress: Omit<
+      MediaPreparationProgress,
+      | "operationId"
+      | "releaseId"
+      | "completedUnits"
+      | "totalUnits"
+      | "trackCount"
+      | "updatedAt"
+    >,
+  ): Promise<void> => {
+    await options.onProgress?.({
+      operationId,
+      releaseId,
+      completedUnits,
+      totalUnits,
+      trackCount,
+      updatedAt: new Date().toISOString(),
+      ...progress,
+    });
+  };
+  const trackProgressFields = (trackId: string) => {
+    const trackIndex = mediaPlan.items.findIndex(
+      (item) => item.trackId === trackId,
+    );
+
+    return {
+      trackId,
+      trackLabel: mediaPreparationTrackLabel(trackId),
+      ...(trackIndex >= 0
+        ? { trackIndex: trackIndex + 1 }
+        : {}),
+    };
+  };
+
+  await reportProgress({
+    status: "running",
+    phase: "starting",
+    message: "Preparing media plan…",
+  });
+
   const operationParent = rootPath(
     mediaRoot,
     ".metadata-editor-operations",
@@ -1021,6 +1098,13 @@ export async function prepareReleaseMedia(
         );
       }
 
+      await reportProgress({
+        status: "running",
+        phase: "web-stream-hls",
+        message: `${mediaPreparationTrackLabel(track.trackId)}: transcoding segmented AAC-LC HLS stream…`,
+        ...trackProgressFields(track.trackId),
+      });
+
       const stagePath = await stageWebStream(
         mediaRoot,
         stageRoot,
@@ -1063,6 +1147,7 @@ export async function prepareReleaseMedia(
           : {}),
       });
       await writeManifest(manifestPath, manifest);
+      completedUnits += 1;
     }
 
     for (const { track, derivative } of itemsToPrepare) {
@@ -1079,15 +1164,34 @@ export async function prepareReleaseMedia(
       );
       await mkdir(path.dirname(stagePath), { recursive: true });
 
-      await stageWaveform(
-        mediaRoot,
-        decodeRoot,
-        stagePath,
-        track,
-        capabilities,
-        mediaPlan,
-        runProcess,
-      );
+      await reportProgress({
+        status: "running",
+        phase: derivative.kind,
+        message: derivative.kind === "playback-mp3"
+          ? `${mediaPreparationTrackLabel(track.trackId)}: preparing Library playback MP3…`
+          : `${mediaPreparationTrackLabel(track.trackId)}: generating waveform peaks…`,
+        ...trackProgressFields(track.trackId),
+      });
+
+      if (derivative.kind === "playback-mp3") {
+        await stagePlayback(
+          mediaRoot,
+          stagePath,
+          track,
+          capabilities,
+          runProcess,
+        );
+      } else {
+        await stageWaveform(
+          mediaRoot,
+          decodeRoot,
+          stagePath,
+          track,
+          capabilities,
+          mediaPlan,
+          runProcess,
+        );
+      }
 
       const stagedIntegrity = await hashFile(stagePath);
       const preparedItem: PreparedDerivative = {
@@ -1121,7 +1225,14 @@ export async function prepareReleaseMedia(
           : {}),
       });
       await writeManifest(manifestPath, manifest);
+      completedUnits += 1;
     }
+
+    await reportProgress({
+      status: "running",
+      phase: "validating",
+      message: "Validating prepared media and checking for stale source changes…",
+    });
 
     manifest.status = "prepared";
     await writeManifest(manifestPath, manifest);
@@ -1159,6 +1270,13 @@ export async function prepareReleaseMedia(
         "The release changed while media was being prepared. No derivative was promoted; refresh preflight and try again.",
       );
     }
+
+    completedUnits += 1;
+    await reportProgress({
+      status: "running",
+      phase: "promoting",
+      message: "Promoting prepared media into the private Library and verifying checksums…",
+    });
 
     await promoteDerivatives(
       mediaRoot,
@@ -1206,25 +1324,41 @@ export async function prepareReleaseMedia(
           verifiedPlan,
           capabilities,
         );
-        const incompleteWaveforms = verifiedPlan.items.flatMap(
+        const preparedFileKeys = new Set(
+          prepared
+            .filter((item) => item.nodeType === "file")
+            .map((item) => `${item.trackId}:${item.kind}`),
+        );
+        const incompletePreparedFiles = verifiedPlan.items.flatMap(
           (track) =>
-            track.waveform.action !== "none" ||
-            track.waveform.status !== "current"
-              ? [track.waveform]
-              : [],
+            [track.playback, track.waveform].filter(
+              (derivative) =>
+                preparedFileKeys.has(
+                  `${track.trackId}:${derivative.kind}`,
+                ) &&
+                (derivative.action !== "none" ||
+                  derivative.status !== "current"),
+            ),
         );
 
         if (
-          incompleteWaveforms.length > 0 ||
+          incompletePreparedFiles.length > 0 ||
           verifiedWebStreams.summary.currentCount !==
             verifiedWebStreams.summary.trackCount
         ) {
           throw new Error(
-            "Prepared HLS stream/waveform derivatives did not validate as current after promotion.",
+            "Prepared private playback/HLS/waveform derivatives did not validate as current after promotion.",
           );
         }
       },
     );
+
+    completedUnits += 1;
+    await reportProgress({
+      status: "completed",
+      phase: "completed",
+      message: "Media preparation complete.",
+    });
 
     const completedAt = now().toISOString();
     manifest.status = "completed";
@@ -1234,7 +1368,9 @@ export async function prepareReleaseMedia(
     await rm(stageRoot, { recursive: true, force: true });
     await rm(decodeRoot, { recursive: true, force: true });
 
-    const playbackCount = 0;
+    const playbackCount = prepared.filter(
+      (item) => item.kind === "playback-mp3",
+    ).length;
     const streamCount = prepared.filter(
       (item) => item.kind === "web-stream-hls",
     ).length;
@@ -1272,6 +1408,14 @@ export async function prepareReleaseMedia(
         error instanceof Error ? error.message : String(error);
       await writeManifest(manifestPath, manifest);
     }
+    await reportProgress({
+      status: "failed",
+      phase: "failed",
+      message:
+        error instanceof Error
+          ? error.message
+          : "Media preparation failed.",
+    });
     throw error;
   }
 }

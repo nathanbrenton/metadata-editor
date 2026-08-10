@@ -4923,11 +4923,41 @@ textarea:disabled {
   background: #20272d;
   color: #f4f7f9;
   box-shadow: 0 0.8rem 2rem rgb(0 0 0 / 38%);
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
   font-size: 0.86rem;
   font-weight: 700;
-  text-align: center;
+  text-align: left;
   transform: translateX(-50%);
   animation: toast-enter 160ms ease-out;
+}
+
+.toast-notification > span {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.toast-dismiss {
+  display: grid;
+  flex: 0 0 auto;
+  width: 1.65rem;
+  height: 1.65rem;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  opacity: 0.78;
+}
+
+.toast-dismiss:hover,
+.toast-dismiss:focus-visible {
+  background: rgb(255 255 255 / 10%);
+  opacity: 1;
 }
 
 .toast-notification.success {
@@ -9740,6 +9770,7 @@ input[aria-invalid="true"] {
 }
 
 .track-navigation-artwork {
+  position: relative;
   display: block;
   width: 2rem;
   min-width: 2rem;
@@ -9748,6 +9779,31 @@ input[aria-invalid="true"] {
   border: 1px solid #3d4852;
   border-radius: 0.3rem;
   background: #10151a;
+}
+
+.track-navigation-artwork.is-inherited {
+  border-style: dashed;
+}
+
+.track-navigation-artwork.is-inherited img {
+  opacity: 0.68;
+  filter: saturate(0.78);
+}
+
+.track-navigation-artwork-scope {
+  position: absolute;
+  right: 0.08rem;
+  bottom: 0.08rem;
+  min-width: 0.72rem;
+  padding: 0.08rem 0.14rem;
+  border: 1px solid #53606b;
+  border-radius: 0.2rem;
+  background: rgba(16, 21, 26, 0.9);
+  color: #cbd3db;
+  font-size: 0.48rem;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
 }
 
 .track-navigation-artwork.is-empty {
@@ -10507,6 +10563,30 @@ input[aria-invalid="true"] {
   background: #1d252b;
 }
 
+.publish-preparation-progress {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.7rem;
+  border: 1px solid #48545e;
+  border-radius: 0.35rem;
+  background: #151b20;
+}
+
+.publish-preparation-progress > strong {
+  color: #eef3f6;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.publish-preparation-progress progress {
+  width: 100%;
+  height: 0.55rem;
+}
+
+.publish-preparation-progress > small {
+  color: #9ba8b2;
+}
+
 .publish-preflight-next-step .primary-button {
   width: 100%;
   margin-top: 0.1rem;
@@ -10515,6 +10595,21 @@ input[aria-invalid="true"] {
 
 .publish-preflight-next-step .primary-button:disabled {
   opacity: 0.72;
+}
+
+.publish-package-current {
+  display: grid;
+  gap: 0.4rem;
+  align-content: start;
+}
+
+.publish-package-current .badge {
+  justify-self: start;
+}
+
+.publish-package-current > strong {
+  color: #e6f4ea;
+  font-size: 0.92rem;
 }
 
 .publish-plan-disclosure {

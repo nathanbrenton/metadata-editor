@@ -9,6 +9,13 @@ const builderSource = readFileSync(
   ),
   "utf8",
 );
+const appSource = readFileSync(
+  new URL(
+    "../src/App.tsx",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const assignmentSource = readFileSync(
   new URL(
     "../src/ingest-artwork-assignment.ts",
@@ -97,6 +104,26 @@ test(
       /buildFrontArtworkAssignmentUpdates/,
     );
     assert.match(
+      builderSource,
+      /onSourceReviewed\(\s*sourceAsset\.sourceRelativePath,\s*true,/s,
+    );
+    assert.match(
+      builderSource,
+      /assigned to \$\{targetLabel\(target\)\}.*"success"/s,
+    );
+    assert.match(
+      builderSource,
+      /✓ Assigned · front cover/,
+    );
+    assert.match(
+      appSource,
+      /<StagingWorkspace[\s\S]*?onNotify=\{notify\}/s,
+    );
+    assert.match(
+      appSource,
+      /<LazyIngestReleaseBuilder[\s\S]*?onNotify=\{onNotify\}/s,
+    );
+    assert.match(
       assignmentSource,
       /assignmentsWithoutTarget/,
     );
@@ -129,6 +156,10 @@ test(
     assert.match(
       helpSource,
       /Replacing an occupied front-artwork target requires confirmation/,
+    );
+    assert.match(
+      helpSource,
+      /success toast.*source-review decision for a standalone image/i,
     );
   },
 );

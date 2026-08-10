@@ -20,15 +20,40 @@ test("keeps release-header artwork release-scoped and front-specific", () => {
   assert.match(appSource, /selectReleaseFrontArtwork\(\s*release\?\.artworkMasters/);
 });
 
-test("shows local track artwork thumbnails in Library sidebar rows", () => {
+test("shows effective track artwork thumbnails in Library sidebar rows", () => {
   assert.match(appSource, /scannedTrack\?\.artworkMasters/);
   assert.match(appSource, /track-navigation-artwork/);
-  assert.match(appSource, /trackArtwork\.relativePath/);
+  assert.match(appSource, /effectiveTrackArtwork\.relativePath/);
   assert.match(styleSource, /\.track-navigation-artwork/);
   assert.match(styleSource, /object-fit:\s*cover/);
 });
 
 test("documents release and track artwork scope in Workflow Help", () => {
   assert.match(helpSource, /release header displays only explicit release-scoped front artwork/i);
-  assert.match(helpSource, /local track-artwork thumbnails/i);
+  assert.match(helpSource, /track-specific artwork appears at full strength/i);
+  assert.match(helpSource, /inherited release artwork uses a subdued dashed treatment/i);
 });
+
+test("shows inherited release artwork subtly in Library track rows", () => {
+  assert.match(
+    appSource,
+    /effectiveTrackArtwork\s*=\s*trackArtwork\s*\?\?\s*releaseArtwork/,
+  );
+  assert.match(
+    appSource,
+    /trackArtworkIsInherited\s*=\s*!trackArtwork\s*&&\s*Boolean\(releaseArtwork\)/,
+  );
+  assert.match(appSource, /"is-inherited"/);
+  assert.match(appSource, /Inherited release artwork/);
+  assert.match(appSource, /track-navigation-artwork-scope/);
+  assert.match(
+    styleSource,
+    /\.track-navigation-artwork\.is-inherited\s*\{[\s\S]*?border-style:\s*dashed;/,
+  );
+  assert.match(
+    styleSource,
+    /\.track-navigation-artwork\.is-inherited img\s*\{[\s\S]*?opacity:/,
+  );
+  assert.match(helpSource, /inherited release artwork uses a subdued dashed treatment/i);
+});
+

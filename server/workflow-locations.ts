@@ -40,7 +40,7 @@ export type WorkflowLocation = {
 
 export type WorkflowLocations = {
   locations: WorkflowLocation[];
-  publishState: "planned";
+  publishState: "available";
 };
 
 function displayPathFor(absolutePath: string): string {
@@ -112,7 +112,7 @@ export async function readWorkflowLocations(): Promise<WorkflowLocations> {
   ]);
 
   return {
-    publishState: "planned",
+    publishState: "available",
     locations: [
       {
         id: "ingest",
@@ -147,12 +147,12 @@ export async function readWorkflowLocations(): Promise<WorkflowLocations> {
       {
         id: "publish",
         label: "Public output",
-        purpose: "Planned sanitized player-facing snapshot",
+        purpose: "Generated sanitized player-facing snapshots",
         configuredPath: publishConfigured,
         absolutePath: publish.absolutePath,
         displayPath: displayPathFor(publish.absolutePath),
         exists: publish.exists,
-        writeEnabled: false,
+        writeEnabled: true,
       },
     ],
   };

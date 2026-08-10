@@ -136,8 +136,15 @@ import {
   buildPublishPlan,
 } from "./publish-plan.js";
 import {
+  publishReleasePackage,
+} from "./publish-writer.js";
+import {
   prepareReleaseMedia,
 } from "./media-processing/prepare.js";
+import {
+  readMediaPreparationProgress,
+  recordMediaPreparationProgress,
+} from "./media-processing/progress.js";
 import {
   readWorkflowLocations,
   resolvePublishRoot,
@@ -4375,8 +4382,126 @@ const server = createServer(
     }
 
     if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/publish/prepare-progress"
+    ) {
+      const operationId =
+        requestUrl.searchParams.get("operationId") ?? "";
+      if (!operationId) {
+        sendJson(response, 400, {
+          error: "operationId is required",
+        });
+        return;
+      }
+
+      const progress =
+        readMediaPreparationProgress(operationId);
+      if (!progress) {
+        sendJson(response, 404, {
+          error: "Media preparation progress is not available yet.",
+        });
+        return;
+      }
+
+      sendJson(response, 200, progress);
+      return;
+    }
+
+    if (
       request.method === "POST" &&
       requestUrl.pathname === "/api/publish/prepare"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : "";
+        const planFingerprint =
+          "planFingerprint" in body &&
+          typeof body.planFingerprint === "string"
+            ? body.planFingerprint
+            : "";
+        const planGeneratedAt =
+          "planGeneratedAt" in body &&
+          typeof body.planGeneratedAt === "string"
+            ? body.planGeneratedAt
+            : "";
+        const operationId =
+          "operationId" in body &&
+          typeof body.operationId === "string"
+            ? body.operationId
+            : "";
+
+        if (
+          !releaseId ||
+          !planFingerprint ||
+          !planGeneratedAt
+        ) {
+          sendJson(response, 400, {
+            error:
+              "releaseId, planFingerprint, and planGeneratedAt are required",
+          });
+          return;
+        }
+
+        if (
+          operationId &&
+          !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(operationId)
+        ) {
+          sendJson(response, 400, {
+            error: "operationId contains unsupported characters",
+          });
+          return;
+        }
+
+        const [mediaRoot, publishRoot] =
+          await Promise.all([
+            resolveMediaRoot(),
+            resolvePublishRoot(),
+          ]);
+
+        const result = await prepareReleaseMedia(
+          mediaRoot,
+          publishRoot,
+          releaseId,
+          {
+            expectedPublishPlanFingerprint:
+              planFingerprint,
+            publishPlanGeneratedAt:
+              planGeneratedAt,
+            ...(operationId ? { operationId } : {}),
+            onProgress: recordMediaPreparationProgress,
+          },
+        );
+        sendJson(response, 200, result);
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown media-preparation error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/publish/build"
     ) {
       try {
         const body = await readJsonBody(request);
@@ -4428,7 +4553,7 @@ const server = createServer(
         sendJson(
           response,
           200,
-          await prepareReleaseMedia(
+          await publishReleasePackage(
             mediaRoot,
             publishRoot,
             releaseId,
@@ -4445,7 +4570,7 @@ const server = createServer(
           error:
             error instanceof Error
               ? error.message
-              : "Unknown media-preparation error",
+              : "Unknown public-package error",
         });
       }
 

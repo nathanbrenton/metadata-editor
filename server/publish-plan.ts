@@ -3,6 +3,7 @@ import {
 } from "node:crypto";
 import {
   lstat,
+  readFile,
 } from "node:fs/promises";
 import path from "node:path";
 
@@ -53,6 +54,7 @@ export type PublishPlanItemKind =
   | "release-metadata"
   | "track-metadata"
   | "release-artwork"
+  | "track-artwork"
   | "track-stream-manifest"
   | "track-stream-init"
   | "track-stream-segment"
@@ -74,6 +76,12 @@ export type PublishPlanItem = {
   sourceRelativePath?: string;
   trackId?: string;
   sizeBytes?: number;
+  sourceSha256?: string;
+};
+
+export type PublishMetadataInput = {
+  relativePath: string;
+  sha256: string;
 };
 
 export type PublishPlan = {
@@ -111,9 +119,17 @@ export type PublishPlan = {
   sourceRoot: string;
   destinationRoot: string;
   destinationReleaseRelativePath: string;
+  destinationReleaseExists: boolean;
+  publication: {
+    state: "not-published" | "up-to-date" | "update-available";
+    currentContentFingerprint: string;
+    publishedContentFingerprint?: string;
+    publishedAt?: string;
+  };
   planFingerprint: string;
   status: PublishPlanStatus;
   issues: PublishPlanIssue[];
+  metadataInputs: PublishMetadataInput[];
   items: PublishPlanItem[];
   validation: {
     status: "ok" | "warning" | "blocked";
@@ -121,6 +137,13 @@ export type PublishPlan = {
     blockedCount: number;
   };
   derivatives: {
+    trackCount: number;
+    currentCount: number;
+    createCount: number;
+    replaceCount: number;
+    blockedCount: number;
+  };
+  libraryPlayback: {
     trackCount: number;
     currentCount: number;
     createCount: number;
@@ -184,7 +207,11 @@ function isMissingFileError(error: unknown): boolean {
 async function inspectRegularFile(
   root: string,
   relativePath: string,
-): Promise<{ exists: boolean; sizeBytes?: number }> {
+): Promise<{
+  exists: boolean;
+  sizeBytes?: number;
+  sha256?: string;
+}> {
   const absolutePath = assertPathWithinRoot(
     root,
     path.resolve(
@@ -205,9 +232,14 @@ async function inspectRegularFile(
       );
     }
 
+    const content = await readFile(absolutePath);
+
     return {
       exists: true,
       sizeBytes: stats.size,
+      sha256: createHash("sha256")
+        .update(content)
+        .digest("hex"),
     };
   } catch (error) {
     if (isMissingFileError(error)) {
@@ -277,6 +309,14 @@ function isPublishManagedDerivativeReferenceIssue(
     issue.message.startsWith(
       'track.assets.waveform_peaks points to "waveform-peaks.json",',
     )
+  );
+}
+
+function isPrivatePlaybackDerivativeIssue(
+  issue: LibraryValidationIssue,
+): boolean {
+  return issue.code.startsWith(
+    "derivative-playback-mp3-",
   );
 }
 
@@ -374,6 +414,139 @@ function hashPlan(
     .digest("hex");
 }
 
+function hashPublicationContent(
+  releaseId: string,
+  contract: PublishPlan["contract"],
+  metadataInputs: readonly PublishMetadataInput[],
+  items: readonly PublishPlanItem[],
+): string {
+  const resources = items
+    .filter(
+      (item) =>
+        item.kind !== "catalog" &&
+        item.kind !== "publication-manifest" &&
+        item.action !== "blocked",
+    )
+    .map((item) => ({
+      kind: item.kind,
+      destinationRelativePath: item.destinationRelativePath,
+      ...(item.trackId ? { trackId: item.trackId } : {}),
+      ...(item.sourceSha256
+        ? { sourceSha256: item.sourceSha256 }
+        : {}),
+    }))
+    .sort((left, right) =>
+      left.destinationRelativePath.localeCompare(
+        right.destinationRelativePath,
+      ),
+    );
+
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        schema: {
+          name: "metadata-editor-publication-content",
+          version: 1,
+        },
+        releaseId,
+        contract,
+        metadataInputs,
+        resources,
+      }),
+    )
+    .digest("hex");
+}
+
+async function inspectPublicationState(
+  publishRoot: string,
+  destinationReleaseRelativePath: string,
+  destinationReleaseExists: boolean,
+  currentContentFingerprint: string,
+): Promise<PublishPlan["publication"]> {
+  if (!destinationReleaseExists) {
+    return {
+      state: "not-published",
+      currentContentFingerprint,
+    };
+  }
+
+  const manifestRelativePath = path.posix.join(
+    destinationReleaseRelativePath,
+    "publication-manifest.json",
+  );
+  const manifestPath = assertPathWithinRoot(
+    publishRoot,
+    path.resolve(
+      publishRoot,
+      ...manifestRelativePath.split("/"),
+    ),
+  );
+
+  try {
+    const stats = await lstat(manifestPath);
+
+    if (stats.isSymbolicLink() || !stats.isFile()) {
+      return {
+        state: "update-available",
+        currentContentFingerprint,
+      };
+    }
+
+    const parsed = JSON.parse(
+      await readFile(manifestPath, "utf8"),
+    ) as unknown;
+
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return {
+        state: "update-available",
+        currentContentFingerprint,
+      };
+    }
+
+    const manifest = parsed as Record<string, unknown>;
+    const publishedContentFingerprint =
+      typeof manifest.sourceContentFingerprint === "string"
+        ? manifest.sourceContentFingerprint
+        : undefined;
+    const publishedAt =
+      typeof manifest.publishedAt === "string"
+        ? manifest.publishedAt
+        : undefined;
+
+    return {
+      state:
+        publishedContentFingerprint === currentContentFingerprint
+          ? "up-to-date"
+          : "update-available",
+      currentContentFingerprint,
+      ...(publishedContentFingerprint
+        ? { publishedContentFingerprint }
+        : {}),
+      ...(publishedAt ? { publishedAt } : {}),
+    };
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return {
+        state: "update-available",
+        currentContentFingerprint,
+      };
+    }
+
+    if (error instanceof SyntaxError) {
+      return {
+        state: "update-available",
+        currentContentFingerprint,
+      };
+    }
+
+    throw error;
+  }
+}
+
 function formatPublishPlanItem(
   item: PublishPlanItem,
 ): string {
@@ -396,7 +569,9 @@ export function formatPublishPlan(
     `Read-only: yes`,
     `Writes enabled: no`,
     `Validation: ${plan.validation.blockedCount} blocked, ${plan.validation.warningCount} warnings`,
+    `Public package: ${plan.publication.state}`,
     `Public derivatives: ${plan.derivatives.currentCount} current, ${plan.derivatives.createCount} missing, ${plan.derivatives.replaceCount} stale, ${plan.derivatives.blockedCount} blocked`,
+    `Library playback MP3s: ${plan.libraryPlayback.currentCount}/${plan.libraryPlayback.trackCount} current (private; not published)`,
     `Web streams: ${plan.webStreams.currentCount}/${plan.webStreams.trackCount} current`,
     `Waveforms: ${plan.waveforms.currentCount}/${plan.waveforms.trackCount} current`,
     "",
@@ -473,6 +648,24 @@ export async function buildPublishPlan(
     derivatives,
     capabilities,
   );
+  const playbackItems = derivatives.items.map(
+    (item) => item.playback,
+  );
+  const libraryPlayback = {
+    trackCount: playbackItems.length,
+    currentCount: playbackItems.filter(
+      (item) => item.action === "none",
+    ).length,
+    createCount: playbackItems.filter(
+      (item) => item.action === "create",
+    ).length,
+    replaceCount: playbackItems.filter(
+      (item) => item.action === "replace",
+    ).length,
+    blockedCount: playbackItems.filter(
+      (item) => item.action === "blocked",
+    ).length,
+  };
   const waveformItems = derivatives.items.map(
     (item) => item.waveform,
   );
@@ -508,29 +701,63 @@ export async function buildPublishPlan(
       (releaseResult) => releaseResult.issues,
     ),
   ].filter(
-    (issue) => !isPublishManagedDerivativeReferenceIssue(issue),
+    (issue) =>
+      !isPublishManagedDerivativeReferenceIssue(issue) &&
+      !isPrivatePlaybackDerivativeIssue(issue),
   );
   const issues: PublishPlanIssue[] =
     validationIssues.map(issueFromValidation);
   const items: PublishPlanItem[] = [];
+  const metadataInputs: PublishMetadataInput[] = [];
+  const metadataFiles = [
+    ...release.metadataFiles.filter(
+      (file) => file.filename === "release.toml" && file.exists,
+    ),
+    ...release.tracks.flatMap((track) =>
+      track.metadataFiles.filter(
+        (file) =>
+          (file.filename === "track.toml" ||
+            file.filename === "track-credits.toml") &&
+          file.exists,
+      ),
+    ),
+  ];
+
+  for (const file of metadataFiles) {
+    const inspection = await inspectRegularFile(
+      mediaRoot,
+      file.relativePath,
+    );
+
+    if (!inspection.exists || !inspection.sha256) {
+      issues.push({
+        code: "metadata-input-missing",
+        severity: "blocked",
+        relativePath: file.relativePath,
+        message:
+          "A metadata input needed for the public package disappeared during preflight.",
+        suggestion:
+          "Refresh the Library scan and rebuild preflight.",
+      });
+      continue;
+    }
+
+    metadataInputs.push({
+      relativePath: file.relativePath,
+      sha256: inspection.sha256,
+    });
+  }
+
+  metadataInputs.sort((left, right) =>
+    left.relativePath.localeCompare(right.relativePath),
+  );
+
   const destinationReleaseRelativePath =
     path.posix.join("releases", releaseId);
   const releaseDestinationExists = await destinationExists(
     publishRoot,
     destinationReleaseRelativePath,
   );
-
-  if (releaseDestinationExists) {
-    issues.push({
-      code: "existing-public-release",
-      severity: "warning",
-      relativePath: destinationReleaseRelativePath,
-      message:
-        "A public release with this ID already exists. A future write-enabled operation must build a complete replacement and atomically promote it rather than merging files in place.",
-      suggestion:
-        "Review this plan as a republish operation and retain the current public release for rollback.",
-    });
-  }
 
   const artwork = await discoverBrowserArtwork(
     mediaRoot,
@@ -584,6 +811,9 @@ export async function buildPublishPlan(
       ...(inspection.sizeBytes === undefined
         ? {}
         : { sizeBytes: inspection.sizeBytes }),
+      ...(inspection.sha256
+        ? { sourceSha256: inspection.sha256 }
+        : {}),
     });
   }
 
@@ -593,6 +823,55 @@ export async function buildPublishPlan(
       "tracks",
       trackPlan.trackId,
     );
+    const trackScan = release.tracks.find(
+      (track) => track.id === trackPlan.trackId,
+    );
+
+    if (!trackScan) {
+      throw new Error(
+        `Release scan is missing track ${trackPlan.trackId}.`,
+      );
+    }
+
+    const trackArtwork = await discoverBrowserArtwork(
+      mediaRoot,
+      trackScan.relativePath,
+      trackScan.artworkMasters,
+    );
+
+    if (trackArtwork) {
+      const trackArtworkInspection = await inspectRegularFile(
+        mediaRoot,
+        trackArtwork.relativePath,
+      );
+      const trackArtworkDestination = path.posix.join(
+        trackDestination,
+        "artwork/front",
+        publicArtworkFilename(trackArtwork),
+      );
+
+      items.push({
+        kind: "track-artwork",
+        action: await destinationExists(
+          publishRoot,
+          trackArtworkDestination,
+        )
+          ? "replace"
+          : "create",
+        sourceRelativePath: trackArtwork.relativePath,
+        destinationRelativePath: trackArtworkDestination,
+        trackId: trackPlan.trackId,
+        reason:
+          "Copy the browser-compatible track artwork override; tracks without an override inherit release front artwork.",
+        ...(trackArtworkInspection.sizeBytes === undefined
+          ? {}
+          : { sizeBytes: trackArtworkInspection.sizeBytes }),
+        ...(trackArtworkInspection.sha256
+          ? { sourceSha256: trackArtworkInspection.sha256 }
+          : {}),
+      });
+    }
+
     const webStream = webStreams.items.find(
       (item) => item.trackId === trackPlan.trackId,
     );
@@ -640,6 +919,22 @@ export async function buildPublishPlan(
           "stream",
           streamFile.filename,
         );
+        const streamInspection = await inspectRegularFile(
+          mediaRoot,
+          streamFile.relativePath,
+        );
+
+        if (!streamInspection.exists || !streamInspection.sha256) {
+          issues.push({
+            code: "current-stream-file-missing",
+            severity: "blocked",
+            relativePath: streamFile.relativePath,
+            message:
+              "The web-stream plan reported current media, but a referenced stream file is no longer present.",
+            suggestion:
+              "Refresh preflight and Prepare release again if necessary.",
+          });
+        }
 
         items.push({
           kind: streamKind,
@@ -659,6 +954,9 @@ export async function buildPublishPlan(
                 ? "Copy the HLS fMP4 initialization segment referenced by the playlist."
                 : "Copy one short AAC-LC HLS media segment referenced by the playlist.",
           sizeBytes: streamFile.sizeBytes,
+          ...(streamInspection.sha256
+            ? { sourceSha256: streamInspection.sha256 }
+            : {}),
         });
       }
     }
@@ -727,6 +1025,9 @@ export async function buildPublishPlan(
         ...(inspection.sizeBytes === undefined
           ? {}
           : { sizeBytes: inspection.sizeBytes }),
+        ...(inspection.sha256
+          ? { sourceSha256: inspection.sha256 }
+          : {}),
       });
     }
 
@@ -781,36 +1082,49 @@ export async function buildPublishPlan(
     updateCount: items.filter((item) => item.action === "update").length,
     blockedCount: items.filter((item) => item.action === "blocked").length,
   };
+  const contract: PublishPlan["contract"] = {
+    name: "audio-player-public-package",
+    version: 2,
+    catalogSchemaVersion: 1,
+    mediaBaseUrl: "/media",
+    trackResources: {
+      stream: {
+        hrefField: "stream.href",
+        protocol: "hls",
+        manifestRelativePath: "stream/index.m3u8",
+        codec: "aac",
+        bitrateKbps: webStreams.profile.bitrateKbps,
+        segmentDurationSeconds:
+          webStreams.profile.segmentDurationSeconds,
+        segmentType: "fmp4",
+      },
+      waveform: {
+        hrefField: "waveform.href",
+        filename: derivatives.profile.waveform.filename,
+        schemaVersion:
+          derivatives.profile.waveform.schemaVersion,
+      },
+    },
+    privateContentExcluded,
+  };
+  const currentContentFingerprint = hashPublicationContent(
+    releaseId,
+    contract,
+    metadataInputs,
+    items,
+  );
+  const publication = await inspectPublicationState(
+    publishRoot,
+    destinationReleaseRelativePath,
+    releaseDestinationExists,
+    currentContentFingerprint,
+  );
   const planWithoutFingerprint: Omit<PublishPlan, "planFingerprint"> = {
     schema: {
       name: "metadata-editor-publish-plan",
       version: 1,
     },
-    contract: {
-      name: "audio-player-public-package",
-      version: 2,
-      catalogSchemaVersion: 1,
-      mediaBaseUrl: "/media",
-      trackResources: {
-        stream: {
-          hrefField: "stream.href",
-          protocol: "hls",
-          manifestRelativePath: "stream/index.m3u8",
-          codec: "aac",
-          bitrateKbps: webStreams.profile.bitrateKbps,
-          segmentDurationSeconds:
-            webStreams.profile.segmentDurationSeconds,
-          segmentType: "fmp4",
-        },
-        waveform: {
-          hrefField: "waveform.href",
-          filename: derivatives.profile.waveform.filename,
-          schemaVersion:
-            derivatives.profile.waveform.schemaVersion,
-        },
-      },
-      privateContentExcluded,
-    },
+    contract,
     releaseId,
     generatedAt,
     readOnly: true,
@@ -818,8 +1132,11 @@ export async function buildPublishPlan(
     sourceRoot: mediaRoot,
     destinationRoot: publishRoot,
     destinationReleaseRelativePath,
+    destinationReleaseExists: releaseDestinationExists,
+    publication,
     status: planStatus(issues),
     issues,
+    metadataInputs,
     items,
     validation: {
       status: validationIssues.some(
@@ -839,6 +1156,7 @@ export async function buildPublishPlan(
       ).length,
     },
     derivatives: publicDerivatives,
+    libraryPlayback,
     webStreams: webStreams.summary,
     waveforms,
     summary,

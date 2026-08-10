@@ -186,6 +186,7 @@ export type IngestBuildPreview = {
     removedFileCount: number;
   };
   warnings: string[];
+  notes: string[];
   confirmationPhrase:
     | typeof INGEST_BUILD_CONFIRMATION_PHRASE
     | typeof INGEST_UPDATE_CONFIRMATION_PHRASE;

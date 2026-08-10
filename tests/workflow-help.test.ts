@@ -286,3 +286,26 @@ test("documents Ingest Source files media previews", () => {
   );
   assert.match(text, /probe provenance.*remain.*Details/i);
 });
+
+
+test("documents guarded Build and Update public-package snapshots", () => {
+  const publish = workflowStages.find(
+    ({ id }) => id === "publish",
+  );
+  const text = [
+    publish?.summary,
+    publish?.currentNote,
+    ...(publish?.steps ?? []),
+    ...workflowFaqItems.map(
+      ({ question, answer }) =>
+        `${question} ${answer}`,
+    ),
+  ].join(" ");
+
+  assert.match(text, /Build public package/i);
+  assert.match(text, /Update public package/i);
+  assert.match(text, /atomically/i);
+  assert.match(text, /obsolete files cannot survive/i);
+  assert.match(text, /canonical masters/i);
+  assert.match(text, /sample-clearance/i);
+});
