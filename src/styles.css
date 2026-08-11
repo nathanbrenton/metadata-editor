@@ -13781,3 +13781,142 @@ main {
 .metadata-detail-home-button {
   align-self: center;
 }
+
+/* Published-media fleet and deployment snapshot */
+.publish-deployment-overview {
+  display: grid;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+  border: 1px solid #37424c;
+  border-radius: 0.55rem;
+  padding: 0.85rem 0.95rem;
+  background: #11171c;
+}
+
+.publish-deployment-overview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.publish-deployment-overview-header h3 {
+  margin: 0.08rem 0 0.16rem;
+  font-size: 1rem;
+}
+
+.publish-deployment-overview-header p {
+  margin: 0;
+  color: #aab5bd;
+  font-size: 0.78rem;
+}
+
+.publish-deployment-kicker {
+  color: #7f929f;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.publish-deployment-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.publish-fleet-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.publish-fleet-summary-grid > div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  border: 1px solid #303a43;
+  border-radius: 0.42rem;
+  padding: 0.5rem 0.58rem;
+  background: #0d1216;
+}
+
+.publish-fleet-summary-grid span {
+  color: #8f9ca6;
+  font-size: 0.68rem;
+}
+
+.publish-fleet-summary-grid strong {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.publish-deployment-integrity-line {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem 1.1rem;
+  flex-wrap: wrap;
+  color: #aab5bd;
+  font-size: 0.74rem;
+}
+
+.publish-deployment-integrity-line strong {
+  color: #d9e1e6;
+}
+
+.publish-deployment-issues {
+  border-top: 1px solid #303a43;
+  padding-top: 0.65rem;
+}
+
+.publish-deployment-issues summary {
+  cursor: pointer;
+  color: #c6d0d7;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.publish-deployment-issues ol {
+  display: grid;
+  gap: 0.42rem;
+  margin: 0.6rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.publish-deployment-issues li {
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 0.35fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.45rem;
+  color: #b7c1c8;
+  font-size: 0.72rem;
+}
+
+.publish-deployment-issues code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publish-deployment-loading {
+  margin: 0;
+  color: #8f9ca6;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 1100px) {
+  .publish-fleet-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .publish-deployment-overview-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .publish-deployment-actions {
+    justify-content: flex-start;
+  }
+}

@@ -799,6 +799,69 @@ type BatchPreparationResponse = {
   results: BatchPreparationResult[];
 };
 
+type PublishedMediaDeploymentIssue = {
+  code: string;
+  severity: "warning" | "blocked";
+  relativePath: string;
+  message: string;
+};
+
+type PublishedMediaDeploymentAudit = {
+  generatedAt: string;
+  status: "empty" | "ready" | "warning" | "blocked";
+  deployable: boolean;
+  issues: PublishedMediaDeploymentIssue[];
+  deploymentManifest: {
+    exists: boolean;
+    current: boolean;
+    generatedAt?: string;
+    contentFingerprint?: string;
+  };
+  summary: {
+    catalogReleaseCount: number;
+    releaseDirectoryCount: number;
+    readyReleaseCount: number;
+    blockedReleaseCount: number;
+    fileCount: number;
+    totalBytes: number;
+    warningCount: number;
+    blockedCount: number;
+  };
+};
+
+type PublishFleetRelease = {
+  releaseId: string;
+  releaseTitle?: string;
+  primaryArtistName?: string;
+  publicationState:
+    | "not-published"
+    | "up-to-date"
+    | "update-available";
+  planStatus: "ready" | "warning" | "blocked";
+  blockerCount: number;
+  warningCount: number;
+  needsPreparation: boolean;
+  playbackNeedsPreparation: boolean;
+  audioStreamNeedsPreparation: boolean;
+  videoStreamNeedsPreparation: boolean;
+  waveformNeedsPreparation: boolean;
+};
+
+type PublishFleetSummary = {
+  generatedAt: string;
+  releases: PublishFleetRelease[];
+  summary: {
+    releaseCount: number;
+    notPublishedCount: number;
+    currentCount: number;
+    updateAvailableCount: number;
+    blockedCount: number;
+    warningCount: number;
+    needsPreparationCount: number;
+  };
+  deployment: PublishedMediaDeploymentAudit;
+};
+
 type InferredValue<T> = {
   value: T;
   source: string;
@@ -5594,12 +5657,89 @@ function PublishWorkspace({
     useState<Set<string>>(() => new Set());
   const [batchPrepareLoading, setBatchPrepareLoading] =
     useState(false);
+  const [publishFleet, setPublishFleet] =
+    useState<PublishFleetSummary | null>(null);
+  const [publishFleetLoading, setPublishFleetLoading] =
+    useState(false);
+  const [publishFleetError, setPublishFleetError] =
+    useState<string | null>(null);
+  const [deploymentManifestLoading, setDeploymentManifestLoading] =
+    useState(false);
   const [sortMode, setSortMode] =
     useState<LibraryReleaseSortMode>("date-desc");
   const sortedReleases = useMemo(
     () => sortLibraryReleases(releases, sortMode),
     [releases, sortMode],
   );
+
+  const loadPublishFleet = useCallback(async () => {
+    setPublishFleetLoading(true);
+    setPublishFleetError(null);
+
+    try {
+      const response = await fetch(
+        "/api/publish/fleet",
+      );
+      const payload = await response.json() as
+        | PublishFleetSummary
+        | { error?: string };
+
+      if (!response.ok || !("deployment" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to load the publish fleet summary.",
+        );
+      }
+
+      setPublishFleet(payload);
+    } catch (fleetError) {
+      setPublishFleetError(
+        fleetError instanceof Error
+          ? fleetError.message
+          : "Unable to load the publish fleet summary.",
+      );
+    } finally {
+      setPublishFleetLoading(false);
+    }
+  }, []);
+
+  const refreshDeploymentManifest = useCallback(async () => {
+    setDeploymentManifestLoading(true);
+    setPublishFleetError(null);
+
+    try {
+      const response = await fetch(
+        "/api/publish/deployment-manifest",
+        { method: "POST" },
+      );
+      const payload = await response.json() as
+        | PublishedMediaDeploymentAudit
+        | { error?: string };
+
+      if (!response.ok || !("deployable" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to refresh the deployment manifest.",
+        );
+      }
+
+      await loadPublishFleet();
+      onNotify(
+        "Deployment manifest refreshed and the published-media snapshot verified.",
+        "success",
+      );
+    } catch (manifestError) {
+      setPublishFleetError(
+        manifestError instanceof Error
+          ? manifestError.message
+          : "Unable to refresh the deployment manifest.",
+      );
+    } finally {
+      setDeploymentManifestLoading(false);
+    }
+  }, [loadPublishFleet, onNotify]);
 
   const loadPublishOperations = useCallback(async () => {
     setPublishOperationsLoading(true);
@@ -5636,6 +5776,10 @@ function PublishWorkspace({
   useEffect(() => {
     void loadPublishOperations();
   }, [loadPublishOperations, releases]);
+
+  useEffect(() => {
+    void loadPublishFleet();
+  }, [loadPublishFleet, releases]);
 
   const loadPublishPlan = useCallback(async (
     releaseId: string,
@@ -6087,6 +6231,17 @@ function PublishWorkspace({
     onRefresh,
   ]);
 
+  const deploymentAudit = publishFleet?.deployment ?? null;
+  const deploymentBadge = deploymentAudit?.deployable
+    ? { label: "Deployment ready", tone: "success" }
+    : deploymentAudit?.status === "blocked"
+      ? { label: "Deployment blocked", tone: "missing" }
+      : deploymentAudit?.status === "empty"
+        ? { label: "No public snapshot", tone: "preview" }
+        : deploymentAudit
+          ? { label: "Manifest refresh needed", tone: "warning" }
+          : { label: "Deployment not checked", tone: "preview" };
+
   return (
     <section className="workflow-workspace publish-workspace">
       <header className="workflow-workspace-header publish-workspace-header">
@@ -6160,6 +6315,12 @@ function PublishWorkspace({
         </p>
       )}
 
+      {publishFleetError && (
+        <p className="message error">
+          {publishFleetError}
+        </p>
+      )}
+
       {publishOperations &&
         publishOperations.interruptedCount > 0 && (
           <aside
@@ -6176,6 +6337,135 @@ function PublishWorkspace({
             </div>
           </aside>
         )}
+
+      <section
+        className="publish-deployment-overview"
+        aria-label="Published media deployment snapshot"
+      >
+        <header className="publish-deployment-overview-header">
+          <div>
+            <span className="publish-deployment-kicker">Published-media fleet</span>
+            <h3>Deployment snapshot</h3>
+            <p>
+              Verify the complete sanitized catalog before it is staged for the public server.
+            </p>
+          </div>
+          <div className="publish-deployment-actions">
+            <span
+              className={`badge ${deploymentBadge.tone}`}
+              role="status"
+            >
+              {deploymentBadge.label}
+            </span>
+            <button
+              type="button"
+              disabled={publishFleetLoading}
+              onClick={() => void loadPublishFleet()}
+            >
+              {publishFleetLoading
+                ? "Verifying…"
+                : "Verify snapshot"}
+            </button>
+            <button
+              type="button"
+              className="primary"
+              disabled={
+                deploymentManifestLoading ||
+                publishFleetLoading ||
+                publishLoading ||
+                prepareLoading ||
+                batchPrepareLoading ||
+                !deploymentAudit ||
+                deploymentAudit.summary.blockedCount > 0 ||
+                deploymentAudit.summary.releaseDirectoryCount === 0
+              }
+              onClick={() => void refreshDeploymentManifest()}
+              title="Hash the verified public catalog and every manifest-controlled public resource into deployment-manifest.json. This writes only inside published-media and does not deploy to a server."
+            >
+              {deploymentManifestLoading
+                ? "Refreshing manifest…"
+                : deploymentAudit?.deploymentManifest.current
+                  ? "Refresh deployment manifest"
+                  : "Create deployment manifest"}
+            </button>
+          </div>
+        </header>
+
+        {publishFleet ? (
+          <>
+            <div className="publish-fleet-summary-grid">
+              <div>
+                <span>Library releases</span>
+                <strong>{publishFleet.summary.releaseCount}</strong>
+              </div>
+              <div>
+                <span>Published · current</span>
+                <strong>{publishFleet.summary.currentCount}</strong>
+              </div>
+              <div>
+                <span>Update available</span>
+                <strong>{publishFleet.summary.updateAvailableCount}</strong>
+              </div>
+              <div>
+                <span>Not published</span>
+                <strong>{publishFleet.summary.notPublishedCount}</strong>
+              </div>
+              <div>
+                <span>Needs preparation</span>
+                <strong>{publishFleet.summary.needsPreparationCount}</strong>
+              </div>
+              <div>
+                <span>Blocked releases</span>
+                <strong>{publishFleet.summary.blockedCount}</strong>
+              </div>
+            </div>
+
+            <div className="publish-deployment-integrity-line">
+              <strong>
+                {deploymentAudit?.summary.readyReleaseCount ?? 0}/
+                {deploymentAudit?.summary.releaseDirectoryCount ?? 0} published release packages verified
+              </strong>
+              <span>
+                {deploymentAudit
+                  ? `${deploymentAudit.summary.fileCount} manifest-controlled files · ${formatByteSize(deploymentAudit.summary.totalBytes)}`
+                  : "No deployment audit loaded"}
+              </span>
+              <span>
+                Deployment manifest: {deploymentAudit?.deploymentManifest.current
+                  ? "current"
+                  : deploymentAudit?.deploymentManifest.exists
+                    ? "stale"
+                    : "missing"}
+              </span>
+            </div>
+
+            {deploymentAudit && deploymentAudit.issues.length > 0 && (
+              <details className="publish-deployment-issues">
+                <summary>
+                  Deployment checks · {deploymentAudit.summary.blockedCount} blockers · {deploymentAudit.summary.warningCount} warnings
+                </summary>
+                <ol>
+                  {deploymentAudit.issues.map((issue, index) => (
+                    <li key={`${issue.code}-${issue.relativePath}-${index}`}>
+                      <span className={`badge ${issue.severity === "blocked" ? "missing" : "warning"}`}>
+                        {issue.severity === "blocked" ? "Blocked" : "Warning"}
+                      </span>
+                      <code>{issue.relativePath}</code>
+                      <span>{issue.message}</span>
+                    </li>
+                  ))}
+                </ol>
+              </details>
+            )}
+          </>
+        ) : (
+          <p className="publish-deployment-loading">
+            {publishFleetLoading
+              ? "Verifying the published-media fleet…"
+              : "Deployment snapshot has not been verified yet."}
+          </p>
+        )}
+      </section>
 
       <section className="workflow-table-panel">
         <header className="publish-release-list-header">

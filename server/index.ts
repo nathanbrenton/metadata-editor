@@ -151,6 +151,13 @@ import {
   recoverPublishOperation,
 } from "./publish-operations.js";
 import {
+  buildPublishFleetSummary,
+} from "./publish-fleet.js";
+import {
+  auditPublishedMediaDeployment,
+  writePublishedMediaDeploymentManifest,
+} from "./published-media-deployment.js";
+import {
   prepareReleaseMedia,
 } from "./media-processing/prepare.js";
 import {
@@ -4786,6 +4793,106 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown preview error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/publish/fleet"
+    ) {
+      try {
+        const [mediaRoot, publishRoot] =
+          await Promise.all([
+            resolveMediaRoot(),
+            resolvePublishRoot(),
+          ]);
+
+        sendJson(
+          response,
+          200,
+          await buildPublishFleetSummary(
+            mediaRoot,
+            publishRoot,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 500, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown publish-fleet error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/publish/deployment-audit"
+    ) {
+      try {
+        const publishRoot = await resolvePublishRoot();
+        sendJson(
+          response,
+          200,
+          await auditPublishedMediaDeployment(
+            publishRoot,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 500, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown deployment-audit error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/publish/deployment-manifest"
+    ) {
+      try {
+        const publishRoot = await resolvePublishRoot();
+        const history = await listPublishOperations(
+          publishRoot,
+          { limit: 200 },
+        );
+        const runningOperation = history.operations.some(
+          (operation) => operation.state === "running",
+        );
+
+        if (
+          runningOperation ||
+          history.interruptedCount > 0
+        ) {
+          sendJson(response, 409, {
+            error:
+              "Deployment manifest cannot be refreshed while a publish operation is running or interrupted.",
+          });
+          return;
+        }
+
+        sendJson(
+          response,
+          200,
+          await writePublishedMediaDeploymentManifest(
+            publishRoot,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown deployment-manifest error",
         });
       }
 

@@ -372,6 +372,18 @@ when the plan is blocked so it can gate later automation.
 
 HLS-stream/waveform/browser-artwork preparation is the first write-enabled Publish action and writes only reproducible derivatives inside the private canonical release. **Publish public package** is now the second write-enabled action: it reconstructs the exact reviewed sanitized package in an isolated sibling operation directory, verifies metadata/source fingerprints, copies only planned browser artwork, waveforms, and HLS files, generates `release.json`, per-track `track.json`, `publication-manifest.json`, and `catalog.json`, rejects unplanned/private files, verifies hashes, and atomically promotes the release and catalog. If the release is already public, the same guarded operation is labeled **Update public package** and backs up the previous release/catalog for rollback before replacement.
 
+Published Media Fleet & Deployment Bundle v1 adds a whole-catalog deployment gate after release-scoped publication. The Publish workspace verifies every directory under `published-media/releases/` against its `publication-manifest.json` and the root `catalog.json`, reports orphan directories or unexpected root files as blockers, and summarizes current, update-available, not-published, blocked, and preparation-needed Library releases. A verified tree can create `published-media/deployment-manifest.json`, which records the catalog hash, every manifest-controlled public file hash/size, each release publication-manifest identity, package-contract versions, and one snapshot content fingerprint. The deployment manifest intentionally excludes itself from that fingerprint. A missing or stale deployment manifest means the tree is not yet deployment-ready even when every individual release is valid.
+
+Deployment commands:
+
+```bash
+npm run verify:published-media
+npm run manifest:published-media
+npm run stage:published-media -- --output ~/Desktop/metadata-editor-deploy --confirm STAGE_PUBLISHED_MEDIA
+```
+
+`verify:published-media` is read-only and exits non-zero for integrity blockers, an empty public tree, or a missing/stale deployment manifest. `manifest:published-media` writes only the deployment manifest after the complete public tree verifies. `stage:published-media` requires an explicit confirmation token, refuses to overwrite an existing target, requires a current deployment manifest, and copies only the verified sanitized snapshot into a new local directory. It does not SSH, rsync, configure nginx, or write to the public server.
+
 ## Core Workflows
 
 ### Performer-credit range copy
@@ -444,7 +456,7 @@ The GET response includes `writesEnabled: false`, profile hashes, per-track chec
 
 ### Hosted Audio-Player Package Contract
 
-Publish contract v4 plans a host-ready audio/video layout without deployment-domain URLs:
+Publish contract v5 plans a host-ready audio/video layout without deployment-domain URLs:
 
 ```text
 releases/<release-id>/

@@ -17,7 +17,10 @@
     "tags:summarize": "scripts/player-tag-tests/summarize-probes.py",
     "audit:file-spec": "tsx scripts/audit-media-file-spec.ts",
     "audit:media-technical": "tsx scripts/audit-media-technical.ts",
-    "repair:ingest-receipt-release-prefix": "tsx scripts/repair-ingest-receipt-release-prefix.ts"
+    "repair:ingest-receipt-release-prefix": "tsx scripts/repair-ingest-receipt-release-prefix.ts",
+    "verify:published-media": "tsx scripts/verify-published-media.ts",
+    "manifest:published-media": "tsx scripts/write-published-media-deployment-manifest.ts",
+    "stage:published-media": "tsx scripts/stage-published-media.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.4",
