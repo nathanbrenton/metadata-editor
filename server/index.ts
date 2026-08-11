@@ -147,6 +147,10 @@ import {
   publishReleasePackage,
 } from "./publish-writer.js";
 import {
+  buildPublicReleaseUnpublishPlan,
+  unpublishPublicRelease,
+} from "./publication-membership.js";
+import {
   listPublishOperations,
   recoverPublishOperation,
 } from "./publish-operations.js";
@@ -157,6 +161,12 @@ import {
   auditPublishedMediaDeployment,
   writePublishedMediaDeploymentManifest,
 } from "./published-media-deployment.js";
+import {
+  buildPublishedMediaDeploymentSyncPlan,
+  buildPublishedMediaDeploymentTargetStatus,
+  executePublishedMediaDeployment,
+  rollbackPublishedMediaDeployment,
+} from "./deployment-sync.js";
 import {
   prepareReleaseMedia,
 } from "./media-processing/prepare.js";
@@ -4901,6 +4911,189 @@ const server = createServer(
 
     if (
       request.method === "GET" &&
+      requestUrl.pathname === "/api/publish/deployment-target"
+    ) {
+      try {
+        const publishRoot = await resolvePublishRoot();
+        sendJson(
+          response,
+          200,
+          await buildPublishedMediaDeploymentTargetStatus(
+            publishRoot,
+            process.env,
+            requestUrl.searchParams.get("profile") ?? undefined,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown deployment-target error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/publish/deployment-sync-plan"
+    ) {
+      try {
+        const publishRoot = await resolvePublishRoot();
+        sendJson(
+          response,
+          200,
+          await buildPublishedMediaDeploymentSyncPlan(
+            publishRoot,
+            process.env,
+            requestUrl.searchParams.get("profile") ?? undefined,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown deployment-sync-plan error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/publish/deployment-sandbox-execute"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+        if (typeof body !== "object" || body === null) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const planFingerprint =
+          "planFingerprint" in body &&
+          typeof body.planFingerprint === "string"
+            ? body.planFingerprint
+            : "";
+        if (!planFingerprint) {
+          sendJson(response, 400, {
+            error: "planFingerprint is required",
+          });
+          return;
+        }
+        const allowPendingLibraryChanges =
+          "allowPendingLibraryChanges" in body &&
+          body.allowPendingLibraryChanges === true;
+
+        const [mediaRoot, publishRoot] =
+          await Promise.all([
+            resolveMediaRoot(),
+            resolvePublishRoot(),
+          ]);
+        const fleet = await buildPublishFleetSummary(
+          mediaRoot,
+          publishRoot,
+        );
+        if (
+          fleet.summary.updateAvailableCount > 0 &&
+          !allowPendingLibraryChanges
+        ) {
+          sendJson(response, 409, {
+            error:
+              `${fleet.summary.updateAvailableCount} published ${fleet.summary.updateAvailableCount === 1 ? "release has" : "releases have"} pending Library changes. Update the public package before deployment, or explicitly allow deployment of the older public snapshot.`,
+          });
+          return;
+        }
+
+        const status =
+          await buildPublishedMediaDeploymentTargetStatus(
+            publishRoot,
+            process.env,
+            "local-sandbox",
+          );
+        if (!status.target || status.target.kind !== "local") {
+          sendJson(response, 409, {
+            error:
+              "Browser deployment is restricted to the local-sandbox profile with a local filesystem target. Production and SSH deployment remain CLI-only.",
+          });
+          return;
+        }
+
+        sendJson(
+          response,
+          200,
+          await executePublishedMediaDeployment(
+            publishRoot,
+            {
+              confirmation: status.deployConfirmation,
+              planFingerprint,
+              profileName: "local-sandbox",
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown local sandbox deployment error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/publish/deployment-sandbox-rollback"
+    ) {
+      try {
+        const publishRoot = await resolvePublishRoot();
+        const status =
+          await buildPublishedMediaDeploymentTargetStatus(
+            publishRoot,
+            process.env,
+            "local-sandbox",
+          );
+        if (!status.target || status.target.kind !== "local") {
+          sendJson(response, 409, {
+            error:
+              "Browser rollback is restricted to the local-sandbox profile with a local filesystem target. Production and SSH rollback remain CLI-only.",
+          });
+          return;
+        }
+
+        sendJson(
+          response,
+          200,
+          await rollbackPublishedMediaDeployment(
+            publishRoot,
+            {
+              confirmation: status.rollbackConfirmation,
+              profileName: "local-sandbox",
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown local sandbox rollback error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
       requestUrl.pathname === "/api/publish/plan"
     ) {
       try {
@@ -4935,6 +5128,42 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown publish-plan error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/publish/unpublish-plan"
+    ) {
+      try {
+        const releaseId =
+          requestUrl.searchParams.get("release");
+
+        if (!releaseId) {
+          sendJson(response, 400, {
+            error: "Missing release query parameter",
+          });
+          return;
+        }
+
+        const publishRoot = await resolvePublishRoot();
+        sendJson(
+          response,
+          200,
+          await buildPublicReleaseUnpublishPlan(
+            publishRoot,
+            releaseId,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown unpublish-plan error",
         });
       }
 
@@ -5508,6 +5737,84 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown media-preparation error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/publish/unpublish"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : "";
+        const planFingerprint =
+          "planFingerprint" in body &&
+          typeof body.planFingerprint === "string"
+            ? body.planFingerprint
+            : "";
+        const planGeneratedAt =
+          "planGeneratedAt" in body &&
+          typeof body.planGeneratedAt === "string"
+            ? body.planGeneratedAt
+            : "";
+        const confirmation =
+          "confirmation" in body &&
+          typeof body.confirmation === "string"
+            ? body.confirmation
+            : "";
+
+        if (
+          !releaseId ||
+          !planFingerprint ||
+          !planGeneratedAt ||
+          !confirmation
+        ) {
+          sendJson(response, 400, {
+            error:
+              "releaseId, planFingerprint, planGeneratedAt, and confirmation are required",
+          });
+          return;
+        }
+
+        const publishRoot = await resolvePublishRoot();
+        sendJson(
+          response,
+          200,
+          await unpublishPublicRelease(
+            publishRoot,
+            releaseId,
+            {
+              expectedPlanFingerprint:
+                planFingerprint,
+              planGeneratedAt,
+              confirmation,
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown public unpublish error",
         });
       }
 

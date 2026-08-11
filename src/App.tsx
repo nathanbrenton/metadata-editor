@@ -749,10 +749,61 @@ type PublishPackageReceipt = {
   completedAt: string;
 };
 
+type PublicReleaseUnpublishPlan = {
+  schema: {
+    name: "metadata-editor-public-release-unpublish-plan";
+    version: 1;
+  };
+  releaseId: string;
+  generatedAt: string;
+  readOnly: true;
+  writesEnabled: false;
+  confirmation: "UNPUBLISH_PUBLIC_RELEASE";
+  destinationReleaseRelativePath: string;
+  catalogEntry: {
+    releaseId: string;
+    title?: string;
+    primaryArtist?: string;
+    href: string;
+    destinationReleaseRelativePath: string;
+    releaseDirectoryExists: boolean;
+  } | null;
+  publication: {
+    publishedAt?: string;
+    sourcePlanFingerprint?: string;
+    sourceContentFingerprint?: string;
+  };
+  publicFiles: {
+    fileCount: number;
+    totalBytes: number;
+    treeFingerprint: string;
+  };
+  deploymentManifestWillNeedRefresh: boolean;
+  status: "ready" | "blocked";
+  issues: Array<{
+    code: string;
+    severity: "warning" | "blocked";
+    relativePath: string;
+    message: string;
+  }>;
+  planFingerprint: string;
+};
+
+type PublicReleaseUnpublishReceipt = {
+  releaseId: string;
+  operationId: string;
+  destinationRelativePath: string;
+  mode: "unpublish";
+  removedFileCount: number;
+  removedBytes: number;
+  completedAt: string;
+  deploymentManifestRefreshRequired: true;
+};
+
 type PublishOperationSummary = {
   operationId: string;
   releaseId: string;
-  mode: "build" | "update";
+  mode: "build" | "update" | "unpublish";
   state:
     | "running"
     | "interrupted"
@@ -833,10 +884,12 @@ type PublishFleetRelease = {
   releaseId: string;
   releaseTitle?: string;
   primaryArtistName?: string;
+  libraryPresent: boolean;
   publicationState:
     | "not-published"
     | "up-to-date"
-    | "update-available";
+    | "update-available"
+    | "published-only";
   planStatus: "ready" | "warning" | "blocked";
   blockerCount: number;
   warningCount: number;
@@ -852,14 +905,120 @@ type PublishFleetSummary = {
   releases: PublishFleetRelease[];
   summary: {
     releaseCount: number;
+    libraryReleaseCount: number;
     notPublishedCount: number;
     currentCount: number;
     updateAvailableCount: number;
+    publishedOnlyCount: number;
+    publicCatalogCount: number;
     blockedCount: number;
     warningCount: number;
     needsPreparationCount: number;
   };
   deployment: PublishedMediaDeploymentAudit;
+};
+
+type PublishedMediaDeploymentProfile = {
+  name: "local-sandbox" | "production" | "custom";
+  label: string;
+  environment: "local" | "production" | "custom";
+  active: boolean;
+  configured: boolean;
+  targetSource:
+    | "default-local-sandbox"
+    | "profile-environment"
+    | "explicit-override"
+    | "unconfigured";
+  configuredTarget?: string;
+  description: string;
+};
+
+type PublishedMediaDeploymentTarget = {
+  kind: "local" | "ssh";
+  configuredValue: string;
+  display: string;
+  destinationPath: string;
+  host?: string;
+  sshPort?: number;
+};
+
+type PublishedMediaDeploymentOperationReceipt = {
+  operationId: string;
+  profileName?: PublishedMediaDeploymentProfile["name"];
+  state: "running" | "completed" | "failed" | "rolled-back";
+  startedAt: string;
+  completedAt?: string;
+  rolledBackAt?: string;
+  target: PublishedMediaDeploymentTarget;
+  sourceContentFingerprint: string;
+  previousContentFingerprint?: string;
+  planFingerprint: string;
+  backupPath: string;
+  incomingPath: string;
+  summary: {
+    addCount: number;
+    updateCount: number;
+    removeCount: number;
+    metadataCount: number;
+    unknownCount: number;
+    changeCount: number;
+  };
+  error?: string;
+};
+
+type PublishedMediaDeploymentTargetStatus = {
+  generatedAt: string;
+  configured: boolean;
+  profile: PublishedMediaDeploymentProfile;
+  profiles: PublishedMediaDeploymentProfile[];
+  architecture: {
+    frontendSource: string;
+    frontendServerRoot: string;
+    publicMediaServerRoot: string;
+    publicMediaUrlPrefix: string;
+    localPublishedMediaRole: string;
+    frontendAndMediaIndependent: boolean;
+  };
+  target?: PublishedMediaDeploymentTarget;
+  stateRoot: string;
+  deployConfirmation: string;
+  rollbackConfirmation: string;
+  deployCommand: string;
+  rollbackCommand: string;
+  latestOperation?: PublishedMediaDeploymentOperationReceipt;
+};
+
+type PublishedMediaDeploymentSyncChange = {
+  action: "add" | "update" | "remove" | "metadata" | "unknown";
+  path: string;
+  itemized: string;
+};
+
+type PublishedMediaDeploymentSyncPlan = {
+  generatedAt: string;
+  profile: PublishedMediaDeploymentProfile;
+  status: "current" | "changes";
+  sourceRoot: string;
+  sourceContentFingerprint: string;
+  sourceFileCount: number;
+  sourceTotalBytes: number;
+  target: PublishedMediaDeploymentTarget;
+  targetManifest: {
+    exists: boolean;
+    contentFingerprint?: string;
+    generatedAt?: string;
+  };
+  changes: PublishedMediaDeploymentSyncChange[];
+  summary: {
+    addCount: number;
+    updateCount: number;
+    removeCount: number;
+    metadataCount: number;
+    unknownCount: number;
+    changeCount: number;
+  };
+  planFingerprint: string;
+  confirmation: string;
 };
 
 type InferredValue<T> = {
@@ -2370,9 +2529,6 @@ export function App() {
               error={error}
               onRefresh={() =>
                 void refreshLibrary(true)
-              }
-              onOpenWorkflowHelp={
-                openWorkflowHelp
               }
               onNotify={notify}
               technicalAudit={mediaTechnicalAudit}
@@ -5572,15 +5728,33 @@ function publishOperationBadge(
   }
 
   if (operation.state === "interrupted") {
-    return { label: "Interrupted", tone: "missing" };
+    return {
+      label:
+        operation.mode === "unpublish"
+          ? "Interrupted unpublish"
+          : "Interrupted",
+      tone: "missing",
+    };
   }
 
   if (operation.state === "failed") {
-    return { label: "Publish failed", tone: "missing" };
+    return {
+      label:
+        operation.mode === "unpublish"
+          ? "Unpublish failed"
+          : "Publish failed",
+      tone: "missing",
+    };
   }
 
   if (operation.state === "running") {
-    return { label: "Publishing", tone: "preview" };
+    return {
+      label:
+        operation.mode === "unpublish"
+          ? "Unpublishing"
+          : "Publishing",
+      tone: "preview",
+    };
   }
 
   if (operation.state === "recovered") {
@@ -5612,7 +5786,6 @@ function PublishWorkspace({
   loading,
   error,
   onRefresh,
-  onOpenWorkflowHelp,
   onNotify,
   technicalAudit,
   technicalByRelease,
@@ -5622,7 +5795,6 @@ function PublishWorkspace({
   loading: boolean;
   error: string | null;
   onRefresh: () => void;
-  onOpenWorkflowHelp: () => void;
   onNotify: (
     message: string,
     tone?: ToastMessage["tone"],
@@ -5645,6 +5817,8 @@ function PublishWorkspace({
     useState<MediaPreparationProgress | null>(null);
   const [publishLoading, setPublishLoading] =
     useState(false);
+  const [unpublishLoadingReleaseId, setUnpublishLoadingReleaseId] =
+    useState<string | null>(null);
   const [publishOperations, setPublishOperations] =
     useState<PublishOperationHistory | null>(null);
   const [publishOperationsLoading, setPublishOperationsLoading] =
@@ -5665,12 +5839,34 @@ function PublishWorkspace({
     useState<string | null>(null);
   const [deploymentManifestLoading, setDeploymentManifestLoading] =
     useState(false);
+  const [deploymentTargetStatus, setDeploymentTargetStatus] =
+    useState<PublishedMediaDeploymentTargetStatus | null>(null);
+  const [selectedDeploymentProfile, setSelectedDeploymentProfile] =
+    useState<PublishedMediaDeploymentProfile["name"] | null>(null);
+  const [deploymentTargetLoading, setDeploymentTargetLoading] =
+    useState(false);
+  const [deploymentSyncPlan, setDeploymentSyncPlan] =
+    useState<PublishedMediaDeploymentSyncPlan | null>(null);
+  const [deploymentSyncPlanLoading, setDeploymentSyncPlanLoading] =
+    useState(false);
+  const [deploymentSyncError, setDeploymentSyncError] =
+    useState<string | null>(null);
+  const [deploymentSandboxAction, setDeploymentSandboxAction] =
+    useState<"deploy" | "rollback" | null>(null);
+  const [allowPendingLibraryDeployment, setAllowPendingLibraryDeployment] =
+    useState(false);
   const [sortMode, setSortMode] =
     useState<LibraryReleaseSortMode>("date-desc");
   const sortedReleases = useMemo(
     () => sortLibraryReleases(releases, sortMode),
     [releases, sortMode],
   );
+
+  useEffect(() => {
+    if ((publishFleet?.summary.updateAvailableCount ?? 0) === 0) {
+      setAllowPendingLibraryDeployment(false);
+    }
+  }, [publishFleet?.summary.updateAvailableCount]);
 
   const loadPublishFleet = useCallback(async () => {
     setPublishFleetLoading(true);
@@ -5741,6 +5937,246 @@ function PublishWorkspace({
     }
   }, [loadPublishFleet, onNotify]);
 
+  const loadDeploymentTargetStatus = useCallback(async (
+    profileName?: PublishedMediaDeploymentProfile["name"],
+  ) => {
+    setDeploymentTargetLoading(true);
+    setDeploymentSyncError(null);
+
+    try {
+      const profileQuery = profileName
+        ? `?profile=${encodeURIComponent(profileName)}`
+        : "";
+      const response = await fetch(
+        `/api/publish/deployment-target${profileQuery}`,
+      );
+      const payload = await response.json() as
+        | PublishedMediaDeploymentTargetStatus
+        | { error?: string };
+
+      if (!response.ok || !("configured" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to load the deployment target.",
+        );
+      }
+
+      setDeploymentTargetStatus(payload);
+      setSelectedDeploymentProfile(payload.profile.name);
+    } catch (targetError) {
+      setDeploymentSyncError(
+        targetError instanceof Error
+          ? targetError.message
+          : "Unable to load the deployment target.",
+      );
+    } finally {
+      setDeploymentTargetLoading(false);
+    }
+  }, []);
+
+  const loadDeploymentSyncPlan = useCallback(async () => {
+    setDeploymentSyncPlanLoading(true);
+    setDeploymentSyncError(null);
+
+    try {
+      const activeProfile =
+        selectedDeploymentProfile ??
+        deploymentTargetStatus?.profile.name;
+      const profileQuery = activeProfile
+        ? `?profile=${encodeURIComponent(activeProfile)}`
+        : "";
+      const response = await fetch(
+        `/api/publish/deployment-sync-plan${profileQuery}`,
+        { method: "POST" },
+      );
+      const payload = await response.json() as
+        | PublishedMediaDeploymentSyncPlan
+        | { error?: string };
+
+      if (!response.ok || !("planFingerprint" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to compare the deployment target.",
+        );
+      }
+
+      setDeploymentSyncPlan(payload);
+      await loadDeploymentTargetStatus(
+        payload.profile.name,
+      );
+    } catch (syncError) {
+      setDeploymentSyncPlan(null);
+      setDeploymentSyncError(
+        syncError instanceof Error
+          ? syncError.message
+          : "Unable to compare the deployment target.",
+      );
+    } finally {
+      setDeploymentSyncPlanLoading(false);
+    }
+  }, [
+    deploymentTargetStatus?.profile.name,
+    loadDeploymentTargetStatus,
+    selectedDeploymentProfile,
+  ]);
+
+  const selectDeploymentProfile = useCallback(async (
+    profileName: PublishedMediaDeploymentProfile["name"],
+  ) => {
+    setSelectedDeploymentProfile(profileName);
+    setDeploymentSyncPlan(null);
+    await loadDeploymentTargetStatus(profileName);
+  }, [loadDeploymentTargetStatus]);
+
+  const deployLocalSandbox = useCallback(async () => {
+    if (
+      deploymentTargetStatus?.profile.name !== "local-sandbox" ||
+      deploymentTargetStatus.target?.kind !== "local" ||
+      deploymentSyncPlan?.status !== "changes"
+    ) {
+      return;
+    }
+
+    const pendingLibraryChanges =
+      publishFleet?.summary.updateAvailableCount ?? 0;
+    if (
+      pendingLibraryChanges > 0 &&
+      !allowPendingLibraryDeployment
+    ) {
+      setDeploymentSyncError(
+        `${pendingLibraryChanges} published ${pendingLibraryChanges === 1 ? "release has" : "releases have"} pending Library changes. Update the public package first, or explicitly allow deployment of the older public snapshot.`,
+      );
+      return;
+    }
+
+    const pendingNotice = pendingLibraryChanges > 0
+      ? `\n\nWARNING: ${pendingLibraryChanges} published ${pendingLibraryChanges === 1 ? "release has" : "releases have"} newer Library changes that are not included in this public snapshot.`
+      : "";
+    const reviewed = window.confirm(
+      `Deploy the reviewed local sandbox plan?\n\n${deploymentSyncPlan.summary.changeCount} changes · +${deploymentSyncPlan.summary.addCount} add · ${deploymentSyncPlan.summary.updateCount} update · −${deploymentSyncPlan.summary.removeCount} remove\n\nTarget: ${deploymentTargetStatus.target.destinationPath}${pendingNotice}\n\nThis writes only to the local deployment sandbox.`,
+    );
+    if (!reviewed) {
+      return;
+    }
+
+    setDeploymentSandboxAction("deploy");
+    setDeploymentSyncError(null);
+
+    try {
+      const response = await fetch(
+        "/api/publish/deployment-sandbox-execute",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            planFingerprint: deploymentSyncPlan.planFingerprint,
+            allowPendingLibraryChanges: allowPendingLibraryDeployment,
+          }),
+        },
+      );
+      const payload = await response.json() as
+        | PublishedMediaDeploymentOperationReceipt
+        | { error?: string };
+
+      if (!response.ok || !("operationId" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to deploy the local sandbox.",
+        );
+      }
+
+      setDeploymentSyncPlan(null);
+      await loadDeploymentTargetStatus("local-sandbox");
+      await loadDeploymentSyncPlan();
+      onNotify(
+        `Local sandbox deployed · ${payload.summary.changeCount} changes verified.`,
+        "success",
+      );
+    } catch (deploymentError) {
+      setDeploymentSyncError(
+        deploymentError instanceof Error
+          ? deploymentError.message
+          : "Unable to deploy the local sandbox.",
+      );
+    } finally {
+      setDeploymentSandboxAction(null);
+    }
+  }, [
+    allowPendingLibraryDeployment,
+    deploymentSyncPlan,
+    deploymentTargetStatus,
+    loadDeploymentSyncPlan,
+    loadDeploymentTargetStatus,
+    onNotify,
+    publishFleet?.summary.updateAvailableCount,
+  ]);
+
+  const rollbackLocalSandbox = useCallback(async () => {
+    const latest = deploymentTargetStatus?.latestOperation;
+    if (
+      deploymentTargetStatus?.profile.name !== "local-sandbox" ||
+      deploymentTargetStatus.target?.kind !== "local" ||
+      latest?.state !== "completed" ||
+      !latest.previousContentFingerprint
+    ) {
+      return;
+    }
+
+    const reviewed = window.confirm(
+      `Roll back the local sandbox to the previous verified snapshot?\n\nCurrent deployment: ${latest.sourceContentFingerprint.slice(0, 12)}…\nPrevious snapshot: ${latest.previousContentFingerprint.slice(0, 12)}…\n\nTarget: ${deploymentTargetStatus.target.destinationPath}\n\nThis affects only the local deployment sandbox.`,
+    );
+    if (!reviewed) {
+      return;
+    }
+
+    setDeploymentSandboxAction("rollback");
+    setDeploymentSyncError(null);
+
+    try {
+      const response = await fetch(
+        "/api/publish/deployment-sandbox-rollback",
+        { method: "POST" },
+      );
+      const payload = await response.json() as
+        | PublishedMediaDeploymentOperationReceipt
+        | { error?: string };
+
+      if (!response.ok || !("operationId" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to roll back the local sandbox.",
+        );
+      }
+
+      setDeploymentSyncPlan(null);
+      await loadDeploymentTargetStatus("local-sandbox");
+      await loadDeploymentSyncPlan();
+      onNotify(
+        "Local sandbox rolled back to the previous verified snapshot.",
+        "success",
+      );
+    } catch (rollbackError) {
+      setDeploymentSyncError(
+        rollbackError instanceof Error
+          ? rollbackError.message
+          : "Unable to roll back the local sandbox.",
+      );
+    } finally {
+      setDeploymentSandboxAction(null);
+    }
+  }, [
+    deploymentTargetStatus,
+    loadDeploymentSyncPlan,
+    loadDeploymentTargetStatus,
+    onNotify,
+  ]);
+
   const loadPublishOperations = useCallback(async () => {
     setPublishOperationsLoading(true);
     setPublishOperationsError(null);
@@ -5780,6 +6216,10 @@ function PublishWorkspace({
   useEffect(() => {
     void loadPublishFleet();
   }, [loadPublishFleet, releases]);
+
+  useEffect(() => {
+    void loadDeploymentTargetStatus();
+  }, [loadDeploymentTargetStatus]);
 
   const loadPublishPlan = useCallback(async (
     releaseId: string,
@@ -6231,9 +6671,141 @@ function PublishWorkspace({
     onRefresh,
   ]);
 
+  const unpublishRelease = useCallback(async (
+    releaseId: string,
+    displayTitle?: string,
+  ) => {
+    setUnpublishLoadingReleaseId(releaseId);
+    setPlanError(null);
+
+    try {
+      const planResponse = await fetch(
+        `/api/publish/unpublish-plan?release=${encodeURIComponent(releaseId)}`,
+      );
+      const planPayload = await planResponse.json() as
+        | PublicReleaseUnpublishPlan
+        | { error?: string };
+
+      if (
+        !planResponse.ok ||
+        !("planFingerprint" in planPayload)
+      ) {
+        throw new Error(
+          "error" in planPayload && planPayload.error
+            ? planPayload.error
+            : "Unable to build the public unpublish plan.",
+        );
+      }
+
+      if (planPayload.status !== "ready") {
+        throw new Error(
+          planPayload.issues.length > 0
+            ? planPayload.issues
+                .map((issue) => issue.message)
+                .join(" ")
+            : "Public release is not safe to unpublish.",
+        );
+      }
+
+      const label =
+        displayTitle ??
+        planPayload.catalogEntry?.title ??
+        releaseId;
+      const reviewed = window.confirm(
+        `Unpublish “${label}” from the public catalog?\n\n` +
+        `${planPayload.publicFiles.fileCount} public files · ${formatByteSize(planPayload.publicFiles.totalBytes)}\n` +
+        `Public path: ${planPayload.destinationReleaseRelativePath}\n\n` +
+        "This removes only the sanitized public package and catalog membership. " +
+        "The canonical Library release and masters are not deleted.\n\n" +
+        "Afterward, refresh the deployment manifest and deploy the resulting removal to sandbox/production.",
+      );
+
+      if (!reviewed) {
+        return;
+      }
+
+      const response = await fetch(
+        "/api/publish/unpublish",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId,
+            planFingerprint:
+              planPayload.planFingerprint,
+            planGeneratedAt:
+              planPayload.generatedAt,
+            confirmation:
+              planPayload.confirmation,
+          }),
+        },
+      );
+      const payload = await response.json() as
+        | PublicReleaseUnpublishReceipt
+        | { error?: string };
+
+      if (
+        !response.ok ||
+        !("operationId" in payload)
+      ) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to unpublish the public release.",
+        );
+      }
+
+      if (selectedPlan?.releaseId === releaseId) {
+        setSelectedPlan(null);
+      }
+      setDeploymentSyncPlan(null);
+      setAllowPendingLibraryDeployment(false);
+      await Promise.resolve(onRefresh());
+      await Promise.all([
+        loadPublishFleet(),
+        loadPublishOperations(),
+        loadDeploymentTargetStatus(
+          selectedDeploymentProfile ?? undefined,
+        ),
+      ]);
+
+      onNotify(
+        `Unpublished ${label} · ${payload.removedFileCount} public files removed. Refresh the deployment manifest before deployment.`,
+        "success",
+      );
+    } catch (unpublishError) {
+      setPlanError(
+        unpublishError instanceof Error
+          ? unpublishError.message
+          : "Unable to unpublish the public release.",
+      );
+    } finally {
+      setUnpublishLoadingReleaseId(null);
+    }
+  }, [
+    loadDeploymentTargetStatus,
+    loadPublishFleet,
+    loadPublishOperations,
+    onNotify,
+    onRefresh,
+    selectedDeploymentProfile,
+    selectedPlan?.releaseId,
+  ]);
+
   const deploymentAudit = publishFleet?.deployment ?? null;
+  const pendingLibraryChangesCount =
+    publishFleet?.summary.updateAvailableCount ?? 0;
+  const hasPendingLibraryChanges =
+    pendingLibraryChangesCount > 0;
   const deploymentBadge = deploymentAudit?.deployable
-    ? { label: "Deployment ready", tone: "success" }
+    ? hasPendingLibraryChanges
+      ? {
+          label: "Snapshot valid · Library updates pending",
+          tone: "warning",
+        }
+      : { label: "Deployment ready", tone: "success" }
     : deploymentAudit?.status === "blocked"
       ? { label: "Deployment blocked", tone: "missing" }
       : deploymentAudit?.status === "empty"
@@ -6263,12 +6835,6 @@ function PublishWorkspace({
             >
               Read-only preflight
             </span>
-            <button
-              type="button"
-              onClick={onOpenWorkflowHelp}
-            >
-              Publishing guide
-            </button>
           </div>
           <div
             className="publish-header-storage-boundary"
@@ -6318,6 +6884,12 @@ function PublishWorkspace({
       {publishFleetError && (
         <p className="message error">
           {publishFleetError}
+        </p>
+      )}
+
+      {deploymentSyncError && (
+        <p className="message error">
+          {deploymentSyncError}
         </p>
       )}
 
@@ -6376,8 +6948,7 @@ function PublishWorkspace({
                 prepareLoading ||
                 batchPrepareLoading ||
                 !deploymentAudit ||
-                deploymentAudit.summary.blockedCount > 0 ||
-                deploymentAudit.summary.releaseDirectoryCount === 0
+                deploymentAudit.summary.blockedCount > 0
               }
               onClick={() => void refreshDeploymentManifest()}
               title="Hash the verified public catalog and every manifest-controlled public resource into deployment-manifest.json. This writes only inside published-media and does not deploy to a server."
@@ -6396,7 +6967,15 @@ function PublishWorkspace({
             <div className="publish-fleet-summary-grid">
               <div>
                 <span>Library releases</span>
-                <strong>{publishFleet.summary.releaseCount}</strong>
+                <strong>{publishFleet.summary.libraryReleaseCount}</strong>
+              </div>
+              <div>
+                <span>Public catalog</span>
+                <strong>{publishFleet.summary.publicCatalogCount}</strong>
+              </div>
+              <div>
+                <span>Published-only</span>
+                <strong>{publishFleet.summary.publishedOnlyCount}</strong>
               </div>
               <div>
                 <span>Published · current</span>
@@ -6437,6 +7016,353 @@ function PublishWorkspace({
                     ? "stale"
                     : "missing"}
               </span>
+            </div>
+
+            <div
+              className={`publish-library-freshness-gate ${hasPendingLibraryChanges ? "warning" : "current"}`}
+              role={hasPendingLibraryChanges ? "alert" : "status"}
+            >
+              <div>
+                <span>Public snapshot integrity</span>
+                <strong>
+                  {deploymentAudit?.deployable ? "Ready" : "Needs review"}
+                </strong>
+              </div>
+              <div>
+                <span>Library changes pending</span>
+                <strong>{pendingLibraryChangesCount}</strong>
+              </div>
+              <div>
+                <span>Deployment manifest</span>
+                <strong>
+                  {deploymentAudit?.deploymentManifest.current
+                    ? "Current"
+                    : deploymentAudit?.deploymentManifest.exists
+                      ? "Stale"
+                      : "Missing"}
+                </strong>
+              </div>
+              <p>
+                {hasPendingLibraryChanges
+                  ? `${pendingLibraryChangesCount} published ${pendingLibraryChangesCount === 1 ? "release has" : "releases have"} Library changes that are not in the public snapshot yet. Run Update public package for ${pendingLibraryChangesCount === 1 ? "that release" : "those releases"} before deploying the newest Library state.`
+                  : "No published releases have pending Library changes. Not-published Library releases remain intentionally outside the deployment snapshot."}
+              </p>
+            </div>
+
+            {publishFleet.summary.publishedOnlyCount > 0 && (
+              <aside
+                className="publish-public-only-membership"
+                aria-label="Published releases missing from the Library"
+              >
+                <div className="publish-public-only-membership-heading">
+                  <div>
+                    <span className="publish-deployment-kicker">Public catalog membership</span>
+                    <strong>
+                      {publishFleet.summary.publishedOnlyCount} published-only {publishFleet.summary.publishedOnlyCount === 1 ? "release" : "releases"}
+                    </strong>
+                  </div>
+                  <span className="badge warning">Review membership</span>
+                </div>
+                <p>
+                  These releases are still public but are not present in the current Library scan. Metadata Editor will never remove them automatically. Review each one and explicitly unpublish it if it should leave the public catalog.
+                </p>
+                <div className="publish-public-only-membership-list">
+                  {publishFleet.releases
+                    .filter((release) => !release.libraryPresent)
+                    .map((release) => (
+                      <div key={release.releaseId}>
+                        <span>
+                          <strong>{release.releaseTitle ?? release.releaseId}</strong>
+                          {release.primaryArtistName && (
+                            <small>{release.primaryArtistName}</small>
+                          )}
+                          <code>{release.releaseId}</code>
+                        </span>
+                        <button
+                          type="button"
+                          className="danger-button"
+                          disabled={
+                            unpublishLoadingReleaseId !== null ||
+                            publishLoading ||
+                            prepareLoading ||
+                            batchPrepareLoading
+                          }
+                          onClick={() =>
+                            void unpublishRelease(
+                              release.releaseId,
+                              release.releaseTitle,
+                            )
+                          }
+                        >
+                          {unpublishLoadingReleaseId === release.releaseId
+                            ? "Unpublishing…"
+                            : "Review unpublish"}
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              </aside>
+            )}
+
+            <div className="publish-host-boundary">
+              <div className="publish-host-boundary-heading">
+                <div>
+                  <span className="publish-deployment-kicker">Host boundary · Deployment environment</span>
+                  <strong>{deploymentTargetStatus?.profile.label ?? "Deployment target"}</strong>
+                </div>
+                <div className="publish-host-boundary-actions">
+                  <span
+                    className={`badge ${
+                      !deploymentTargetStatus?.configured
+                        ? "preview"
+                        : deploymentSyncPlan?.status === "current"
+                          ? "success"
+                          : deploymentSyncPlan?.status === "changes"
+                            ? "warning"
+                            : "preview"
+                    }`}
+                  >
+                    {!deploymentTargetStatus?.configured
+                      ? "Not configured"
+                      : deploymentSyncPlan?.status === "current"
+                        ? "Deployment current"
+                        : deploymentSyncPlan?.status === "changes"
+                          ? "Remote differs"
+                          : "Host not checked"}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={
+                      deploymentTargetLoading ||
+                      deploymentSyncPlanLoading ||
+                      !deploymentTargetStatus?.configured ||
+                      !deploymentAudit?.deploymentManifest.current
+                    }
+                    onClick={() => void loadDeploymentSyncPlan()}
+                    title="Run a checksum-based rsync dry-run against the configured local or SSH target. This comparison is read-only."
+                  >
+                    {deploymentSyncPlanLoading
+                      ? "Checking host…"
+                      : "Check host"}
+                  </button>
+                </div>
+              </div>
+
+              {deploymentTargetStatus && (
+                <div
+                  className="publish-deployment-profile-selector"
+                  aria-label="Published media deployment profiles"
+                >
+                  {deploymentTargetStatus.profiles
+                    .filter((profile) => profile.name !== "custom" || profile.configured)
+                    .map((profile) => (
+                      <button
+                        key={profile.name}
+                        type="button"
+                        className={
+                          selectedDeploymentProfile === profile.name
+                            ? "active"
+                            : ""
+                        }
+                        aria-pressed={selectedDeploymentProfile === profile.name}
+                        disabled={deploymentTargetLoading || deploymentSyncPlanLoading}
+                        onClick={() => void selectDeploymentProfile(profile.name)}
+                        title={profile.description}
+                      >
+                        <strong>{profile.label}</strong>
+                        <span>
+                          {profile.configured
+                            ? profile.environment === "production"
+                              ? "Configured"
+                              : "Available"
+                            : "Not configured"}
+                        </span>
+                      </button>
+                    ))}
+                </div>
+              )}
+
+              {deploymentTargetStatus?.profile && (
+                <div className="publish-deployment-profile-context">
+                  <span>{deploymentTargetStatus.profile.description}</span>
+                  {deploymentTargetStatus.profile.name === "local-sandbox" && (
+                    <code>~/Desktop/websites/_deploy/hiplingo.com/published-media</code>
+                  )}
+                  {deploymentTargetStatus.profile.name === "production" && (
+                    <code>/var/www/hiplingo.com/published-media</code>
+                  )}
+                </div>
+              )}
+
+              {deploymentTargetStatus?.configured && deploymentTargetStatus.target ? (
+                <>
+                  <div className="publish-host-boundary-target">
+                    <span>{deploymentTargetStatus.target.kind === "ssh" ? "SSH target" : "Local target"}</span>
+                    <code title={deploymentTargetStatus.target.display}>
+                      {deploymentTargetStatus.target.display}
+                    </code>
+                  </div>
+
+                  {deploymentSyncPlan && (
+                    <div className="publish-host-sync-summary">
+                      <strong>
+                        {deploymentSyncPlan.status === "current"
+                          ? "The deployed target matches this verified snapshot."
+                          : `${deploymentSyncPlan.summary.changeCount} host changes planned`}
+                      </strong>
+                      {deploymentSyncPlan.status === "changes" && (
+                        <span>
+                          +{deploymentSyncPlan.summary.addCount} add · {deploymentSyncPlan.summary.updateCount} update · −{deploymentSyncPlan.summary.removeCount} remove
+                        </span>
+                      )}
+                      <span>
+                        Snapshot {deploymentSyncPlan.sourceContentFingerprint.slice(0, 12)}…
+                      </span>
+                    </div>
+                  )}
+
+                  {deploymentTargetStatus.profile.name === "local-sandbox" &&
+                    deploymentTargetStatus.target.kind === "local" && (
+                      <div className="publish-host-local-actions">
+                        <div>
+                          <strong>Local lifecycle</strong>
+                          <span>Plan, deploy, compare, and roll back entirely on this workstation.</span>
+                        </div>
+                        <div className="publish-host-local-action-controls">
+                          {deploymentSyncPlan?.status === "changes" &&
+                            hasPendingLibraryChanges && (
+                              <label className="publish-pending-library-deploy-override">
+                                <input
+                                  type="checkbox"
+                                  checked={allowPendingLibraryDeployment}
+                                  disabled={deploymentSandboxAction !== null}
+                                  onChange={(event) =>
+                                    setAllowPendingLibraryDeployment(event.target.checked)
+                                  }
+                                />
+                                <span>
+                                  Deploy the current public snapshot anyway; {pendingLibraryChangesCount} published {pendingLibraryChangesCount === 1 ? "release has" : "releases have"} newer Library changes.
+                                </span>
+                              </label>
+                            )}
+                          <div>
+                          {deploymentSyncPlan?.status === "changes" && (
+                            <button
+                              type="button"
+                              className="primary"
+                              disabled={
+                                deploymentSandboxAction !== null ||
+                                (hasPendingLibraryChanges && !allowPendingLibraryDeployment)
+                              }
+                              onClick={() => void deployLocalSandbox()}
+                              title="Deploy the reviewed plan only to the local Hiplingo deployment sandbox. Production and SSH writes are not exposed here."
+                            >
+                              {deploymentSandboxAction === "deploy"
+                                ? "Deploying sandbox…"
+                                : "Deploy to sandbox"}
+                            </button>
+                          )}
+                          {deploymentTargetStatus.latestOperation?.state === "completed" &&
+                            deploymentTargetStatus.latestOperation.previousContentFingerprint && (
+                              <button
+                                type="button"
+                                disabled={deploymentSandboxAction !== null}
+                                onClick={() => void rollbackLocalSandbox()}
+                                title="Restore the previous verified local-sandbox deployment recorded by metadata-editor."
+                              >
+                                {deploymentSandboxAction === "rollback"
+                                  ? "Rolling back…"
+                                  : "Rollback sandbox"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                  {deploymentSyncPlan?.status === "changes" && (
+                    <details className="publish-host-sync-plan">
+                      <summary>
+                        Reviewed host sync plan · {deploymentSyncPlan.summary.changeCount} changes
+                      </summary>
+                      <div className="publish-host-sync-command">
+                        <span>Guarded deploy command</span>
+                        <code>
+                          {deploymentTargetStatus?.deployCommand.replace(
+                            "<reviewed-fingerprint>",
+                            deploymentSyncPlan.planFingerprint,
+                          )}
+                        </code>
+                        {hasPendingLibraryChanges && (
+                          <small>
+                            CLI deployment is also blocked by default while published releases have pending Library changes. Add <code>--allow-pending-library-changes</code> only when intentionally deploying this older public snapshot.
+                          </small>
+                        )}
+                      </div>
+                      <ol>
+                        {deploymentSyncPlan.changes.slice(0, 40).map((change, index) => (
+                          <li key={`${change.action}-${change.path}-${index}`}>
+                            <span className={`badge ${change.action === "remove" ? "warning" : "preview"}`}>
+                              {change.action}
+                            </span>
+                            <code>{change.path}</code>
+                          </li>
+                        ))}
+                      </ol>
+                      {deploymentSyncPlan.changes.length > 40 && (
+                        <p>
+                          {deploymentSyncPlan.changes.length - 40} additional changes are available from npm run plan:published-media-deploy.
+                        </p>
+                      )}
+                    </details>
+                  )}
+
+                  {deploymentTargetStatus.latestOperation && (
+                    <div className="publish-host-last-operation">
+                      <span>Last deployment</span>
+                      <strong>{deploymentTargetStatus.latestOperation.state}</strong>
+                      <code>{deploymentTargetStatus.latestOperation.operationId}</code>
+                      {deploymentTargetStatus.latestOperation.previousContentFingerprint &&
+                        deploymentTargetStatus.latestOperation.state === "completed" && (
+                          <span>Rollback backup recorded</span>
+                        )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="publish-host-boundary-unconfigured">
+                  {deploymentTargetStatus?.profile.name === "production" ? (
+                    <>
+                      <span>The production host is intentionally optional. Local Library, Prepare, Publish, and deployment-sandbox work do not require SSH.</span>
+                      <code>PUBLISHED_MEDIA_PRODUCTION_TARGET=ssh:user@host:/var/www/hiplingo.com/published-media</code>
+                    </>
+                  ) : (
+                    <>
+                      <span>Configure an explicit deployment boundary before comparison or deployment.</span>
+                      <code>PUBLISHED_MEDIA_DEPLOY_TARGET=local:/absolute/public/media/path</code>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {deploymentTargetStatus?.architecture && (
+                <details className="publish-host-architecture">
+                  <summary>Hiplingo host boundary</summary>
+                  <div>
+                    <span>Frontend</span>
+                    <code>{deploymentTargetStatus.architecture.frontendServerRoot}</code>
+                  </div>
+                  <div>
+                    <span>Persistent public media</span>
+                    <code>{deploymentTargetStatus.architecture.publicMediaServerRoot}</code>
+                  </div>
+                  <div>
+                    <span>Public URL</span>
+                    <code>{deploymentTargetStatus.architecture.publicMediaUrlPrefix}</code>
+                  </div>
+                  <p>Frontend releases and published media are independent deployment lifecycles. Frontend rollback must not roll back or erase published media.</p>
+                </details>
+              )}
             </div>
 
             {deploymentAudit && deploymentAudit.issues.length > 0 && (
@@ -6736,6 +7662,7 @@ function PublishWorkspace({
               <thead>
                 <tr>
                   <th scope="col">Release</th>
+                  <th scope="col">Action</th>
                   <th scope="col">State</th>
                   <th scope="col">Phase</th>
                   <th scope="col">Started</th>
@@ -6755,6 +7682,13 @@ function PublishWorkspace({
                         {operation.operationId}
                       </code>
                     </th>
+                    <td>
+                      {operation.mode === "unpublish"
+                        ? "Unpublish"
+                        : operation.mode === "update"
+                          ? "Update"
+                          : "Publish"}
+                    </td>
                     <td>
                       <span className={`badge ${
                         operation.state === "completed"
@@ -6831,7 +7765,11 @@ function PublishWorkspace({
             )?.releaseTitle ?? selectedPlan.releaseId
           }`}
           variant="wide"
-          closeDisabled={prepareLoading || publishLoading}
+          closeDisabled={
+            prepareLoading ||
+            publishLoading ||
+            unpublishLoadingReleaseId !== null
+          }
           onClose={() => {
             setSelectedPlan(null);
             setPlanError(null);
@@ -7019,6 +7957,50 @@ function PublishWorkspace({
               )}
             </div>
           </section>
+
+          {selectedPlan.destinationReleaseExists && (
+            <section
+              className="publish-public-membership-action"
+              aria-label="Public catalog membership action"
+            >
+              <div>
+                <span className="eyebrow">Public catalog membership</span>
+                <strong>This release currently has a public package</strong>
+                <small>
+                  Unpublishing removes only the sanitized package from published-media and its catalog entry. The canonical Library release, masters, metadata, and private derivatives remain unchanged.
+                </small>
+              </div>
+              <button
+                type="button"
+                className="danger-button"
+                disabled={
+                  prepareLoading ||
+                  publishLoading ||
+                  unpublishLoadingReleaseId !== null ||
+                  Boolean(
+                    unresolvedPublishOperationForRelease(
+                      publishOperations,
+                      selectedPlan.releaseId,
+                    ),
+                  )
+                }
+                onClick={() =>
+                  void unpublishRelease(
+                    selectedPlan.releaseId,
+                    releases.find(
+                      (release) =>
+                        release.id === selectedPlan.releaseId,
+                    )?.releaseTitle,
+                  )
+                }
+                title="Build a read-only removal plan, review its public file count, then remove this release from published-media and catalog.json. Library content is never deleted."
+              >
+                {unpublishLoadingReleaseId === selectedPlan.releaseId
+                  ? "Unpublishing…"
+                  : "Review unpublish"}
+              </button>
+            </section>
+          )}
 
           <dl className="publish-plan-summary">
             <div>
@@ -8980,12 +9962,11 @@ const LIBRARY_RELEASE_VIEW_STORAGE_KEY =
   "metadata-editor.library-release-view";
 const LIBRARY_RELEASE_SORT_STORAGE_KEY =
   "metadata-editor.library-release-sort";
-const LIBRARY_TILE_SIZE_STORAGE_KEY =
-  "metadata-editor.library-tile-size-rem";
 
 const LIBRARY_TILE_SIZE_MIN_REM = 9;
 const LIBRARY_TILE_SIZE_MAX_REM = 24;
-const LIBRARY_TILE_SIZE_DEFAULT_REM = 14;
+const LIBRARY_TILE_SIZE_STEP_REM = 0.25;
+const LIBRARY_TILE_SIZE_DEFAULT_REM = 16;
 
 function readLibraryReleaseViewMode(): LibraryReleaseViewMode {
   if (typeof window === "undefined") {
@@ -9004,31 +9985,6 @@ function readLibraryReleaseViewMode(): LibraryReleaseViewMode {
       : "cards";
   } catch {
     return "cards";
-  }
-}
-
-function readLibraryTileSizeRem(): number {
-  if (typeof window === "undefined") {
-    return LIBRARY_TILE_SIZE_DEFAULT_REM;
-  }
-
-  try {
-    const stored = Number.parseFloat(
-      window.localStorage.getItem(
-        LIBRARY_TILE_SIZE_STORAGE_KEY,
-      ) ?? "",
-    );
-
-    if (!Number.isFinite(stored)) {
-      return LIBRARY_TILE_SIZE_DEFAULT_REM;
-    }
-
-    return Math.min(
-      LIBRARY_TILE_SIZE_MAX_REM,
-      Math.max(LIBRARY_TILE_SIZE_MIN_REM, stored),
-    );
-  } catch {
-    return LIBRARY_TILE_SIZE_DEFAULT_REM;
   }
 }
 
@@ -9192,9 +10148,7 @@ function LibraryReleaseBrowser({
       readLibraryReleaseSortMode,
     );
   const [tileSizeRem, setTileSizeRem] =
-    useState<number>(
-      readLibraryTileSizeRem,
-    );
+    useState<number>(LIBRARY_TILE_SIZE_DEFAULT_REM);
 
   const sortedReleases = useMemo(
     () => sortLibraryReleases(releases, sortMode),
@@ -9225,15 +10179,6 @@ function LibraryReleaseBrowser({
     );
 
     setTileSizeRem(clamped);
-
-    try {
-      window.localStorage.setItem(
-        LIBRARY_TILE_SIZE_STORAGE_KEY,
-        String(clamped),
-      );
-    } catch {
-      // Tile-size persistence is optional UI convenience.
-    }
   };
 
   const chooseViewMode = (
@@ -9291,7 +10236,7 @@ function LibraryReleaseBrowser({
                 type="range"
                 min={LIBRARY_TILE_SIZE_MIN_REM}
                 max={LIBRARY_TILE_SIZE_MAX_REM}
-                step={0.5}
+                step={LIBRARY_TILE_SIZE_STEP_REM}
                 value={tileSizeRem}
                 aria-label="Library tile size"
                 aria-valuetext={`${tileSizeRem} rem`}

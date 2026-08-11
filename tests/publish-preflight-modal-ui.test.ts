@@ -78,7 +78,10 @@ test("opens Publish preflight from the whole release row without an action colum
 test("renders Publish preflight in the reusable wide modal", () => {
   assert.match(appSource, /title=\{`Publish preflight ·/);
   assert.match(appSource, /variant="wide"/);
-  assert.match(appSource, /closeDisabled=\{prepareLoading \|\| publishLoading\}/);
+  assert.match(
+    appSource,
+    /closeDisabled=\{\s*prepareLoading \|\|\s*publishLoading \|\|\s*unpublishLoadingReleaseId !== null\s*\}/,
+  );
   assert.match(appSource, /publish-plan-panel publish-plan-modal/);
   assert.match(stylesSource, /metadata-field-modal--wide/);
 });

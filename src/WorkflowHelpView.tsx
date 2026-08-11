@@ -75,6 +75,26 @@ const quickQuestions = [
     answer:
       "npm run audit:file-spec reports extension/naming conformance. npm run audit:media-technical uses ffprobe to inventory observed technical characteristics plus per-release probe/consistency health. Both are read-only; technical health does not grade quality or change Publish gating.",
   },
+  {
+    question: "Where did the Publishing Guide button go?",
+    answer:
+      "Publishing guidance now lives here in Workflow & Help instead of taking permanent space in the Publish header. The Publish workspace remains action-focused; use this FAQ for the relationship between preflight, Update public package, deployment-manifest verification, host comparison, and deployment.",
+  },
+  {
+    question: "What if the Library changed after a release was published?",
+    answer:
+      "A published release with newer canonical Library inputs becomes Update available. Verify snapshot and Refresh deployment manifest only verify/hash the current published-media tree; they do not copy new Library changes into it. Run Update public package first. Deployment is blocked by default while published releases have pending Library changes; intentionally deploying the older public snapshot requires an explicit override. Not-published Library releases are intentionally excluded and do not block deployment.",
+  },
+  {
+    question: "How do I remove a release from the public catalog?",
+    answer:
+      "Use Publish → Review unpublish on an already-published release. The first step is a read-only plan that fingerprints the complete public release and catalog state. Confirmed unpublish removes only the sanitized public package and catalog membership; the canonical Library release and masters remain private and unchanged. Then refresh the deployment manifest, Check host, and deploy the reviewed removals to the sandbox or production target.",
+  },
+  {
+    question: "What does Published-only mean?",
+    answer:
+      "Published-only means a release is still present in the public catalog but is absent from the active Library scan. Metadata Editor never treats that mismatch as permission to delete public content. Review it explicitly and use Review unpublish only when you intend to withdraw it from the public snapshot.",
+  },
 ] as const;
 
 export function WorkflowHelpView({

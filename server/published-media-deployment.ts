@@ -965,12 +965,12 @@ export async function auditPublishedMediaDeployment(
   const blockedReleaseCount = releases.length - readyReleaseCount;
   const fileCount = candidateManifest?.snapshot.fileCount ?? 0;
   const totalBytes = candidateManifest?.snapshot.totalBytes ?? 0;
-  const empty =
-    releaseDirectoryNames.length === 0 &&
-    catalogEntries.length === 0;
-  const status: PublishedMediaDeploymentAudit["status"] = empty
-    ? "empty"
-    : blockedCount > 0
+  // A present, valid catalog with zero releases is an intentional empty
+  // public snapshot (for example after unpublishing the final release), not
+  // an uninitialized published-media root. It must remain manifestable and
+  // deployable so remote targets can receive an all-release removal.
+  const status: PublishedMediaDeploymentAudit["status"] =
+    blockedCount > 0
       ? "blocked"
       : warningCount > 0
         ? "warning"

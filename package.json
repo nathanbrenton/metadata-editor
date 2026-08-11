@@ -12,6 +12,8 @@
     "validate:release": "tsx scripts/validate-library.ts --release",
     "publish:plan": "tsx scripts/plan-publish.ts",
     "preflight:publish": "tsx scripts/plan-publish.ts --strict",
+    "plan:unpublish-release": "tsx scripts/plan-public-release-unpublish.ts",
+    "unpublish:release": "tsx scripts/unpublish-public-release.ts",
     "preview": "vite preview",
     "tags:generate": "scripts/player-tag-tests/generate-fixtures.sh",
     "tags:summarize": "scripts/player-tag-tests/summarize-probes.py",
@@ -20,7 +22,10 @@
     "repair:ingest-receipt-release-prefix": "tsx scripts/repair-ingest-receipt-release-prefix.ts",
     "verify:published-media": "tsx scripts/verify-published-media.ts",
     "manifest:published-media": "tsx scripts/write-published-media-deployment-manifest.ts",
-    "stage:published-media": "tsx scripts/stage-published-media.ts"
+    "stage:published-media": "tsx scripts/stage-published-media.ts",
+    "plan:published-media-deploy": "tsx scripts/plan-published-media-deployment.ts",
+    "deploy:published-media": "tsx scripts/deploy-published-media.ts",
+    "rollback:published-media": "tsx scripts/rollback-published-media.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.4",

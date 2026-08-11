@@ -384,6 +384,46 @@ npm run stage:published-media -- --output ~/Desktop/metadata-editor-deploy --con
 
 `verify:published-media` is read-only and exits non-zero for integrity blockers, an empty public tree, or a missing/stale deployment manifest. `manifest:published-media` writes only the deployment manifest after the complete public tree verifies. `stage:published-media` requires an explicit confirmation token, refuses to overwrite an existing target, requires a current deployment manifest, and copies only the verified sanitized snapshot into a new local directory. It does not SSH, rsync, configure nginx, or write to the public server.
 
+Deployment Sync & Host Boundary v1 adds a guarded boundary between the verified local snapshot and a deployment destination. Deployment Profiles & Local Sandbox v1 makes that boundary usable before a public server exists. Local Sandbox Lifecycle v1 lets the Publish workspace execute the already-reviewed local-sandbox plan and restore its immediately previous verified snapshot from the browser; these write endpoints are hard-restricted to the `local-sandbox` profile with a `local:` filesystem target. Production and SSH deployment/rollback remain CLI-only and unavailable until explicitly configured. The default profile is `local-sandbox`, which mirrors the future Hiplingo public-media location at `~/Desktop/websites/_deploy/hiplingo.com/published-media`. The `production` profile remains intentionally unconfigured until `PUBLISHED_MEDIA_PRODUCTION_TARGET` is set to an SSH target such as `ssh:user@host:/var/www/hiplingo.com/published-media`. `PUBLISHED_MEDIA_DEPLOY_TARGET` remains available as a one-off `custom` override. `PUBLISHED_MEDIA_DEPLOY_PROFILE` can select the default named profile for a server process or shell. SSH targets may optionally set `PUBLISHED_MEDIA_DEPLOY_SSH_PORT`. Deployment operation receipts live outside `published-media` and are isolated by profile under the sibling `<published-media>.deployments/<profile>/` directory unless `PUBLISHED_MEDIA_DEPLOY_STATE_ROOT` is explicitly configured.
+
+The established Hiplingo host boundary keeps frontend and media lifecycles independent:
+
+```text
+Local frontend source:
+  ~/Desktop/record-label/audio-player/
+
+Server frontend releases:
+  /var/www/hiplingo.com/app/releases/<timestamp>/
+  /var/www/hiplingo.com/app/current -> releases/<active-timestamp>/
+
+Persistent public media:
+  /var/www/hiplingo.com/published-media/
+
+nginx public-media route:
+  /media/ -> /var/www/hiplingo.com/published-media/
+```
+
+A frontend deployment or rollback must therefore never erase or roll back the independently published media tree. The private `media-library/` is never a deployment input; only the sanitized, verified `published-media/` snapshot crosses this boundary.
+
+Host sync commands:
+
+```bash
+# No SSH/server is required for the default local sandbox.
+npm run plan:published-media-deploy -- --profile local-sandbox
+npm run deploy:published-media -- --profile local-sandbox --plan-fingerprint <reviewed-fingerprint> --confirm DEPLOY_PUBLISHED_MEDIA
+npm run rollback:published-media -- --profile local-sandbox --confirm ROLLBACK_PUBLISHED_MEDIA
+
+# Later, when the Debian/nginx server is built:
+export PUBLISHED_MEDIA_PRODUCTION_TARGET='ssh:user@host:/var/www/hiplingo.com/published-media'
+# export PUBLISHED_MEDIA_DEPLOY_SSH_PORT=22
+
+npm run plan:published-media-deploy -- --profile production
+npm run deploy:published-media -- --profile production --plan-fingerprint <reviewed-fingerprint> --confirm DEPLOY_PUBLISHED_MEDIA
+npm run rollback:published-media -- --profile production --confirm ROLLBACK_PUBLISHED_MEDIA
+```
+
+`plan:published-media-deploy` requires a current local deployment manifest and performs a checksum-based read-only comparison, including add/update/remove detection. When the local sandbox does not yet exist, planning treats it as an empty destination without creating directories, so normal local development remains side-effect free until a confirmed deployment. The Publish workspace exposes Local sandbox and Production profile controls, the current profile/target, the same read-only **Check host** plan, and the reviewed profile-specific CLI command. Deployment readiness now separates public-snapshot integrity from canonical Library freshness. If an already-published release is **Update available**, the snapshot can still be internally valid, but Publish reports **Library changes pending** and blocks deployment by default. **Verify snapshot** and **Refresh deployment manifest** never publish those Library edits; run **Update public package** first. An intentional older-snapshot deployment requires an explicit UI override for the local sandbox or `--allow-pending-library-changes` from the CLI. Releases that have never been published remain intentionally absent from the deployment snapshot and do not block it. `deploy:published-media` rebuilds that plan and refuses a stale fingerprint, copies the verified snapshot into a unique sibling incoming directory, checksum-verifies the incoming tree, rechecks the local snapshot fingerprint, preserves the immediately previous deployed directory as one sibling backup, promotes the incoming directory, and verifies the promoted target again. `rollback:published-media` is separately confirmed and only uses the latest completed receipt for the selected profile. The milestone does not modify nginx, DNS, TLS, firewall rules, SSH hardening, the audio-player source, or server configuration. Those remain server-provisioning responsibilities.
+
 ## Core Workflows
 
 ### Performer-credit range copy
@@ -747,3 +787,16 @@ a complete date.
 ### Metadata evidence sidecars
 
 Recognized FFmpeg `;FFMETADATA1` sidecars are first-class ingest evidence rather than opaque text-only copies. They may accompany a new release, be attached later, or be staged by themselves against an existing canonical Library release. The parser preserves raw tags, maps known aliases to canonical metadata-editor paths, pairs sidecars to audio/tracks by encoded audio filename and track hints, surfaces conflicts instead of silently choosing a winner, and preserves unknown keys for future mappings. Unambiguous paired identity/track values can seed a new Staging draft; existing Library metadata is compared non-destructively against canonical TOML values when available and is never silently overwritten. Preserving the original sidecar file under `notes/imported/` remains optional because parsed provenance is recorded in the ingest receipt.
+
+### Public catalog membership and guarded unpublish
+
+Publication selectivity lives at the release boundary, not at the deployment transport layer. A Library release enters `published-media` only through **Publish public package**; deployment then moves the complete verified public snapshot as one coherent catalog. **Review unpublish** provides the inverse operation without deleting canonical Library content. It builds a read-only plan that fingerprints the complete public release tree plus `catalog.json`, then a confirmed write moves the public release into the operation backup, removes exactly one catalog membership, promotes the staged catalog, verifies that the release directory and catalog membership are absent, and journals the result through the existing interrupted-operation recovery model. `deployment-manifest.json` is intentionally left stale so the next Verify snapshot / Refresh deployment manifest / Check host sequence exposes the resulting removal before sandbox or production deployment.
+
+If `catalog.json` contains a release that is not present in the current Library scan, Publish reports it as **Published-only** instead of deleting anything automatically. This keeps removal authority explicit even when a canonical release has been archived or removed from the active Library separately.
+
+```bash
+npm run plan:unpublish-release -- --release <release-id>
+npm run unpublish:release -- --release <release-id> --plan-fingerprint <reviewed-fingerprint> --confirm UNPUBLISH_PUBLIC_RELEASE
+```
+
+`plan:unpublish-release` is read-only. Guarded unpublish removes only the sanitized public release package and its catalog entry; it never deletes `media-library` masters, TOML, receipts, or private derivatives. After unpublish, refresh the deployment manifest and review the deployment plan so the sandbox/production target receives the corresponding removals.

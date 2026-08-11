@@ -11,15 +11,20 @@ import {
   auditPublishedMediaDeployment,
   type PublishedMediaDeploymentAudit,
 } from "./published-media-deployment.js";
+import {
+  listPublicCatalogMembership,
+} from "./publication-membership.js";
 
 export type PublishFleetRelease = {
   releaseId: string;
   releaseTitle?: string;
   primaryArtistName?: string;
+  libraryPresent: boolean;
   publicationState:
     | "not-published"
     | "up-to-date"
-    | "update-available";
+    | "update-available"
+    | "published-only";
   planStatus: "ready" | "warning" | "blocked";
   blockerCount: number;
   warningCount: number;
@@ -39,9 +44,12 @@ export type PublishFleetSummary = {
   releases: PublishFleetRelease[];
   summary: {
     releaseCount: number;
+    libraryReleaseCount: number;
     notPublishedCount: number;
     currentCount: number;
     updateAvailableCount: number;
+    publishedOnlyCount: number;
+    publicCatalogCount: number;
     blockedCount: number;
     warningCount: number;
     needsPreparationCount: number;
@@ -54,11 +62,15 @@ export async function buildPublishFleetSummary(
   publishRoot: string,
 ): Promise<PublishFleetSummary> {
   const generatedAt = new Date().toISOString();
-  const [library, ffmpegCapabilities] =
-    await Promise.all([
-      scanMediaLibrary(mediaRoot),
-      detectFfmpegCapabilities(),
-    ]);
+  const [
+    library,
+    ffmpegCapabilities,
+    publicMemberships,
+  ] = await Promise.all([
+    scanMediaLibrary(mediaRoot),
+    detectFfmpegCapabilities(),
+    listPublicCatalogMembership(publishRoot),
+  ]);
   const releases: PublishFleetRelease[] = [];
 
   for (const release of library.releases) {
@@ -93,6 +105,7 @@ export async function buildPublishFleetSummary(
 
     releases.push({
       releaseId: release.id,
+      libraryPresent: true,
       ...(release.releaseTitle
         ? { releaseTitle: release.releaseTitle }
         : {}),
@@ -117,6 +130,45 @@ export async function buildPublishFleetSummary(
     });
   }
 
+  const libraryReleaseIds = new Set(
+    library.releases.map((release) => release.id),
+  );
+
+  for (const membership of publicMemberships) {
+    if (libraryReleaseIds.has(membership.releaseId)) {
+      continue;
+    }
+
+    releases.push({
+      releaseId: membership.releaseId,
+      libraryPresent: false,
+      ...(membership.title
+        ? { releaseTitle: membership.title }
+        : {}),
+      ...(membership.primaryArtist
+        ? {
+            primaryArtistName:
+              membership.primaryArtist,
+          }
+        : {}),
+      publicationState: "published-only",
+      planStatus: membership.releaseDirectoryExists
+        ? "warning"
+        : "blocked",
+      blockerCount: membership.releaseDirectoryExists
+        ? 0
+        : 1,
+      warningCount: membership.releaseDirectoryExists
+        ? 1
+        : 0,
+      needsPreparation: false,
+      playbackNeedsPreparation: false,
+      audioStreamNeedsPreparation: false,
+      videoStreamNeedsPreparation: false,
+      waveformNeedsPreparation: false,
+    });
+  }
+
   releases.sort((left, right) =>
     left.releaseId.localeCompare(
       right.releaseId,
@@ -134,6 +186,7 @@ export async function buildPublishFleetSummary(
     releases,
     summary: {
       releaseCount: releases.length,
+      libraryReleaseCount: library.releases.length,
       notPublishedCount: releases.filter(
         (release) =>
           release.publicationState === "not-published",
@@ -146,6 +199,11 @@ export async function buildPublishFleetSummary(
         (release) =>
           release.publicationState === "update-available",
       ).length,
+      publishedOnlyCount: releases.filter(
+        (release) =>
+          release.publicationState === "published-only",
+      ).length,
+      publicCatalogCount: publicMemberships.length,
       blockedCount: releases.filter(
         (release) => release.blockerCount > 0,
       ).length,

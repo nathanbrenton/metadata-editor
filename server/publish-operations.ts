@@ -61,7 +61,7 @@ export type PublishOperationRecord = {
   failedAt?: string;
   reviewedPlanFingerprint: string;
   sourceContentFingerprint: string;
-  mode: "build" | "update";
+  mode: "build" | "update" | "unpublish";
   state: PublishOperationState;
   phase: PublishOperationPhase;
   releasePreviouslyExisted: boolean;
@@ -95,7 +95,7 @@ export type PublishOperationRecoveryAction =
 export type PublishOperationSummary = {
   operationId: string;
   releaseId: string;
-  mode: "build" | "update";
+  mode: "build" | "update" | "unpublish";
   state: PublishOperationDerivedState;
   phase: string;
   startedAt: string;
@@ -128,7 +128,7 @@ type LegacyOperationRecord = {
   completedAt?: string;
   failedAt?: string;
   reviewedPlanFingerprint?: string;
-  mode?: "build" | "update";
+  mode?: "build" | "update" | "unpublish";
   state?: string;
   resources?: number;
   error?: string;
@@ -523,6 +523,100 @@ export async function verifyPublishedPackageIntegrity(
   }
 }
 
+export async function verifyUnpublishedPackageIntegrity(
+  publishRoot: string,
+  releaseId: string,
+  expectedCatalogSha256?: string,
+): Promise<PackageIntegrityResult> {
+  const canonicalPublishRoot = path.resolve(
+    publishRoot,
+  );
+  const releaseRoot = rootPath(
+    canonicalPublishRoot,
+    path.posix.join("releases", releaseId),
+  );
+  const catalogPath = rootPath(
+    canonicalPublishRoot,
+    "catalog.json",
+  );
+
+  try {
+    if (await pathExists(releaseRoot)) {
+      return {
+        ok: false,
+        reason:
+          "Public release directory still exists after unpublish.",
+        resourceCount: 0,
+      };
+    }
+
+    if (!(await pathExists(catalogPath))) {
+      return {
+        ok: false,
+        reason:
+          "Public catalog is missing after unpublish.",
+        resourceCount: 0,
+      };
+    }
+
+    if (expectedCatalogSha256) {
+      const digest = await sha256File(catalogPath);
+      if (digest.sha256 !== expectedCatalogSha256) {
+        return {
+          ok: false,
+          reason:
+            "Public catalog does not match the reviewed unpublish operation.",
+          resourceCount: 0,
+        };
+      }
+    }
+
+    const catalog = await readJsonFile(catalogPath);
+    if (
+      !isRecord(catalog) ||
+      !Array.isArray(catalog.releases)
+    ) {
+      return {
+        ok: false,
+        reason:
+          "Public catalog is missing or invalid after unpublish.",
+        resourceCount: 0,
+      };
+    }
+
+    const matchingEntries = catalog.releases.filter(
+      (entry) =>
+        isRecord(entry) &&
+        entry.id === releaseId,
+    );
+
+    if (matchingEntries.length !== 0) {
+      return {
+        ok: false,
+        reason:
+          "Public catalog still contains the unpublished release.",
+        resourceCount: 0,
+      };
+    }
+
+    return {
+      ok: true,
+      reason:
+        "Public release directory is absent and catalog membership is removed.",
+      resourceCount: 0,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason:
+        error instanceof Error
+          ? error.message
+          : "Unknown unpublish verification failure.",
+      resourceCount: 0,
+    };
+  }
+}
+
 function isPublishOperationRecord(
   value: unknown,
 ): value is PublishOperationRecord {
@@ -540,7 +634,9 @@ function isPublishOperationRecord(
     typeof value.updatedAt === "string" &&
     typeof value.reviewedPlanFingerprint === "string" &&
     typeof value.sourceContentFingerprint === "string" &&
-    (value.mode === "build" || value.mode === "update") &&
+    (value.mode === "build" ||
+      value.mode === "update" ||
+      value.mode === "unpublish") &&
     (value.state === "running" ||
       value.state === "completed" ||
       value.state === "failed") &&
@@ -741,16 +837,25 @@ async function inspectRecovery(
   record: PublishOperationRecord,
 ): Promise<RecoveryInspection> {
   const integrity =
-    await verifyPublishedPackageIntegrity(
-      publishRoot,
-      record.releaseId,
-      record.reviewedPlanFingerprint,
-    );
+    record.mode === "unpublish"
+      ? await verifyUnpublishedPackageIntegrity(
+          publishRoot,
+          record.releaseId,
+          record.artifacts?.stagedCatalogSha256,
+        )
+      : await verifyPublishedPackageIntegrity(
+          publishRoot,
+          record.releaseId,
+          record.reviewedPlanFingerprint,
+        );
 
   if (integrity.ok) {
     return {
       action: "finalize-current",
-      reason: "The promoted release and catalog already verify against this interrupted operation.",
+      reason:
+        record.mode === "unpublish"
+          ? "The public release is absent and catalog membership already matches this interrupted unpublish operation."
+          : "The promoted release and catalog already verify against this interrupted operation.",
     };
   }
 
@@ -788,7 +893,11 @@ async function summarizeOperation(
         record.operationId ?? path.basename(operationPath),
       releaseId: record.releaseId ?? "unknown-release",
       mode:
-        record.mode === "update" ? "update" : "build",
+        record.mode === "unpublish"
+          ? "unpublish"
+          : record.mode === "update"
+            ? "update"
+            : "build",
       state,
       phase: record.state ?? "unknown",
       startedAt: record.startedAt ?? "",
@@ -1161,11 +1270,17 @@ export async function recoverPublishOperation(
 
   if (inspection.action === "finalize-current") {
     const integrity =
-      await verifyPublishedPackageIntegrity(
-        publishRoot,
-        record.releaseId,
-        record.reviewedPlanFingerprint,
-      );
+      record.mode === "unpublish"
+        ? await verifyUnpublishedPackageIntegrity(
+            publishRoot,
+            record.releaseId,
+            record.artifacts?.stagedCatalogSha256,
+          )
+        : await verifyPublishedPackageIntegrity(
+            publishRoot,
+            record.releaseId,
+            record.reviewedPlanFingerprint,
+          );
 
     if (!integrity.ok) {
       throw new Error(
@@ -1184,7 +1299,9 @@ export async function recoverPublishOperation(
           action: "finalized-current",
           recoveredAt,
           note:
-            "Interrupted operation was finalized after the already-promoted package and catalog verified successfully.",
+            record.mode === "unpublish"
+              ? "Interrupted unpublish operation was finalized after public removal and catalog membership verified successfully."
+              : "Interrupted operation was finalized after the already-promoted package and catalog verified successfully.",
         },
       },
     );

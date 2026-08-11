@@ -13866,6 +13866,53 @@ main {
   color: #d9e1e6;
 }
 
+.publish-library-freshness-gate {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, auto)) minmax(18rem, 1fr);
+  align-items: center;
+  gap: 0.55rem 1rem;
+  border: 1px solid #34414a;
+  border-radius: 0.42rem;
+  padding: 0.55rem 0.65rem;
+  background: #0d1317;
+}
+
+.publish-library-freshness-gate.warning {
+  border-color: #725f35;
+  background: #19160f;
+}
+
+.publish-library-freshness-gate > div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.publish-library-freshness-gate span {
+  color: #8f9ca6;
+  font-size: 0.65rem;
+}
+
+.publish-library-freshness-gate strong {
+  color: #d9e1e6;
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.publish-library-freshness-gate.warning strong {
+  color: #e2c679;
+}
+
+.publish-library-freshness-gate p {
+  margin: 0;
+  color: #9fabb3;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.publish-library-freshness-gate.warning p {
+  color: #c9b98f;
+}
+
 .publish-deployment-issues {
   border-top: 1px solid #303a43;
   padding-top: 0.65rem;
@@ -13918,5 +13965,461 @@ main {
 
   .publish-deployment-actions {
     justify-content: flex-start;
+  }
+}
+
+/* Deployment target and guarded host synchronization */
+.publish-host-boundary {
+  display: grid;
+  gap: 0.65rem;
+  border-top: 1px solid #303a43;
+  padding-top: 0.7rem;
+}
+
+.publish-host-boundary-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.publish-host-boundary-heading > div:first-child {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.publish-host-boundary-heading strong {
+  font-size: 0.86rem;
+}
+
+.publish-host-boundary-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.publish-host-boundary-target,
+.publish-host-last-operation {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.35rem 0.7rem;
+  color: #98a6af;
+  font-size: 0.72rem;
+}
+
+.publish-host-boundary-target code,
+.publish-host-last-operation code,
+.publish-host-boundary-unconfigured code,
+.publish-host-sync-command code,
+.publish-host-sync-plan li code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publish-host-sync-summary {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+  color: #97a5ae;
+  font-size: 0.72rem;
+}
+
+.publish-host-sync-summary strong {
+  color: #d7e0e5;
+}
+
+.publish-host-local-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  border: 1px solid #32404a;
+  border-radius: 0.42rem;
+  padding: 0.55rem 0.65rem;
+  background: #10171c;
+}
+
+.publish-host-local-actions > div {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.publish-host-local-actions > div:first-child {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.publish-host-local-actions strong {
+  color: #d7e0e5;
+  font-size: 0.74rem;
+}
+
+.publish-host-local-actions span {
+  color: #94a2ac;
+  font-size: 0.69rem;
+}
+
+.publish-host-local-action-controls {
+  display: grid !important;
+  justify-items: end;
+  gap: 0.45rem !important;
+}
+
+.publish-host-local-action-controls > div {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.publish-pending-library-deploy-override {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  max-width: 34rem;
+  color: #c6b788;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.publish-pending-library-deploy-override input {
+  margin-top: 0.12rem;
+}
+
+.publish-host-sync-plan {
+  border: 1px solid #303a43;
+  border-radius: 0.42rem;
+  padding: 0.55rem 0.65rem;
+  background: #0d1216;
+}
+
+.publish-host-sync-plan summary {
+  cursor: pointer;
+  color: #c5cfd6;
+  font-size: 0.74rem;
+  font-weight: 650;
+}
+
+.publish-host-sync-plan ol {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.55rem 0 0;
+  padding-left: 1.2rem;
+}
+
+.publish-host-sync-plan li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 0.7rem;
+}
+
+.publish-host-sync-plan p {
+  margin: 0.5rem 0 0;
+  color: #8f9ca6;
+  font-size: 0.7rem;
+}
+
+.publish-host-sync-command {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.55rem;
+}
+
+.publish-host-sync-command span {
+  color: #8f9ca6;
+  font-size: 0.68rem;
+}
+
+.publish-host-sync-command code {
+  display: block;
+  border: 1px solid #2f3941;
+  border-radius: 0.32rem;
+  padding: 0.42rem 0.5rem;
+  background: #090d10;
+  color: #c8d3da;
+  user-select: all;
+}
+
+.publish-host-sync-command small {
+  color: #aa9b73;
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+
+.publish-host-sync-command small code {
+  display: inline;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: #d1bf8d;
+  user-select: text;
+}
+
+.publish-host-boundary-unconfigured {
+  display: grid;
+  gap: 0.3rem;
+  color: #99a6af;
+  font-size: 0.72rem;
+}
+
+.publish-host-boundary-unconfigured code {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  color: #c4cfd6;
+}
+
+.publish-host-last-operation {
+  grid-template-columns: auto auto minmax(8rem, 1fr) auto;
+  border-top: 1px solid #29323a;
+  padding-top: 0.5rem;
+}
+
+@media (max-width: 1100px) {
+  .publish-host-boundary-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .publish-host-boundary-actions {
+    justify-content: flex-start;
+  }
+
+  .publish-host-local-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .publish-host-local-actions > div:last-child {
+    justify-content: flex-start;
+  }
+
+  .publish-library-freshness-gate {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .publish-library-freshness-gate p {
+    grid-column: 1 / -1;
+  }
+
+  .publish-host-local-action-controls {
+    justify-items: start;
+  }
+
+  .publish-host-local-action-controls > div {
+    justify-content: flex-start;
+  }
+
+  .publish-host-last-operation {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+}
+
+/* Named deployment profiles keep local sandbox work independent from production SSH. */
+.publish-deployment-profile-selector {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.publish-deployment-profile-selector button {
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: baseline;
+  gap: 0.55rem;
+  min-width: 9rem;
+  border: 1px solid #303a43;
+  border-radius: 0.38rem;
+  padding: 0.42rem 0.55rem;
+  background: #0d1216;
+  color: #aab6be;
+  text-align: left;
+}
+
+.publish-deployment-profile-selector button strong {
+  color: #d5dde2;
+  font-size: 0.74rem;
+}
+
+.publish-deployment-profile-selector button span {
+  color: #87949e;
+  font-size: 0.66rem;
+}
+
+.publish-deployment-profile-selector button.active {
+  border-color: #647482;
+  background: #151c21;
+}
+
+.publish-deployment-profile-context {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 0.45rem 0.8rem;
+  color: #96a3ac;
+  font-size: 0.7rem;
+}
+
+.publish-deployment-profile-context code {
+  max-width: min(38rem, 52vw);
+  overflow: hidden;
+  color: #c7d1d8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publish-host-architecture {
+  border-top: 1px solid #29323a;
+  padding-top: 0.5rem;
+  color: #96a3ac;
+  font-size: 0.7rem;
+}
+
+.publish-host-architecture summary {
+  cursor: pointer;
+  color: #bdc8cf;
+  font-weight: 650;
+}
+
+.publish-host-architecture > div {
+  display: grid;
+  grid-template-columns: 9rem minmax(0, 1fr);
+  gap: 0.7rem;
+  margin-top: 0.35rem;
+}
+
+.publish-host-architecture code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publish-host-architecture p {
+  margin: 0.45rem 0 0;
+  color: #87949e;
+}
+
+@media (max-width: 900px) {
+  .publish-deployment-profile-context,
+  .publish-host-architecture > div {
+    grid-template-columns: 1fr;
+  }
+
+  .publish-deployment-profile-context code {
+    max-width: 100%;
+  }
+}
+
+/* Public catalog membership and guarded unpublish */
+.publish-public-only-membership {
+  display: grid;
+  gap: 0.55rem;
+  border: 1px solid #725f35;
+  border-radius: 0.42rem;
+  padding: 0.6rem 0.65rem;
+  background: #19160f;
+}
+
+.publish-public-only-membership-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.publish-public-only-membership-heading > div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.publish-public-only-membership-heading strong {
+  color: #e2c679;
+  font-size: 0.8rem;
+}
+
+.publish-public-only-membership > p {
+  margin: 0;
+  color: #c9b98f;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.publish-public-only-membership-list {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.publish-public-only-membership-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  border-top: 1px solid #4d442d;
+  padding-top: 0.4rem;
+}
+
+.publish-public-only-membership-list > div > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.08rem;
+}
+
+.publish-public-only-membership-list small,
+.publish-public-only-membership-list code {
+  color: #a99d7f;
+  font-size: 0.66rem;
+}
+
+.publish-public-only-membership-list code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publish-public-membership-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  border: 1px solid #4c3a3a;
+  border-radius: 0.42rem;
+  padding: 0.58rem 0.65rem;
+  background: #161112;
+}
+
+.publish-public-membership-action > div {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.publish-public-membership-action strong {
+  color: #ddd5d5;
+  font-size: 0.78rem;
+}
+
+.publish-public-membership-action small {
+  color: #a89c9c;
+  font-size: 0.69rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 760px) {
+  .publish-public-only-membership-heading,
+  .publish-public-only-membership-list > div,
+  .publish-public-membership-action {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
