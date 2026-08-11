@@ -21,6 +21,9 @@ import {
   publishReleasePackage,
 } from "../server/publish-writer.js";
 import {
+  listPublishOperations,
+} from "../server/publish-operations.js";
+import {
   generateWaveformPeaksFromWav,
 } from "../server/media-processing/waveform-generator.js";
 import {
@@ -454,6 +457,16 @@ test("builds a sanitized HLS public package without canonical/private files", as
     assert.equal(receipt.streamCount, 1);
     assert.equal(receipt.waveformCount, 1);
     assert.equal(receipt.artworkCount, 2);
+
+    const operationHistory = await listPublishOperations(
+      fixture.publishRoot,
+      { releaseId: fixture.releaseId },
+    );
+    assert.equal(operationHistory.interruptedCount, 0);
+    assert.equal(operationHistory.operations.length, 1);
+    assert.equal(operationHistory.operations[0]?.state, "completed");
+    assert.equal(operationHistory.operations[0]?.phase, "completed");
+    assert.equal(operationHistory.operations[0]?.legacy, false);
 
     const publicRelease = path.join(
       fixture.publishRoot,

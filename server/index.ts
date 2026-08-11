@@ -147,6 +147,10 @@ import {
   publishReleasePackage,
 } from "./publish-writer.js";
 import {
+  listPublishOperations,
+  recoverPublishOperation,
+} from "./publish-operations.js";
+import {
   prepareReleaseMedia,
 } from "./media-processing/prepare.js";
 import {
@@ -4795,6 +4799,242 @@ const server = createServer(
     }
 
     if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/publish/operations"
+    ) {
+      try {
+        const publishRoot = await resolvePublishRoot();
+        const releaseId =
+          requestUrl.searchParams.get("release") ?? undefined;
+        const requestedLimit = Number.parseInt(
+          requestUrl.searchParams.get("limit") ?? "30",
+          10,
+        );
+        const limit = Number.isFinite(requestedLimit)
+          ? requestedLimit
+          : 30;
+
+        sendJson(
+          response,
+          200,
+          await listPublishOperations(
+            publishRoot,
+            {
+              ...(releaseId ? { releaseId } : {}),
+              limit,
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown publish-operation history error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/publish/recover"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const operationId =
+          "operationId" in body &&
+          typeof body.operationId === "string"
+            ? body.operationId
+            : "";
+
+        if (!operationId) {
+          sendJson(response, 400, {
+            error: "operationId is required",
+          });
+          return;
+        }
+
+        const publishRoot = await resolvePublishRoot();
+        sendJson(
+          response,
+          200,
+          await recoverPublishOperation(
+            publishRoot,
+            operationId,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown publish recovery error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/publish/prepare-batch"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const rawReleaseIds =
+          "releaseIds" in body &&
+          Array.isArray(body.releaseIds)
+            ? body.releaseIds
+            : [];
+        const releaseIds = Array.from(
+          new Set(
+            rawReleaseIds.filter(
+              (releaseId): releaseId is string =>
+                typeof releaseId === "string" &&
+                releaseId.trim().length > 0,
+            ),
+          ),
+        );
+        const scope =
+          "scope" in body &&
+          body.scope === "playback"
+            ? "playback"
+            : "all";
+
+        if (
+          releaseIds.length === 0 ||
+          releaseIds.length > 50
+        ) {
+          sendJson(response, 400, {
+            error:
+              "releaseIds must contain between 1 and 50 release ids",
+          });
+          return;
+        }
+
+        const [mediaRoot, publishRoot] =
+          await Promise.all([
+            resolveMediaRoot(),
+            resolvePublishRoot(),
+          ]);
+        const results: Array<Record<string, unknown>> = [];
+
+        for (const releaseId of releaseIds) {
+          try {
+            const generatedAt = new Date().toISOString();
+            const plan = await buildPublishPlan(
+              mediaRoot,
+              publishRoot,
+              releaseId,
+              { generatedAt },
+            );
+            const needsPreparation =
+              scope === "playback"
+                ? plan.libraryPlayback.createCount > 0 ||
+                  plan.libraryPlayback.replaceCount > 0
+                : plan.libraryPlayback.createCount > 0 ||
+                  plan.libraryPlayback.replaceCount > 0 ||
+                  plan.derivatives.createCount > 0 ||
+                  plan.derivatives.replaceCount > 0 ||
+                  plan.issues.some(
+                    (issue) =>
+                      issue.code ===
+                        "browser-artwork-preparation-required",
+                  );
+
+            if (!needsPreparation) {
+              results.push({
+                releaseId,
+                status: "skipped",
+                message:
+                  scope === "playback"
+                    ? "Library playback MP3s are already current."
+                    : "Release media is already current.",
+              });
+              continue;
+            }
+
+            const receipt = await prepareReleaseMedia(
+              mediaRoot,
+              publishRoot,
+              releaseId,
+              {
+                expectedPublishPlanFingerprint:
+                  plan.planFingerprint,
+                publishPlanGeneratedAt:
+                  plan.generatedAt,
+                scope,
+              },
+            );
+
+            results.push({
+              releaseId,
+              status: "prepared",
+              receipt,
+            });
+          } catch (error) {
+            results.push({
+              releaseId,
+              status: "failed",
+              error:
+                error instanceof Error
+                  ? error.message
+                  : "Unknown batch-preparation error",
+            });
+          }
+        }
+
+        sendJson(response, 200, {
+          scope,
+          releaseCount: releaseIds.length,
+          preparedCount: results.filter(
+            (result) => result.status === "prepared",
+          ).length,
+          skippedCount: results.filter(
+            (result) => result.status === "skipped",
+          ).length,
+          failedCount: results.filter(
+            (result) => result.status === "failed",
+          ).length,
+          results,
+        });
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown batch-preparation error",
+        });
+      }
+
+      return;
+    }
+
+    if (
       request.method === "POST" &&
       requestUrl.pathname === "/api/publish/prepare-video"
     ) {
@@ -5126,4 +5366,27 @@ server.listen(port, host, () => {
   console.log(
     `Metadata filesystem API listening at http://${host}:${port}`,
   );
+
+  void resolvePublishRoot()
+    .then((publishRoot) =>
+      listPublishOperations(
+        publishRoot,
+        { limit: 200 },
+      ),
+    )
+    .then((history) => {
+      if (history.interruptedCount > 0) {
+        console.warn(
+          `Publish recovery: ${history.interruptedCount} interrupted operation${history.interruptedCount === 1 ? "" : "s"} detected from a previous server instance. Review Publish > Operation history.`,
+        );
+      }
+    })
+    .catch((error) => {
+      console.warn(
+        "Unable to inspect publish-operation history at startup:",
+        error instanceof Error
+          ? error.message
+          : String(error),
+      );
+    });
 });

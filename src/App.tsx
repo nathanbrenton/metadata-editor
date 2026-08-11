@@ -673,6 +673,56 @@ type PublishPackageReceipt = {
   completedAt: string;
 };
 
+type PublishOperationSummary = {
+  operationId: string;
+  releaseId: string;
+  mode: "build" | "update";
+  state:
+    | "running"
+    | "interrupted"
+    | "completed"
+    | "failed"
+    | "recovered";
+  phase: string;
+  startedAt: string;
+  updatedAt?: string;
+  completedAt?: string;
+  failedAt?: string;
+  reviewedPlanFingerprint?: string;
+  resources?: number;
+  recoveryAction:
+    | "none"
+    | "finalize-current"
+    | "rollback-safe"
+    | "review-required";
+  recoveryReason?: string;
+  error?: string;
+  legacy: boolean;
+};
+
+type PublishOperationHistory = {
+  serverInstanceId: string;
+  operations: PublishOperationSummary[];
+  interruptedCount: number;
+  failedCount: number;
+};
+
+type BatchPreparationResult = {
+  releaseId: string;
+  status: "prepared" | "skipped" | "failed";
+  error?: string;
+  message?: string;
+};
+
+type BatchPreparationResponse = {
+  scope: "all" | "playback";
+  releaseCount: number;
+  preparedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  results: BatchPreparationResult[];
+};
+
 type InferredValue<T> = {
   value: T;
   source: string;
@@ -5322,6 +5372,57 @@ function publishNextStepLabel(
     : "Publish public package";
 }
 
+function latestPublishOperationForRelease(
+  history: PublishOperationHistory | null,
+  releaseId: string,
+): PublishOperationSummary | null {
+  return history?.operations.find(
+    (operation) => operation.releaseId === releaseId,
+  ) ?? null;
+}
+
+function publishOperationBadge(
+  operation: PublishOperationSummary | null,
+): { label: string; tone: string } | null {
+  if (!operation) {
+    return null;
+  }
+
+  if (operation.state === "interrupted") {
+    return { label: "Interrupted", tone: "missing" };
+  }
+
+  if (operation.state === "failed") {
+    return { label: "Publish failed", tone: "missing" };
+  }
+
+  if (operation.state === "running") {
+    return { label: "Publishing", tone: "preview" };
+  }
+
+  if (operation.state === "recovered") {
+    return { label: "Recovered", tone: "warning" };
+  }
+
+  return null;
+}
+
+function unresolvedPublishOperationForRelease(
+  history: PublishOperationHistory | null,
+  releaseId: string,
+): PublishOperationSummary | null {
+  const operation = latestPublishOperationForRelease(
+    history,
+    releaseId,
+  );
+
+  return operation &&
+    (operation.state === "interrupted" ||
+      operation.state === "running")
+    ? operation
+    : null;
+}
+
 function PublishWorkspace({
   releases,
   workflowLocations,
@@ -5361,12 +5462,60 @@ function PublishWorkspace({
     useState<MediaPreparationProgress | null>(null);
   const [publishLoading, setPublishLoading] =
     useState(false);
+  const [publishOperations, setPublishOperations] =
+    useState<PublishOperationHistory | null>(null);
+  const [publishOperationsLoading, setPublishOperationsLoading] =
+    useState(false);
+  const [publishOperationsError, setPublishOperationsError] =
+    useState<string | null>(null);
+  const [recoveringOperationId, setRecoveringOperationId] =
+    useState<string | null>(null);
+  const [selectedBatchReleaseIds, setSelectedBatchReleaseIds] =
+    useState<Set<string>>(() => new Set());
+  const [batchPrepareLoading, setBatchPrepareLoading] =
+    useState(false);
   const [sortMode, setSortMode] =
     useState<LibraryReleaseSortMode>("date-desc");
   const sortedReleases = useMemo(
     () => sortLibraryReleases(releases, sortMode),
     [releases, sortMode],
   );
+
+  const loadPublishOperations = useCallback(async () => {
+    setPublishOperationsLoading(true);
+    setPublishOperationsError(null);
+
+    try {
+      const response = await fetch(
+        "/api/publish/operations?limit=40",
+      );
+      const payload = await response.json() as
+        | PublishOperationHistory
+        | { error?: string };
+
+      if (!response.ok || !("operations" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to load publish-operation history.",
+        );
+      }
+
+      setPublishOperations(payload);
+    } catch (operationError) {
+      setPublishOperationsError(
+        operationError instanceof Error
+          ? operationError.message
+          : "Unable to load publish-operation history.",
+      );
+    } finally {
+      setPublishOperationsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPublishOperations();
+  }, [loadPublishOperations, releases]);
 
   const loadPublishPlan = useCallback(async (
     releaseId: string,
@@ -5401,6 +5550,144 @@ function PublishWorkspace({
       setPlanLoadingReleaseId(null);
     }
   }, []);
+
+  const recoverOperation = useCallback(async (
+    operation: PublishOperationSummary,
+  ) => {
+    setRecoveringOperationId(operation.operationId);
+    setPublishOperationsError(null);
+    setPlanError(null);
+
+    try {
+      const response = await fetch(
+        "/api/publish/recover",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            operationId: operation.operationId,
+          }),
+        },
+      );
+      const payload = await response.json() as
+        | PublishOperationSummary
+        | { error?: string };
+
+      if (!response.ok || !("operationId" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to recover publish operation.",
+        );
+      }
+
+      await loadPublishOperations();
+      await Promise.resolve(onRefresh());
+      if (selectedPlan?.releaseId === operation.releaseId) {
+        await loadPublishPlan(operation.releaseId);
+      }
+      onNotify(
+        payload.state === "completed"
+          ? "Interrupted publish finalized after integrity verification."
+          : "Interrupted publish recovered safely.",
+        "success",
+      );
+    } catch (recoveryError) {
+      setPublishOperationsError(
+        recoveryError instanceof Error
+          ? recoveryError.message
+          : "Unable to recover publish operation.",
+      );
+    } finally {
+      setRecoveringOperationId(null);
+    }
+  }, [
+    loadPublishOperations,
+    loadPublishPlan,
+    onNotify,
+    onRefresh,
+    selectedPlan?.releaseId,
+  ]);
+
+  const prepareSelectedReleases = useCallback(async () => {
+    const releaseIds = Array.from(selectedBatchReleaseIds);
+
+    if (releaseIds.length === 0) {
+      return;
+    }
+
+    setBatchPrepareLoading(true);
+    setPlanError(null);
+
+    try {
+      const response = await fetch(
+        "/api/publish/prepare-batch",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseIds,
+            scope: "all",
+          }),
+        },
+      );
+      const payload = await response.json() as
+        | BatchPreparationResponse
+        | { error?: string };
+
+      if (!response.ok || !("results" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to prepare selected releases.",
+        );
+      }
+
+      setSelectedBatchReleaseIds(new Set());
+      await Promise.resolve(onRefresh());
+      await loadPublishOperations();
+      if (selectedPlan) {
+        await loadPublishPlan(selectedPlan.releaseId);
+      }
+
+      onNotify(
+        `Batch preparation: ${payload.preparedCount} prepared · ${payload.skippedCount} already current · ${payload.failedCount} failed.`,
+        payload.failedCount > 0 ? "error" : "success",
+      );
+
+      const failed = payload.results.filter(
+        (result) => result.status === "failed",
+      );
+      if (failed.length > 0) {
+        setPlanError(
+          failed
+            .map((result) =>
+              `${result.releaseId}: ${result.error ?? "Preparation failed."}`,
+            )
+            .join(" "),
+        );
+      }
+    } catch (batchError) {
+      setPlanError(
+        batchError instanceof Error
+          ? batchError.message
+          : "Unable to prepare selected releases.",
+      );
+    } finally {
+      setBatchPrepareLoading(false);
+    }
+  }, [
+    loadPublishOperations,
+    loadPublishPlan,
+    onNotify,
+    onRefresh,
+    selectedBatchReleaseIds,
+    selectedPlan,
+  ]);
 
   const prepareRelease = useCallback(async (
     plan: PublishPlan,
@@ -5558,6 +5845,7 @@ function PublishWorkspace({
       }
 
       await loadPublishPlan(plan.releaseId);
+      await loadPublishOperations();
       await Promise.resolve(onRefresh());
       onNotify(
         `Public package ${payload.mode === "update" ? "updated" : "published"} successfully.`,
@@ -5572,7 +5860,12 @@ function PublishWorkspace({
     } finally {
       setPublishLoading(false);
     }
-  }, [loadPublishPlan, onNotify, onRefresh]);
+  }, [
+    loadPublishOperations,
+    loadPublishPlan,
+    onNotify,
+    onRefresh,
+  ]);
 
   return (
     <section className="workflow-workspace publish-workspace">
@@ -5641,6 +5934,28 @@ function PublishWorkspace({
       {planError && (
         <p className="message error">{planError}</p>
       )}
+      {publishOperationsError && (
+        <p className="message error">
+          {publishOperationsError}
+        </p>
+      )}
+
+      {publishOperations &&
+        publishOperations.interruptedCount > 0 && (
+          <aside
+            className="publish-interrupted-alert"
+            role="alert"
+          >
+            <div>
+              <strong>
+                {publishOperations.interruptedCount} interrupted publish {publishOperations.interruptedCount === 1 ? "operation" : "operations"}
+              </strong>
+              <span>
+                Previous server work stopped before a terminal operation record was written. Review recovery evidence below before publishing that release again.
+              </span>
+            </div>
+          </aside>
+        )}
 
       <section className="workflow-table-panel">
         <header className="publish-release-list-header">
@@ -5663,6 +5978,23 @@ function PublishWorkspace({
                 <option value="library">Library order</option>
               </select>
             </label>
+            {selectedBatchReleaseIds.size > 0 && (
+              <button
+                type="button"
+                className="publish-batch-prepare-button"
+                disabled={
+                  batchPrepareLoading ||
+                  prepareLoading ||
+                  publishLoading
+                }
+                onClick={() => void prepareSelectedReleases()}
+                title="Prepare missing or stale private MP3, HLS, waveform, and browser-artwork derivatives for the selected releases in a sequential queue. Publishing remains per release."
+              >
+                {batchPrepareLoading
+                  ? "Preparing selected…"
+                  : `Prepare selected (${selectedBatchReleaseIds.size})`}
+              </button>
+            )}
             <strong>{releases.length} releases</strong>
           </div>
         </header>
@@ -5671,6 +6003,9 @@ function PublishWorkspace({
           <table className="workflow-workspace-table publish-readiness-table">
             <thead>
               <tr>
+                <th scope="col" className="publish-batch-select-column">
+                  <span className="visually-hidden">Batch prepare</span>
+                </th>
                 <th scope="col">Release</th>
                 <th scope="col">Sources</th>
                 <th scope="col">Public media</th>
@@ -5680,7 +6015,7 @@ function PublishWorkspace({
             <tbody>
               {releases.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="workflow-empty-cell">
+                  <td colSpan={5} className="workflow-empty-cell">
                     No releases are available for readiness review.
                   </td>
                 </tr>
@@ -5699,6 +6034,15 @@ function PublishWorkspace({
                     selectPreferredReleaseArtwork(
                       release.artworkMasters,
                     );
+                  const latestOperation =
+                    latestPublishOperationForRelease(
+                      publishOperations,
+                      release.id,
+                    );
+                  const operationBadge =
+                    publishOperationBadge(latestOperation);
+                  const batchSelected =
+                    selectedBatchReleaseIds.has(release.id);
 
                   return (
                     <tr
@@ -5736,6 +6080,26 @@ function PublishWorkspace({
                         }
                       }}
                     >
+                      <td className="publish-batch-select-cell">
+                        <input
+                          type="checkbox"
+                          checked={batchSelected}
+                          aria-label={`Select ${release.releaseTitle ?? formatReleaseTitle(release.id)} for batch preparation`}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setSelectedBatchReleaseIds((current) => {
+                              const next = new Set(current);
+                              if (checked) {
+                                next.add(release.id);
+                              } else {
+                                next.delete(release.id);
+                              }
+                              return next;
+                            });
+                          }}
+                        />
+                      </td>
                       <th scope="row">
                         <div className="publish-release-cell">
                           <span
@@ -5813,10 +6177,20 @@ function PublishWorkspace({
                         </div>
                       </td>
                       <td className="publish-status-cell">
-                        <span className={`badge ${assessment.preflightTone}`}>
-                          {assessment.preflightLabel}
+                        {operationBadge ? (
+                          <span className={`badge ${operationBadge.tone}`}>
+                            {operationBadge.label}
+                          </span>
+                        ) : (
+                          <span className={`badge ${assessment.preflightTone}`}>
+                            {assessment.preflightLabel}
+                          </span>
+                        )}
+                        <span>
+                          {latestOperation && operationBadge
+                            ? `${latestOperation.phase.replaceAll("-", " ")} · ${latestOperation.recoveryReason ?? assessment.note}`
+                            : assessment.note}
                         </span>
-                        <span>{assessment.note}</span>
                         {loadingPlan && (
                           <small
                             className="publish-row-loading"
@@ -5834,6 +6208,109 @@ function PublishWorkspace({
           </table>
         </div>
       </section>
+
+      <details
+        className="publish-operation-history"
+      >
+        <summary>
+          <span>Publish operation history</span>
+          <span>
+            {publishOperationsLoading
+              ? "Loading…"
+              : `${publishOperations?.operations.length ?? 0} recent`}
+          </span>
+        </summary>
+        <div className="publish-operation-history-content">
+          {publishOperations?.operations.length ? (
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Release</th>
+                  <th scope="col">State</th>
+                  <th scope="col">Phase</th>
+                  <th scope="col">Started</th>
+                  <th scope="col">Recovery</th>
+                </tr>
+              </thead>
+              <tbody>
+                {publishOperations.operations.map((operation) => (
+                  <tr key={operation.operationId}>
+                    <th scope="row">
+                      <strong>
+                        {releases.find((release) =>
+                          release.id === operation.releaseId
+                        )?.releaseTitle ?? operation.releaseId}
+                      </strong>
+                      <code title={operation.operationId}>
+                        {operation.operationId}
+                      </code>
+                    </th>
+                    <td>
+                      <span className={`badge ${
+                        operation.state === "completed"
+                          ? "success"
+                          : operation.state === "running"
+                            ? "preview"
+                            : operation.state === "recovered"
+                              ? "warning"
+                              : "missing"
+                      }`}>
+                        {operation.state}
+                      </span>
+                    </td>
+                    <td>{operation.phase.replaceAll("-", " ")}</td>
+                    <td>
+                      {operation.startedAt
+                        ? new Date(operation.startedAt).toLocaleString()
+                        : "Unknown"}
+                    </td>
+                    <td>
+                      {operation.state === "interrupted" ? (
+                        <div className="publish-operation-recovery-cell">
+                          <small>
+                            {operation.recoveryReason ?? "Recovery evidence is being evaluated."}
+                          </small>
+                          {(operation.recoveryAction === "finalize-current" ||
+                            operation.recoveryAction === "rollback-safe") && (
+                            <button
+                              type="button"
+                              disabled={
+                                recoveringOperationId === operation.operationId ||
+                                publishLoading ||
+                                prepareLoading ||
+                                batchPrepareLoading
+                              }
+                              onClick={() => void recoverOperation(operation)}
+                            >
+                              {recoveringOperationId === operation.operationId
+                                ? "Recovering…"
+                                : operation.recoveryAction === "finalize-current"
+                                  ? "Verify & finalize"
+                                  : "Guarded rollback"}
+                            </button>
+                          )}
+                        </div>
+                      ) : operation.recoveryReason ? (
+                        <small>{operation.recoveryReason}</small>
+                      ) : operation.error ? (
+                        <small>{operation.error}</small>
+                      ) : (
+                        <span>—</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p>
+              {publishOperationsLoading
+                ? "Loading publish operations…"
+                : "No publish operations have been recorded yet."}
+            </p>
+          )}
+        </div>
+      </details>
 
       {selectedPlan && (
         <MetadataFieldModal
@@ -5866,11 +6343,22 @@ function PublishWorkspace({
                 {publishPreflightGuidance(selectedPlan)}
               </p>
             </div>
-            <span
-              className={`badge ${publishPreflightStatus(selectedPlan).tone}`}
-            >
-              {publishPreflightStatus(selectedPlan).label}
-            </span>
+            {(() => {
+              const operationBadge = publishOperationBadge(
+                latestPublishOperationForRelease(
+                  publishOperations,
+                  selectedPlan.releaseId,
+                ),
+              );
+              const status = operationBadge ??
+                publishPreflightStatus(selectedPlan);
+
+              return (
+                <span className={`badge ${status.tone}`}>
+                  {status.label}
+                </span>
+              );
+            })()}
           </header>
 
           <section className="publish-preflight-primary" aria-label="Publish next step">
@@ -5949,33 +6437,62 @@ function PublishWorkspace({
                       prepareLoading ||
                       publishLoading ||
                       (!canPreparePublishPlan(selectedPlan) &&
-                        !canBuildPublishPlan(selectedPlan))
+                        (
+                          !canBuildPublishPlan(selectedPlan) ||
+                          Boolean(
+                            unresolvedPublishOperationForRelease(
+                              publishOperations,
+                              selectedPlan.releaseId,
+                            ),
+                          )
+                        ))
                     }
                     onClick={() =>
                       canPreparePublishPlan(selectedPlan)
                         ? void prepareRelease(selectedPlan)
-                        : void publishRelease(selectedPlan)
+                        : unresolvedPublishOperationForRelease(
+                              publishOperations,
+                              selectedPlan.releaseId,
+                            )
+                          ? undefined
+                          : void publishRelease(selectedPlan)
                     }
                     title={
                       canPreparePublishPlan(selectedPlan)
                         ? "Generate reviewed private playback MP3s, segmented AAC-LC HLS streams, waveform derivatives, and browser-compatible release artwork in the private Library."
-                        : canBuildPublishPlan(selectedPlan)
-                          ? "Publish a complete sanitized public release snapshot, validate it, and atomically promote it into published-media."
-                          : "Resolve the blocking preflight issues first."
+                        : unresolvedPublishOperationForRelease(
+                              publishOperations,
+                              selectedPlan.releaseId,
+                            )
+                          ? "Recover or review the interrupted publish operation in Operation history before publishing again."
+                          : canBuildPublishPlan(selectedPlan)
+                            ? "Publish a complete sanitized public release snapshot, validate it, and atomically promote it into published-media."
+                            : "Resolve the blocking preflight issues first."
                     }
                   >
                     {prepareLoading
                       ? "Preparing…"
                       : publishLoading
                         ? "Publishing…"
-                        : publishNextStepLabel(selectedPlan)}
+                        : unresolvedPublishOperationForRelease(
+                              publishOperations,
+                              selectedPlan.releaseId,
+                            ) &&
+                            !canPreparePublishPlan(selectedPlan)
+                          ? "Recover interrupted publish"
+                          : publishNextStepLabel(selectedPlan)}
                   </button>
                   <small>
                     {canPreparePublishPlan(selectedPlan)
                       ? "Creates reproducible private playback MP3, HLS stream, waveform, and browser-artwork derivatives. Canonical masters are never modified, and private MP3s are never copied into published-media."
-                      : canBuildPublishPlan(selectedPlan)
-                        ? "Publishes the complete public snapshot from current Library metadata, browser artwork, waveform peaks, and HLS assets. Existing public releases are replaced as a unit so obsolete files cannot survive an update."
-                        : "Resolve the blocking issues shown in preflight before preparing derivatives or publishing."}
+                      : unresolvedPublishOperationForRelease(
+                            publishOperations,
+                            selectedPlan.releaseId,
+                          )
+                        ? "Publishing is paused until the interrupted operation is verified and finalized or safely rolled back from Operation history."
+                        : canBuildPublishPlan(selectedPlan)
+                          ? "Publishes the complete public snapshot from current Library metadata, browser artwork, waveform peaks, and HLS assets. Existing public releases are replaced as a unit so obsolete files cannot survive an update."
+                          : "Resolve the blocking issues shown in preflight before preparing derivatives or publishing."}
                   </small>
                 </>
               )}
@@ -6030,6 +6547,20 @@ function PublishWorkspace({
                   : browserArtworkIsBlocked(selectedPlan)
                     ? "Blocked"
                     : "Current"}
+              </dd>
+            </div>
+            <div>
+              <dt>Latest operation</dt>
+              <dd>
+                {(() => {
+                  const operation = latestPublishOperationForRelease(
+                    publishOperations,
+                    selectedPlan.releaseId,
+                  );
+                  return operation
+                    ? `${operation.state} · ${operation.phase.replaceAll("-", " ")}`
+                    : "No recorded publish operation";
+                })()}
               </dd>
             </div>
             <div>

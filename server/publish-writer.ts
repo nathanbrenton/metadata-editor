@@ -29,6 +29,15 @@ import {
 import {
   assertPathWithinRoot,
 } from "./media-root.js";
+import {
+  advancePublishOperation,
+  assertNoUnresolvedPublishOperation,
+  publishOperationsRoot,
+  publishServerInstanceId,
+  verifyPublishedPackageIntegrity,
+  writePublishOperationRecord,
+  type PublishOperationRecord,
+} from "./publish-operations.js";
 import type {
   FfmpegCapabilities,
   ParsedMetadataDocument,
@@ -98,7 +107,6 @@ const publicationManifestFilename = "publication-manifest.json";
 const releaseMetadataFilename = "release.json";
 const trackMetadataFilename = "track.json";
 const catalogFilename = "catalog.json";
-const operationsDirectoryName = ".metadata-editor-publish-operations";
 
 const forbiddenPublicBasenames = new Set([
   "release.toml",
@@ -986,16 +994,6 @@ async function pathExists(
   }
 }
 
-async function writeOperationManifest(
-  operationPath: string,
-  value: unknown,
-): Promise<void> {
-  await writeJson(
-    path.join(operationPath, "operation.json"),
-    value,
-  );
-}
-
 export async function publishReleasePackage(
   mediaRoot: string,
   publishRoot: string,
@@ -1069,12 +1067,12 @@ export async function publishReleasePackage(
   const canonicalPublishRoot = await ensurePublishRoot(
     publishRoot,
   );
-  const publishParent = path.dirname(
+  await assertNoUnresolvedPublishOperation(
     canonicalPublishRoot,
+    releaseId,
   );
-  const operationsRoot = path.join(
-    publishParent,
-    operationsDirectoryName,
+  const operationsRoot = publishOperationsRoot(
+    canonicalPublishRoot,
   );
   await mkdir(operationsRoot, {
     recursive: true,
@@ -1135,23 +1133,55 @@ export async function publishReleasePackage(
     recursive: true,
   });
 
-  await writeOperationManifest(
-    operationPath,
-    {
-      schema: {
-        name: "metadata-editor-publish-operation",
-        version: 1,
-      },
-      operationId,
-      releaseId,
-      startedAt: publishedAt,
-      reviewedPlanFingerprint:
-        reviewedPlan.planFingerprint,
-      mode: releasePreviouslyExisted
-        ? "update"
-        : "build",
-      state: "staging",
+  let operationRecord: PublishOperationRecord = {
+    schema: {
+      name: "metadata-editor-publish-operation",
+      version: 2,
     },
+    operationId,
+    serverInstanceId: publishServerInstanceId,
+    releaseId,
+    destinationReleaseRelativePath:
+      reviewedPlan.destinationReleaseRelativePath,
+    startedAt: publishedAt,
+    updatedAt: publishedAt,
+    reviewedPlanFingerprint:
+      reviewedPlan.planFingerprint,
+    sourceContentFingerprint:
+      reviewedPlan.publication.currentContentFingerprint,
+    mode: releasePreviouslyExisted
+      ? "update"
+      : "build",
+    state: "running",
+    phase: "staging",
+    releasePreviouslyExisted,
+    catalogPreviouslyExisted,
+    phaseHistory: [
+      {
+        phase: "staging",
+        at: publishedAt,
+      },
+    ],
+  };
+
+  const journal = async (
+    phase: PublishOperationRecord["phase"],
+    patch: Partial<PublishOperationRecord> = {},
+  ): Promise<void> => {
+    operationRecord = advancePublishOperation(
+      operationRecord,
+      phase,
+      patch,
+    );
+    await writePublishOperationRecord(
+      operationPath,
+      operationRecord,
+    );
+  };
+
+  await writePublishOperationRecord(
+    operationPath,
+    operationRecord,
   );
 
   try {
@@ -1171,6 +1201,25 @@ export async function publishReleasePackage(
       publishedAt,
     );
     await writeJson(stagedCatalogPath, catalog);
+
+    const stagedCatalogDigest = await sha256File(
+      stagedCatalogPath,
+    );
+    const stagedManifestDigest = await sha256File(
+      path.join(
+        stageReleasePath,
+        publicationManifestFilename,
+      ),
+    );
+
+    await journal("validating", {
+      artifacts: {
+        stagedCatalogSha256:
+          stagedCatalogDigest.sha256,
+        stagedPublicationManifestSha256:
+          stagedManifestDigest.sha256,
+      },
+    });
 
     // Rebuild the reviewed plan immediately before promotion. Any canonical
     // source or public destination change invalidates the write.
@@ -1199,6 +1248,8 @@ export async function publishReleasePackage(
       );
     }
 
+    await journal("backing-up-release");
+
     if (releasePreviouslyExisted) {
       const targetStats = await lstat(
         targetReleasePath,
@@ -1220,11 +1271,15 @@ export async function publishReleasePackage(
       releaseBackedUp = true;
     }
 
+    await journal("promoting-release");
+
     await rename(
       stageReleasePath,
       targetReleasePath,
     );
     releasePromoted = true;
+
+    await journal("backing-up-catalog");
 
     if (catalogPreviouslyExisted) {
       const catalogStats = await lstat(
@@ -1247,11 +1302,15 @@ export async function publishReleasePackage(
       catalogBackedUp = true;
     }
 
+    await journal("promoting-catalog");
+
     await rename(
       stagedCatalogPath,
       targetCatalogPath,
     );
     catalogPromoted = true;
+
+    await journal("verifying");
 
     const promotedManifest = JSON.parse(
       await readFile(
@@ -1281,27 +1340,25 @@ export async function publishReleasePackage(
       }
     }
 
-    await writeOperationManifest(
-      operationPath,
-      {
-        schema: {
-          name: "metadata-editor-publish-operation",
-          version: 1,
-        },
-        operationId,
+    const integrity =
+      await verifyPublishedPackageIntegrity(
+        canonicalPublishRoot,
         releaseId,
-        startedAt: publishedAt,
-        completedAt: new Date().toISOString(),
-        reviewedPlanFingerprint:
-          reviewedPlan.planFingerprint,
-        mode: releasePreviouslyExisted
-          ? "update"
-          : "build",
-        state: "completed",
-        resources:
-          publicationManifest.resources.length,
-      },
-    );
+        reviewedPlan.planFingerprint,
+      );
+
+    if (!integrity.ok) {
+      throw new Error(
+        `Post-publish integrity verification failed: ${integrity.reason}`,
+      );
+    }
+
+    const completedAt = new Date().toISOString();
+    await journal("completed", {
+      state: "completed",
+      completedAt,
+      resources: integrity.resourceCount,
+    });
 
     return {
       releaseId,
@@ -1321,7 +1378,7 @@ export async function publishReleasePackage(
           item.kind === "release-artwork" ||
           item.kind === "track-artwork",
       ).length,
-      completedAt: new Date().toISOString(),
+      completedAt,
     };
   } catch (error) {
     if (catalogPromoted) {
@@ -1353,29 +1410,14 @@ export async function publishReleasePackage(
       ).catch(() => undefined);
     }
 
-    await writeOperationManifest(
-      operationPath,
-      {
-        schema: {
-          name: "metadata-editor-publish-operation",
-          version: 1,
-        },
-        operationId,
-        releaseId,
-        startedAt: publishedAt,
-        failedAt: new Date().toISOString(),
-        reviewedPlanFingerprint:
-          reviewedPlan.planFingerprint,
-        mode: releasePreviouslyExisted
-          ? "update"
-          : "build",
-        state: "failed",
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unknown publication error",
-      },
-    ).catch(() => undefined);
+    await journal("failed", {
+      state: "failed",
+      failedAt: new Date().toISOString(),
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown publication error",
+    }).catch(() => undefined);
 
     throw error;
   }
