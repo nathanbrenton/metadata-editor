@@ -35,6 +35,11 @@ export type VideoMetadataEditorSnapshot = {
   originalSha256: string;
   title: string;
   videoType: string;
+  description: string;
+  date: string;
+  location: string;
+  director: string;
+  cameraOperator: string;
   relatedTrackId: string;
   masterPath: string;
 };
@@ -108,6 +113,46 @@ function normalizeEditableString(
   if (normalized.length > maximumLength) {
     throw new Error(
       `${label} must be ${maximumLength} characters or fewer.`,
+    );
+  }
+
+  return normalized;
+}
+
+function normalizeOptionalString(
+  value: unknown,
+  label: string,
+  maximumLength: number,
+): string {
+  const normalized =
+    typeof value === "string"
+      ? value.trim()
+      : "";
+
+  if (normalized.length > maximumLength) {
+    throw new Error(
+      `${label} must be ${maximumLength} characters or fewer.`,
+    );
+  }
+
+  return normalized;
+}
+
+function normalizeOptionalIsoDate(
+  value: unknown,
+): string {
+  const normalized = normalizeOptionalString(
+    value,
+    "Video date",
+    10,
+  );
+
+  if (
+    normalized &&
+    !/^\d{4}-\d{2}-\d{2}$/.test(normalized)
+  ) {
+    throw new Error(
+      "Video date must use YYYY-MM-DD.",
     );
   }
 
@@ -261,6 +306,26 @@ export async function readVideoMetadataForEdit(
       typeof loaded.videoTable.type === "string"
         ? loaded.videoTable.type
         : "",
+    description:
+      typeof loaded.videoTable.description === "string"
+        ? loaded.videoTable.description
+        : "",
+    date:
+      typeof loaded.videoTable.date === "string"
+        ? loaded.videoTable.date
+        : "",
+    location:
+      typeof loaded.videoTable.location === "string"
+        ? loaded.videoTable.location
+        : "",
+    director:
+      typeof loaded.videoTable.director === "string"
+        ? loaded.videoTable.director
+        : "",
+    cameraOperator:
+      typeof loaded.videoTable.camera_operator === "string"
+        ? loaded.videoTable.camera_operator
+        : "",
     relatedTrackId:
       typeof loaded.videoTable.related_track_id === "string"
         ? loaded.videoTable.related_track_id
@@ -280,6 +345,11 @@ export async function saveVideoMetadataEdits(
     originalSha256: string;
     title: unknown;
     videoType: unknown;
+    description?: unknown;
+    date?: unknown;
+    location?: unknown;
+    director?: unknown;
+    cameraOperator?: unknown;
     relatedTrackId: unknown;
   },
 ): Promise<VideoMetadataEditorSaveReceipt> {
@@ -298,6 +368,29 @@ export async function saveVideoMetadataEdits(
     input.videoType,
     "Video type",
     80,
+  );
+  const description = normalizeOptionalString(
+    input.description,
+    "Video description",
+    4000,
+  );
+  const date = normalizeOptionalIsoDate(
+    input.date,
+  );
+  const location = normalizeOptionalString(
+    input.location,
+    "Video location",
+    300,
+  );
+  const director = normalizeOptionalString(
+    input.director,
+    "Video director",
+    300,
+  );
+  const cameraOperator = normalizeOptionalString(
+    input.cameraOperator,
+    "Video camera operator",
+    300,
   );
   const relatedTrackId =
     typeof input.relatedTrackId === "string"
@@ -329,6 +422,11 @@ export async function saveVideoMetadataEdits(
 
   loaded.videoTable.title = title;
   loaded.videoTable.type = videoType;
+  loaded.videoTable.description = description;
+  loaded.videoTable.date = date;
+  loaded.videoTable.location = location;
+  loaded.videoTable.director = director;
+  loaded.videoTable.camera_operator = cameraOperator;
   loaded.videoTable.related_track_id =
     relatedTrackId;
 

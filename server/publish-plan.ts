@@ -70,7 +70,8 @@ export type PublishPlanItemKind =
   | "video-metadata"
   | "video-stream-manifest"
   | "video-stream-init"
-  | "video-stream-segment";
+  | "video-stream-segment"
+  | "video-poster";
 
 export type PublishPlanIssue = {
   code: string;
@@ -104,7 +105,7 @@ export type PublishPlan = {
   };
   contract: {
     name: "audio-player-public-package";
-    version: 3;
+    version: 4;
     catalogSchemaVersion: 1;
     mediaBaseUrl: "/media";
     trackResources: {
@@ -125,6 +126,11 @@ export type PublishPlan = {
     };
     videoResources: {
       metadataHrefField: "videos[].href";
+      poster: {
+        hrefField: "poster.href";
+        relativePath: "stream/poster.png";
+        format: "png";
+      };
       stream: {
         hrefField: "stream.href";
         protocol: "hls";
@@ -1142,7 +1148,7 @@ export async function buildPublishPlan(
         message:
           `Video web stream must be current before it can enter the hosted package. Current status: ${videoStream.status}.`,
         suggestion:
-          "Use Prepare video streams to generate the reviewed H.264/AAC HLS derivative, then refresh preflight.",
+          "Use Prepare video media to generate the reviewed H.264/AAC HLS derivative, then refresh preflight.",
       });
       items.push({
         kind: "video-stream-manifest",
@@ -1162,7 +1168,9 @@ export async function buildPublishPlan(
             ? "video-stream-manifest"
             : streamFile.kind === "initialization"
               ? "video-stream-init"
-              : "video-stream-segment";
+              : streamFile.kind === "poster"
+                ? "video-poster"
+                : "video-stream-segment";
         const destinationRelativePath = path.posix.join(
           videoDestination,
           "stream",
@@ -1201,7 +1209,9 @@ export async function buildPublishPlan(
               ? "Copy the portable HLS video playlist used as the public video stream resource."
               : streamFile.kind === "initialization"
                 ? "Copy the video HLS fMP4 initialization segment referenced by the playlist."
-                : "Copy one short H.264/AAC HLS video media segment referenced by the playlist.",
+                : streamFile.kind === "poster"
+                  ? "Copy the deterministic browser-compatible video poster frame generated from the canonical video master."
+                  : "Copy one short H.264/AAC HLS video media segment referenced by the playlist.",
           sizeBytes: streamFile.sizeBytes,
           ...(streamInspection.sha256
             ? { sourceSha256: streamInspection.sha256 }
@@ -1263,7 +1273,7 @@ export async function buildPublishPlan(
   };
   const contract: PublishPlan["contract"] = {
     name: "audio-player-public-package",
-    version: 3,
+    version: 4,
     catalogSchemaVersion: 1,
     mediaBaseUrl: "/media",
     trackResources: {
@@ -1286,6 +1296,11 @@ export async function buildPublishPlan(
     },
     videoResources: {
       metadataHrefField: "videos[].href",
+      poster: {
+        hrefField: "poster.href",
+        relativePath: "stream/poster.png",
+        format: "png",
+      },
       stream: {
         hrefField: "stream.href",
         protocol: "hls",

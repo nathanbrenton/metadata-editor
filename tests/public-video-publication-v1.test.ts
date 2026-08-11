@@ -27,10 +27,13 @@ const readmeSource = readFileSync(
   "utf8",
 );
 
-test("public package contract v3 plans sanitized video metadata and HLS resources", () => {
-  assert.match(planSource, /name: "audio-player-public-package";\s*version: 3;/);
+test("public package contract v4 plans sanitized video metadata, poster, and HLS resources", () => {
+  assert.match(planSource, /name: "audio-player-public-package";\s*version: 4;/);
   assert.match(planSource, /videoResources: \{/);
+  assert.match(planSource, /poster: \{/);
+  assert.match(planSource, /relativePath: "stream\/poster\.png"/);
   assert.match(planSource, /\| "video-metadata"/);
+  assert.match(planSource, /\| "video-poster"/);
   assert.match(planSource, /\| "video-stream-manifest"/);
   assert.match(planSource, /\| "video-stream-init"/);
   assert.match(planSource, /\| "video-stream-segment"/);
@@ -40,22 +43,30 @@ test("public package contract v3 plans sanitized video metadata and HLS resource
   assert.match(planSource, /videoStreams: \{/);
 });
 
-test("publisher generates video.json, relates it from release.json, and excludes canonical video internals", () => {
+test("publisher generates richer video.json with poster and excludes canonical video internals", () => {
   assert.match(writerSource, /const videoMetadataFilename = "video\.json"/);
   assert.match(writerSource, /name: "media-player-video"/);
+  assert.match(writerSource, /version: 2/);
+  assert.match(writerSource, /description: video\.description/);
+  assert.match(writerSource, /location: video\.location/);
+  assert.match(writerSource, /director: video\.director/);
+  assert.match(writerSource, /cameraOperator: video\.cameraOperator/);
   assert.match(writerSource, /relatedTrackId: video\.relatedTrackId/);
+  assert.match(writerSource, /poster: \{/);
+  assert.match(writerSource, /videoResources\.poster\.relativePath/);
   assert.match(writerSource, /videos:\s*\(release\.videos \?\? \[\]\)\.map/);
   assert.match(writerSource, /lower\.startsWith\("video-master\."\)/);
   assert.match(writerSource, /"video\.toml"/);
   assert.match(writerSource, /videoStreamCount: reviewedPlan\.videoStreams\.currentCount/);
 });
 
-test("Publish UI separates audio and video preparation while batch preparation includes video HLS", () => {
+test("Publish UI prepares video media while batch preparation includes poster-aware video HLS", () => {
   assert.match(appSource, /function canPrepareVideoPublishPlan/);
   assert.match(appSource, /const prepareVideoRelease = useCallback\(async/);
   assert.match(appSource, /\/api\/publish\/prepare-video/);
-  assert.match(appSource, /Prepare video streams/);
-  assert.match(appSource, /Video stream/);
+  assert.match(appSource, /Prepare video media/);
+  assert.match(appSource, /video HLS/);
+  assert.match(appSource, /with poster/);
   assert.match(appSource, /Video \$\{prepareProgress\.videoIndex\} of/);
 
   assert.match(serverSource, /const videoNeedsPreparation =/);
@@ -64,10 +75,11 @@ test("Publish UI separates audio and video preparation while batch preparation i
   assert.match(serverSource, /videoReceipt/);
 });
 
-test("documentation records public video publication while keeping canonical masters private", () => {
-  assert.match(helpSource, /public-package contract v3 publishes only sanitized video\.json/);
-  assert.match(helpSource, /Prepare video streams/);
-  assert.match(readmeSource, /Publish contract v3 plans a host-ready audio\/video layout/);
+test("documentation records public video presentation resources while canonical masters stay private", () => {
+  assert.match(helpSource, /public-package contract v4 publishes sanitized video\.json, poster\.png/);
+  assert.match(helpSource, /Prepare video media/);
+  assert.match(readmeSource, /Publish contract v4 plans a host-ready audio\/video layout/);
   assert.match(readmeSource, /videos\/<video-id>\//);
+  assert.match(readmeSource, /poster\.png/);
   assert.match(readmeSource, /private `stream-info\.json` preparation sidecars/);
 });

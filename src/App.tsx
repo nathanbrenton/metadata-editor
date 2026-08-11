@@ -365,6 +365,11 @@ type VideoScanResult = {
   relativePath: string;
   title?: string;
   videoType?: string;
+  description?: string;
+  date?: string;
+  location?: string;
+  director?: string;
+  cameraOperator?: string;
   relatedTrackId?: string;
   masterPath?: string;
   metadataFiles: MetadataFileStatus[];
@@ -378,6 +383,11 @@ type VideoMetadataEditorSnapshot = {
   originalSha256: string;
   title: string;
   videoType: string;
+  description: string;
+  date: string;
+  location: string;
+  director: string;
+  cameraOperator: string;
   relatedTrackId: string;
   masterPath: string;
 };
@@ -528,7 +538,8 @@ type PublishPlanItem = {
     | "video-metadata"
     | "video-stream-manifest"
     | "video-stream-init"
-    | "video-stream-segment";
+    | "video-stream-segment"
+    | "video-poster";
   action:
     | "create"
     | "replace"
@@ -636,6 +647,11 @@ type PublishPlan = {
     };
     videoResources: {
       metadataHrefField: string;
+      poster: {
+        hrefField: string;
+        relativePath: string;
+        format: "png";
+      };
       stream: {
         hrefField: string;
         protocol: "hls";
@@ -1846,6 +1862,13 @@ export function App() {
     setMenuOpen(false);
   }, []);
 
+  const returnToLibraryHome = useCallback(() => {
+    setWorkflowHelpReturnTarget(null);
+    setSelectedReleaseDetail(null);
+    setApplicationView("library");
+    setMenuOpen(false);
+  }, []);
+
   const openReleaseInLibrary = useCallback(async (
     releaseId: string,
   ) => {
@@ -1986,27 +2009,26 @@ export function App() {
       ) : (
         <>
           <header className="page-header">
-            <div className="page-header-title">
-              <h1>
-                {applicationView === "help"
-                  ? "Workflow & Help"
-                  : applicationView === "compatibility"
-                    ? "Metadata Tag Search"
-                    : "Metadata Editor"}
-              </h1>
-              <p className="subtitle">
-                {applicationView === "ingest"
-                  ? "Find and inspect source assets"
-                  : applicationView === "staging"
-                    ? "Build or update a release workspace"
-                    : applicationView === "library"
-                      ? "Author metadata and prepare media"
-                      : applicationView === "publish"
-                        ? "Preflight and deploy releases"
-                        : applicationView === "compatibility"
-                          ? "Metadata field reference and player mappings"
-                          : "Release workflow, status reference, FAQ, and troubleshooting"}
-              </p>
+            <div className="page-header-branding">
+              <button
+                type="button"
+                className="page-header-brand"
+                title="Back to Library"
+                aria-label="Hiplingo · Back to Library"
+                onClick={returnToLibraryHome}
+              >
+                <span className="hiplingo-mark" aria-hidden="true">H</span>
+                <span className="hiplingo-wordmark">HIPLINGO</span>
+              </button>
+              <div className="page-header-title">
+                <h1>
+                  {applicationView === "help"
+                    ? "Workflow & Help"
+                    : applicationView === "compatibility"
+                      ? "Metadata Tag Search"
+                      : "Metadata Editor"}
+                </h1>
+              </div>
             </div>
 
             <div className="page-header-actions">
@@ -5392,7 +5414,7 @@ function publishPreflightGuidance(
   }
 
   if (canPrepareVideoPublishPlan(plan)) {
-    return "Canonical video masters are ready, but one or more private H.264/AAC segmented video HLS derivatives must be prepared before the public package can include video.";
+    return "Canonical video masters are ready, but one or more private H.264/AAC segmented video derivatives and poster frames must be prepared before the public package can include video.";
   }
 
   if (
@@ -5429,7 +5451,7 @@ function publishNextStepLabel(
   }
 
   if (canPrepareVideoPublishPlan(plan)) {
-    return "Prepare video streams";
+    return "Prepare video media";
   }
 
   if (
@@ -5909,7 +5931,7 @@ function PublishWorkspace({
       releaseId: plan.releaseId,
       status: "running",
       phase: "starting",
-      message: "Starting video web-stream preparation…",
+      message: "Starting video stream + poster preparation…",
       completedUnits: 0,
       totalUnits: 0,
       trackCount: 0,
@@ -5970,21 +5992,21 @@ function PublishWorkspace({
         throw new Error(
           "error" in payload && payload.error
             ? payload.error
-            : "Unable to prepare release video streams.",
+            : "Unable to prepare release video media.",
         );
       }
 
       await loadPublishPlan(plan.releaseId);
       await Promise.resolve(onRefresh());
       onNotify(
-        `Prepared ${payload.streamCount} video HLS ${payload.streamCount === 1 ? "stream" : "streams"}.`,
+        `Prepared ${payload.streamCount} video HLS ${payload.streamCount === 1 ? "stream" : "streams"} with poster ${payload.streamCount === 1 ? "frame" : "frames"}.`,
         "success",
       );
     } catch (prepareError) {
       setPlanError(
         prepareError instanceof Error
           ? prepareError.message
-          : "Unable to prepare release video streams.",
+          : "Unable to prepare release video media.",
       );
     } finally {
       if (progressTimer !== undefined) {
@@ -6887,6 +6909,10 @@ function PublishWorkspace({
                 {" → "}{selectedPlan.contract.trackResources.stream.manifestRelativePath}
                 {" · "}{selectedPlan.contract.trackResources.waveform.hrefField}
                 {" → "}{selectedPlan.contract.trackResources.waveform.filename}
+              </p>
+              <p>
+                Video poster: {selectedPlan.contract.videoResources.poster.relativePath}
+                {" · "}{selectedPlan.contract.videoResources.poster.format.toUpperCase()}
               </p>
               <p>
                 Video: {selectedPlan.contract.videoResources.stream.protocol.toUpperCase()}
@@ -9203,6 +9229,11 @@ function ReleaseCard({
               videoEditorDraft.originalSha256,
             title,
             videoType,
+            description: videoEditorDraft.description,
+            date: videoEditorDraft.date,
+            location: videoEditorDraft.location,
+            director: videoEditorDraft.director,
+            cameraOperator: videoEditorDraft.cameraOperator,
             relatedTrackId:
               videoEditorDraft.relatedTrackId,
           }),
@@ -9830,6 +9861,89 @@ function ReleaseCard({
                                           ...current,
                                           videoType: event.target.value,
                                         }
+                                      : current,
+                                  )
+                                }
+                              />
+                            </label>
+
+                            <label className="library-video-editor-wide-field">
+                              <span>Description</span>
+                              <textarea
+                                rows={3}
+                                value={videoEditorDraft.description}
+                                disabled={videoEditorSaving}
+                                onChange={(event) =>
+                                  setVideoEditorDraft((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          description: event.target.value,
+                                        }
+                                      : current,
+                                  )
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              <span>Date</span>
+                              <input
+                                type="date"
+                                value={videoEditorDraft.date}
+                                disabled={videoEditorSaving}
+                                onChange={(event) =>
+                                  setVideoEditorDraft((current) =>
+                                    current
+                                      ? { ...current, date: event.target.value }
+                                      : current,
+                                  )
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              <span>Location</span>
+                              <input
+                                type="text"
+                                value={videoEditorDraft.location}
+                                disabled={videoEditorSaving}
+                                onChange={(event) =>
+                                  setVideoEditorDraft((current) =>
+                                    current
+                                      ? { ...current, location: event.target.value }
+                                      : current,
+                                  )
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              <span>Director</span>
+                              <input
+                                type="text"
+                                value={videoEditorDraft.director}
+                                disabled={videoEditorSaving}
+                                onChange={(event) =>
+                                  setVideoEditorDraft((current) =>
+                                    current
+                                      ? { ...current, director: event.target.value }
+                                      : current,
+                                  )
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              <span>Camera operator</span>
+                              <input
+                                type="text"
+                                value={videoEditorDraft.cameraOperator}
+                                disabled={videoEditorSaving}
+                                onChange={(event) =>
+                                  setVideoEditorDraft((current) =>
+                                    current
+                                      ? { ...current, cameraOperator: event.target.value }
                                       : current,
                                   )
                                 }
@@ -19311,9 +19425,9 @@ function ReleaseMetadataDetailView({
         <div className="metadata-detail-identity">
           <button
             type="button"
-            className="metadata-detail-back-button"
-            aria-label="Back to library"
-            title="Back to library"
+            className="page-header-brand metadata-detail-home-button"
+            aria-label="Hiplingo · Back to Library"
+            title="Back to Library"
             onClick={() => {
               if (
                 dirtyCount > 0 &&
@@ -19327,7 +19441,8 @@ function ReleaseMetadataDetailView({
               onBack();
             }}
           >
-            <span aria-hidden="true">←</span>
+            <span className="hiplingo-mark" aria-hidden="true">H</span>
+            <span className="hiplingo-wordmark">HIPLINGO</span>
           </button>
 
           <span

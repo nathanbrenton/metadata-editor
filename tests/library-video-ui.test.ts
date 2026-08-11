@@ -51,7 +51,7 @@ test("documents Library video inspection, guarded preparation, and public-packag
   );
   assert.match(
     helpSource,
-    /V3b H\.264\/AAC HLS backend produces the private/,
+    /H\.264\/AAC HLS backend now also generates a deterministic PNG poster frame/,
   );
   assert.match(
     helpSource,
@@ -59,11 +59,11 @@ test("documents Library video inspection, guarded preparation, and public-packag
   );
   assert.match(
     helpSource,
-    /Publish preflight now includes video readiness/,
+    /Publish preflight includes video readiness/,
   );
   assert.match(
     helpSource,
-    /contract v3 packages sanitized/,
+    /contract v4 publishes sanitized/,
   );
   assert.match(
     helpSource,

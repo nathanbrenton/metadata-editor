@@ -16,6 +16,7 @@ test("guards video preparation with reviewed plans, isolated staging, validation
   assert.match(source, /The video preparation plan is stale/);
   assert.match(source, /\.metadata-editor-operations/);
   assert.match(source, /buildVideoWebStreamFfmpegArgs/);
+  assert.match(source, /buildVideoPosterFfmpegArgs/);
   assert.match(source, /inspectVideoWebStreamDirectory/);
   assert.match(source, /buildVideoWebStreamVerificationArgs/);
   assert.match(source, /canonical video release changed/);

@@ -2726,12 +2726,17 @@ function videoMetadataDocument(
   const data = {
     schema: {
       name: "video-metadata",
-      version: 1,
+      version: 2,
     },
     video: {
       id: video.id,
       title: video.draft.title,
       type: video.draft.videoType,
+      description: "",
+      date: "",
+      location: "",
+      director: "",
+      camera_operator: "",
       master_path: video.videoDestination,
       related_track_id: video.relatedTrackId ?? "",
     },

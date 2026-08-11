@@ -24,6 +24,11 @@ export type VideoScanResult = {
   relativePath: string;
   title?: string;
   videoType?: string;
+  description?: string;
+  date?: string;
+  location?: string;
+  director?: string;
+  cameraOperator?: string;
   relatedTrackId?: string;
   masterPath?: string;
   metadataFiles: MetadataFileStatus[];

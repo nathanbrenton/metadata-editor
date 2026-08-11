@@ -17,7 +17,7 @@ import type {
   VideoScanResult,
 } from "../types.js";
 
-export const VIDEO_WEB_STREAM_PROFILE_VERSION = 1;
+export const VIDEO_WEB_STREAM_PROFILE_VERSION = 2;
 export const VIDEO_WEB_STREAM_DIRECTORY = "stream";
 export const VIDEO_WEB_STREAM_PLAYLIST_FILENAME =
   "index.m3u8";
@@ -25,6 +25,8 @@ export const VIDEO_WEB_STREAM_INIT_FILENAME =
   "init.mp4";
 export const VIDEO_WEB_STREAM_INFO_FILENAME =
   "stream-info.json";
+export const VIDEO_WEB_STREAM_POSTER_FILENAME =
+  "poster.png";
 export const VIDEO_WEB_STREAM_SEGMENT_PATTERN =
   "segment-%05d.m4s";
 export const VIDEO_WEB_STREAM_SEGMENT_DURATION_SECONDS = 3;
@@ -57,6 +59,14 @@ export type VideoWebStreamProfile = {
     bitrateKbps: 192;
     channels: 2;
     sampleRatePolicy: "preserve-source";
+  };
+  poster: {
+    filename: string;
+    format: "png";
+    framePolicy: "thumbnail-first-120-frames";
+    thumbnailFrames: number;
+    maxWidth: number;
+    maxHeight: number;
   };
   playlist: {
     type: "vod";
@@ -109,7 +119,7 @@ export type VideoWebStreamAction =
   | "blocked";
 
 export type VideoWebStreamFile = {
-  kind: "manifest" | "initialization" | "segment";
+  kind: "manifest" | "initialization" | "segment" | "poster";
   filename: string;
   relativePath: string;
   sizeBytes: number;
@@ -220,6 +230,14 @@ export function buildVideoWebStreamProfile():
       bitrateKbps: 192,
       channels: 2,
       sampleRatePolicy: "preserve-source",
+    },
+    poster: {
+      filename: VIDEO_WEB_STREAM_POSTER_FILENAME,
+      format: "png",
+      framePolicy: "thumbnail-first-120-frames",
+      thumbnailFrames: 120,
+      maxWidth: 1280,
+      maxHeight: 720,
     },
     playlist: {
       type: "vod",
@@ -379,6 +397,37 @@ export function buildVideoWebStreamFfmpegArgs(
   ];
 }
 
+export function buildVideoPosterFfmpegArgs(
+  inputPath: string,
+  outputDirectory: string,
+  profile = buildVideoWebStreamProfile(),
+): string[] {
+  const scale =
+    `scale=w='min(iw,${profile.poster.maxWidth})':h='min(ih,${profile.poster.maxHeight})':force_original_aspect_ratio=decrease:force_divisible_by=2`;
+
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-nostdin",
+    "-i",
+    inputPath,
+    "-map",
+    "0:v:0",
+    "-an",
+    "-sn",
+    "-dn",
+    "-vf",
+    `thumbnail=${profile.poster.thumbnailFrames},${scale}`,
+    "-frames:v",
+    "1",
+    "-compression_level",
+    "6",
+    "-y",
+    path.join(outputDirectory, profile.poster.filename),
+  ];
+}
+
 export function buildVideoWebStreamVerificationArgs(
   playlistPath: string,
 ): string[] {
@@ -513,6 +562,7 @@ export async function inspectVideoWebStreamDirectory(
     VIDEO_WEB_STREAM_PLAYLIST_FILENAME,
     VIDEO_WEB_STREAM_INIT_FILENAME,
     VIDEO_WEB_STREAM_INFO_FILENAME,
+    VIDEO_WEB_STREAM_POSTER_FILENAME,
     ...segmentFilenames,
   ]);
   const entries = await readdir(directoryPath, {
@@ -537,6 +587,7 @@ export async function inspectVideoWebStreamDirectory(
   for (const [kind, filename] of [
     ["manifest", VIDEO_WEB_STREAM_PLAYLIST_FILENAME],
     ["initialization", VIDEO_WEB_STREAM_INIT_FILENAME],
+    ["poster", VIDEO_WEB_STREAM_POSTER_FILENAME],
     ...segmentFilenames.map(
       (filename) => ["segment", filename] as const,
     ),
@@ -813,7 +864,7 @@ async function buildVideoItemPlan(
       reason: "Video HLS web stream is current.",
       files: inspected.files,
       checks: [
-        `Validated ${inspected.files.length - 2} video HLS media segments plus manifest and initialization segment.`,
+        `Validated ${Math.max(0, inspected.files.length - 3)} video HLS media segments plus manifest, initialization segment, and poster frame.`,
       ],
     };
   } catch (error) {

@@ -43,12 +43,17 @@ async function createFixture() {
     [
       "[schema]",
       'name = "video-metadata"',
-      "version = 1",
+      "version = 2",
       "",
       "[video]",
       `id = "${videoId}"`,
       'title = "Session Footage"',
       'type = "studio_footage"',
+      'description = "Camera test from the rehearsal room."',
+      'date = "2026-08-09"',
+      'location = "Costa Mesa, CA"',
+      'director = "Nathan Brenton"',
+      'camera_operator = "Camera Operator"',
       'master_path = "video-master.mp4"',
       'related_track_id = ""',
       'future_field = "preserve-me"',
@@ -112,6 +117,14 @@ test("reads editable video metadata with a concurrency hash", async () => {
 
     assert.equal(snapshot.title, "Session Footage");
     assert.equal(snapshot.videoType, "studio_footage");
+    assert.equal(
+      snapshot.description,
+      "Camera test from the rehearsal room.",
+    );
+    assert.equal(snapshot.date, "2026-08-09");
+    assert.equal(snapshot.location, "Costa Mesa, CA");
+    assert.equal(snapshot.director, "Nathan Brenton");
+    assert.equal(snapshot.cameraOperator, "Camera Operator");
     assert.equal(snapshot.relatedTrackId, "");
     assert.equal(snapshot.masterPath, "video-master.mp4");
     assert.match(snapshot.originalSha256, /^[a-f0-9]{64}$/);
@@ -140,6 +153,11 @@ test("updates only editable video fields and preserves identity/master/unknown d
         originalSha256: before.originalSha256,
         title: "Edited Session Footage",
         videoType: "live_performance",
+        description: "Live performance camera master.",
+        date: "2026-08-10",
+        location: "Los Angeles, CA",
+        director: "Director Name",
+        cameraOperator: "Operator Name",
         relatedTrackId: "01_song",
       },
     );
@@ -155,6 +173,14 @@ test("updates only editable video fields and preserves identity/master/unknown d
     assert.equal(parsed.video.master_path, "video-master.mp4");
     assert.equal(parsed.video.title, "Edited Session Footage");
     assert.equal(parsed.video.type, "live_performance");
+    assert.equal(
+      parsed.video.description,
+      "Live performance camera master.",
+    );
+    assert.equal(parsed.video.date, "2026-08-10");
+    assert.equal(parsed.video.location, "Los Angeles, CA");
+    assert.equal(parsed.video.director, "Director Name");
+    assert.equal(parsed.video.camera_operator, "Operator Name");
     assert.equal(parsed.video.related_track_id, "01_song");
     assert.equal(parsed.video.future_field, "preserve-me");
     assert.match(receipt.savedSha256, /^[a-f0-9]{64}$/);
@@ -195,6 +221,22 @@ test("rejects stale saves and broken related-track references", async () => {
         },
       ),
       /changed externally/,
+    );
+
+    await assert.rejects(
+      saveVideoMetadataEdits(
+        fixture.mediaRoot,
+        fixture.release,
+        {
+          videoId: fixture.videoId,
+          originalSha256: snapshot.originalSha256,
+          title: "Changed",
+          videoType: "other",
+          date: "08/10/2026",
+          relatedTrackId: "",
+        },
+      ),
+      /YYYY-MM-DD/,
     );
 
     await assert.rejects(

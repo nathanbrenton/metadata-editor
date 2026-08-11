@@ -6,8 +6,10 @@ import {
   VIDEO_WEB_STREAM_INFO_FILENAME,
   VIDEO_WEB_STREAM_INIT_FILENAME,
   VIDEO_WEB_STREAM_PLAYLIST_FILENAME,
+  VIDEO_WEB_STREAM_POSTER_FILENAME,
   VIDEO_WEB_STREAM_SEGMENT_DURATION_SECONDS,
   VIDEO_WEB_STREAM_SEGMENT_PATTERN,
+  buildVideoPosterFfmpegArgs,
   buildVideoWebStreamInfo,
   buildVideoWebStreamPaths,
   buildVideoWebStreamProfile,
@@ -15,10 +17,10 @@ import {
   hashVideoWebStreamSourceIdentity,
 } from "../server/media-processing/video-web-stream.js";
 
-test("defines one deterministic 720p H.264/AAC HLS video delivery profile", () => {
+test("defines deterministic 720p H.264/AAC HLS plus poster video delivery profile", () => {
   const profile = buildVideoWebStreamProfile();
 
-  assert.equal(profile.version, 1);
+  assert.equal(profile.version, 2);
   assert.equal(profile.protocol, "hls");
   assert.equal(profile.rendition, "single");
 
@@ -49,6 +51,15 @@ test("defines one deterministic 720p H.264/AAC HLS video delivery profile", () =
     sampleRatePolicy: "preserve-source",
   });
 
+  assert.deepEqual(profile.poster, {
+    filename: "poster.png",
+    format: "png",
+    framePolicy: "thumbnail-first-120-frames",
+    thumbnailFrames: 120,
+    maxWidth: 1280,
+    maxHeight: 720,
+  });
+
   assert.deepEqual(profile.playlist, {
     type: "vod",
     segmentType: "fmp4",
@@ -59,38 +70,21 @@ test("defines one deterministic 720p H.264/AAC HLS video delivery profile", () =
     segmentPattern: "segment-%05d.m4s",
   });
 
-  assert.equal(
-    VIDEO_WEB_STREAM_SEGMENT_DURATION_SECONDS,
-    3,
-  );
+  assert.equal(VIDEO_WEB_STREAM_SEGMENT_DURATION_SECONDS, 3);
 });
 
-test("keeps the private video stream layout parallel to audio HLS", () => {
+test("keeps the private video stream layout parallel to audio HLS with one poster", () => {
   const paths = buildVideoWebStreamPaths({
     relativePath:
       "releases/2026-08-09_example/videos/video_example",
   });
 
-  assert.equal(
-    VIDEO_WEB_STREAM_DIRECTORY,
-    "stream",
-  );
-  assert.equal(
-    VIDEO_WEB_STREAM_PLAYLIST_FILENAME,
-    "index.m3u8",
-  );
-  assert.equal(
-    VIDEO_WEB_STREAM_INIT_FILENAME,
-    "init.mp4",
-  );
-  assert.equal(
-    VIDEO_WEB_STREAM_INFO_FILENAME,
-    "stream-info.json",
-  );
-  assert.equal(
-    VIDEO_WEB_STREAM_SEGMENT_PATTERN,
-    "segment-%05d.m4s",
-  );
+  assert.equal(VIDEO_WEB_STREAM_DIRECTORY, "stream");
+  assert.equal(VIDEO_WEB_STREAM_PLAYLIST_FILENAME, "index.m3u8");
+  assert.equal(VIDEO_WEB_STREAM_INIT_FILENAME, "init.mp4");
+  assert.equal(VIDEO_WEB_STREAM_INFO_FILENAME, "stream-info.json");
+  assert.equal(VIDEO_WEB_STREAM_POSTER_FILENAME, "poster.png");
+  assert.equal(VIDEO_WEB_STREAM_SEGMENT_PATTERN, "segment-%05d.m4s");
   assert.deepEqual(paths, {
     directoryRelativePath:
       "releases/2026-08-09_example/videos/video_example/stream",
@@ -103,22 +97,17 @@ test("keeps the private video stream layout parallel to audio HLS", () => {
 
 test("hashes profile and source identity independently for freshness", () => {
   const profile = buildVideoWebStreamProfile();
-  const profileSha256 =
-    hashVideoWebStreamProfile(profile);
+  const profileSha256 = hashVideoWebStreamProfile(profile);
   const source = {
     relativePath:
       "releases/2026-08-09_example/videos/video_example/video-master.mp4",
     sizeBytes: 123456,
     modifiedAt: "2026-08-09T20:00:00.000Z",
   };
-  const sourceFingerprint =
-    hashVideoWebStreamSourceIdentity(source);
+  const sourceFingerprint = hashVideoWebStreamSourceIdentity(source);
 
   assert.match(profileSha256, /^[a-f0-9]{64}$/);
-  assert.match(
-    sourceFingerprint,
-    /^[a-f0-9]{64}$/,
-  );
+  assert.match(sourceFingerprint, /^[a-f0-9]{64}$/);
   assert.notEqual(
     sourceFingerprint,
     hashVideoWebStreamSourceIdentity({
@@ -147,23 +136,14 @@ test("hashes profile and source identity independently for freshness", () => {
     "2026-08-09T21:00:00.000Z",
   );
 
-  assert.equal(
-    info.schema.name,
-    "metadata-editor-video-web-stream",
-  );
+  assert.equal(info.schema.name, "metadata-editor-video-web-stream");
   assert.equal(info.schema.version, 1);
   assert.equal(info.videoId, "video_example");
-  assert.equal(
-    info.source.fingerprint,
-    sourceFingerprint,
-  );
-  assert.equal(
-    info.profile.sha256,
-    profileSha256,
-  );
+  assert.equal(info.source.fingerprint, sourceFingerprint);
+  assert.equal(info.profile.sha256, profileSha256);
 });
 
-test("builds deterministic FFmpeg arguments from the V3b video profile", async () => {
+test("builds deterministic HLS and poster FFmpeg arguments", async () => {
   const {
     buildVideoWebStreamFfmpegArgs,
     buildVideoWebStreamVerificationArgs,
@@ -188,23 +168,36 @@ test("builds deterministic FFmpeg arguments from the V3b video profile", async (
   assert.ok(args.includes("192k"));
   assert.ok(args.includes("independent_segments"));
   assert.ok(
-    args.some((arg) =>
-      arg.includes("min(source_fps,60)"),
-    ),
+    args.some((arg) => arg.includes("min(source_fps,60)")),
   );
   assert.ok(
     args.some((arg) =>
       arg.includes("force_original_aspect_ratio=decrease"),
     ),
   );
+  assert.ok(args.includes("expr:gte(t,n_forced*3)"));
+
+  const posterArgs = buildVideoPosterFfmpegArgs(
+    "/tmp/source video.mp4",
+    "/tmp/video stream",
+  );
+  assert.ok(posterArgs.includes("0:v:0"));
+  assert.ok(posterArgs.includes("-an"));
+  assert.ok(posterArgs.includes("-frames:v"));
+  assert.ok(posterArgs.includes("1"));
   assert.ok(
-    args.includes("expr:gte(t,n_forced*3)"),
+    posterArgs.some((arg) =>
+      arg.includes("thumbnail=120") &&
+      arg.includes("force_original_aspect_ratio=decrease"),
+    ),
+  );
+  assert.ok(
+    posterArgs.at(-1)?.endsWith("/tmp/video stream/poster.png"),
   );
 
-  const verify =
-    buildVideoWebStreamVerificationArgs(
-      "/tmp/video stream/index.m3u8",
-    );
+  const verify = buildVideoWebStreamVerificationArgs(
+    "/tmp/video stream/index.m3u8",
+  );
   assert.deepEqual(
     verify.slice(-7),
     [

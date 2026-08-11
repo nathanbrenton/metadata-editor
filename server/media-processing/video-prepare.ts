@@ -34,6 +34,7 @@ import type {
   MediaPreparationProgress,
 } from "./progress.js";
 import {
+  buildVideoPosterFfmpegArgs,
   buildVideoWebStreamFfmpegArgs,
   buildVideoWebStreamInfo,
   buildVideoWebStreamPlan,
@@ -370,6 +371,15 @@ async function stageVideoStream(
   await runProcess(
     capabilities.executable,
     buildVideoWebStreamFfmpegArgs(
+      masterPath,
+      stageDirectory,
+      plan.profile,
+    ),
+  );
+
+  await runProcess(
+    capabilities.executable,
+    buildVideoPosterFfmpegArgs(
       masterPath,
       stageDirectory,
       plan.profile,

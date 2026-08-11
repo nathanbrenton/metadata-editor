@@ -1723,6 +1723,18 @@ const server = createServer(
               originalSha256,
               title: body.title,
               videoType: body.videoType,
+              description:
+                "description" in body ? body.description : "",
+              date:
+                "date" in body ? body.date : "",
+              location:
+                "location" in body ? body.location : "",
+              director:
+                "director" in body ? body.director : "",
+              cameraOperator:
+                "cameraOperator" in body
+                  ? body.cameraOperator
+                  : "",
               relatedTrackId: body.relatedTrackId,
             },
           ),

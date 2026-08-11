@@ -88,6 +88,10 @@ async function writeCurrentStream(
     "segment",
   );
   await writeFile(
+    path.join(directory, "poster.png"),
+    "poster",
+  );
+  await writeFile(
     path.join(directory, "stream-info.json"),
     `${JSON.stringify(
       buildVideoWebStreamInfo(

@@ -374,16 +374,27 @@ function publicVideoDocument(
   return {
     schema: {
       name: "media-player-video",
-      version: 1,
+      version: 2,
     },
     id: video.id,
     releaseId: release.id,
     metadata: {
       ...(video.title ? { title: video.title } : {}),
       ...(video.videoType ? { type: video.videoType } : {}),
+      ...(video.description ? { description: video.description } : {}),
+      ...(video.date ? { date: video.date } : {}),
+      ...(video.location ? { location: video.location } : {}),
+      ...(video.director ? { director: video.director } : {}),
+      ...(video.cameraOperator
+        ? { cameraOperator: video.cameraOperator }
+        : {}),
       ...(video.relatedTrackId
         ? { relatedTrackId: video.relatedTrackId }
         : {}),
+    },
+    poster: {
+      href: plan.contract.videoResources.poster.relativePath,
+      format: plan.contract.videoResources.poster.format,
     },
     stream: {
       href: plan.contract.videoResources.stream.manifestRelativePath,

@@ -174,7 +174,15 @@ async function readVideoLibraryIdentity(
 ): Promise<
   Pick<
     VideoScanResult,
-    "title" | "videoType" | "relatedTrackId" | "masterPath"
+    | "title"
+    | "videoType"
+    | "description"
+    | "date"
+    | "location"
+    | "director"
+    | "cameraOperator"
+    | "relatedTrackId"
+    | "masterPath"
   >
 > {
   const videoDocument = metadataFiles.find(
@@ -218,6 +226,13 @@ async function readVideoLibraryIdentity(
 
     const title = readNonBlankString(videoTable.title);
     const videoType = readNonBlankString(videoTable.type);
+    const description = readNonBlankString(videoTable.description);
+    const date = readNonBlankString(videoTable.date);
+    const location = readNonBlankString(videoTable.location);
+    const director = readNonBlankString(videoTable.director);
+    const cameraOperator = readNonBlankString(
+      videoTable.camera_operator,
+    );
     const relatedTrackId = readNonBlankString(
       videoTable.related_track_id,
     );
@@ -228,6 +243,11 @@ async function readVideoLibraryIdentity(
     return {
       ...(title ? { title } : {}),
       ...(videoType ? { videoType } : {}),
+      ...(description ? { description } : {}),
+      ...(date ? { date } : {}),
+      ...(location ? { location } : {}),
+      ...(director ? { director } : {}),
+      ...(cameraOperator ? { cameraOperator } : {}),
       ...(relatedTrackId ? { relatedTrackId } : {}),
       ...(masterPath ? { masterPath } : {}),
     };

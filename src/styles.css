@@ -13672,3 +13672,88 @@ main {
 .publish-operation-recovery-cell button {
   justify-self: start;
 }
+
+/* App shell branding + compact header v1 */
+.page-header-branding {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.page-header-brand {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.48rem;
+  margin: 0;
+  border: 0;
+  padding: 0.15rem 0.2rem 0.15rem 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.page-header-brand:hover {
+  background: transparent;
+}
+
+.hiplingo-mark {
+  display: inline-grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  border: 1px solid #596773;
+  border-radius: 0.42rem;
+  background: #101419;
+  color: #f2f5f7;
+  font-size: 0.9rem;
+  font-weight: 850;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+.hiplingo-wordmark {
+  color: #dfe5e9;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+}
+
+.page-header-brand:hover .hiplingo-mark,
+.page-header-brand:focus-visible .hiplingo-mark {
+  border-color: #8699a8;
+  background: #1a2128;
+}
+
+.page-header-brand:hover .hiplingo-wordmark,
+.page-header-brand:focus-visible .hiplingo-wordmark {
+  color: #fff;
+}
+
+.library-video-editor-wide-field {
+  grid-column: 1 / -1;
+}
+
+.library-video-editor-wide-field textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+}
+
+.library-video-editor-fields textarea {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #414b55;
+  border-radius: 0.3rem;
+  padding: 0.45rem 0.55rem;
+  background: #0f1418;
+  color: #e4e9ed;
+  font: inherit;
+  font-size: 0.78rem;
+  text-transform: none;
+}
+
+.metadata-detail-home-button {
+  align-self: center;
+}
