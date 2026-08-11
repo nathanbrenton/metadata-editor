@@ -380,7 +380,7 @@ code {
 .library-video-row {
   display: grid;
   grid-template-columns:
-    2.35rem minmax(10rem, 1.4fr) minmax(7rem, 0.7fr)
+    4.4rem minmax(10rem, 1.4fr) minmax(7rem, 0.7fr)
     minmax(10rem, 1fr) auto auto auto;
   gap: 0.75rem;
   align-items: center;
@@ -403,6 +403,39 @@ code {
   font-size: 0.58rem;
   font-weight: 800;
   letter-spacing: 0.05em;
+}
+
+.library-video-poster {
+  position: relative;
+  display: grid;
+  width: 4rem;
+  aspect-ratio: 16 / 9;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #48535e;
+  border-radius: 0.28rem;
+  background: #0b0f12;
+  color: #aeb7c0;
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.library-video-poster img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-video-poster > span {
+  position: relative;
+  z-index: 1;
+  padding: 0.12rem 0.24rem;
+  border-radius: 0.2rem;
+  background: rgb(0 0 0 / 68%);
 }
 
 .library-video-identity {
@@ -519,6 +552,15 @@ code {
   text-transform: none;
 }
 
+.library-video-editor-fields label > small {
+  color: #7f8a94;
+  font-size: 0.62rem;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-transform: none;
+}
+
 .library-video-editor-reference {
   display: flex;
   flex-wrap: wrap;
@@ -589,7 +631,7 @@ code {
 @media (max-width: 900px) {
   .library-video-row {
     grid-template-columns:
-      2.35rem minmax(9rem, 1fr) auto auto auto;
+      4.4rem minmax(9rem, 1fr) auto auto auto;
   }
 
   .library-video-type,
@@ -13698,37 +13740,19 @@ main {
   background: transparent;
 }
 
-.hiplingo-mark {
-  display: inline-grid;
-  width: 2rem;
-  height: 2rem;
-  place-items: center;
-  border: 1px solid #596773;
-  border-radius: 0.42rem;
-  background: #101419;
-  color: #f2f5f7;
-  font-size: 0.9rem;
-  font-weight: 850;
-  letter-spacing: -0.04em;
-  line-height: 1;
+.hiplingo-logo {
+  display: block;
+  width: 2.35rem;
+  height: 2.35rem;
+  flex: 0 0 auto;
+  object-fit: contain;
+  object-position: center;
+  background: transparent;
 }
 
-.hiplingo-wordmark {
-  color: #dfe5e9;
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.13em;
-}
-
-.page-header-brand:hover .hiplingo-mark,
-.page-header-brand:focus-visible .hiplingo-mark {
-  border-color: #8699a8;
-  background: #1a2128;
-}
-
-.page-header-brand:hover .hiplingo-wordmark,
-.page-header-brand:focus-visible .hiplingo-wordmark {
-  color: #fff;
+.page-header-brand:hover .hiplingo-logo,
+.page-header-brand:focus-visible .hiplingo-logo {
+  filter: brightness(1.12);
 }
 
 .library-video-editor-wide-field {

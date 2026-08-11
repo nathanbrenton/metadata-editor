@@ -20,7 +20,7 @@ import {
 test("defines deterministic 720p H.264/AAC HLS plus poster video delivery profile", () => {
   const profile = buildVideoWebStreamProfile();
 
-  assert.equal(profile.version, 2);
+  assert.equal(profile.version, 3);
   assert.equal(profile.protocol, "hls");
   assert.equal(profile.rendition, "single");
 
@@ -54,7 +54,7 @@ test("defines deterministic 720p H.264/AAC HLS plus poster video delivery profil
   assert.deepEqual(profile.poster, {
     filename: "poster.png",
     format: "png",
-    framePolicy: "thumbnail-first-120-frames",
+    framePolicy: "auto-or-authored-seek",
     thumbnailFrames: 120,
     maxWidth: 1280,
     maxHeight: 720,
@@ -103,6 +103,7 @@ test("hashes profile and source identity independently for freshness", () => {
       "releases/2026-08-09_example/videos/video_example/video-master.mp4",
     sizeBytes: 123456,
     modifiedAt: "2026-08-09T20:00:00.000Z",
+    posterTimeSeconds: 12.5,
   };
   const sourceFingerprint = hashVideoWebStreamSourceIdentity(source);
 
@@ -113,6 +114,13 @@ test("hashes profile and source identity independently for freshness", () => {
     hashVideoWebStreamSourceIdentity({
       ...source,
       sizeBytes: source.sizeBytes + 1,
+    }),
+  );
+  assert.notEqual(
+    sourceFingerprint,
+    hashVideoWebStreamSourceIdentity({
+      ...source,
+      posterTimeSeconds: 13,
     }),
   );
   assert.notEqual(
@@ -193,6 +201,19 @@ test("builds deterministic HLS and poster FFmpeg arguments", async () => {
   );
   assert.ok(
     posterArgs.at(-1)?.endsWith("/tmp/video stream/poster.png"),
+  );
+
+  const authoredPosterArgs = buildVideoPosterFfmpegArgs(
+    "/tmp/source video.mp4",
+    "/tmp/video stream",
+    undefined,
+    12.5,
+  );
+  assert.ok(authoredPosterArgs.includes("-ss"));
+  assert.ok(authoredPosterArgs.includes("12.5"));
+  assert.equal(
+    authoredPosterArgs.some((arg) => arg.includes("thumbnail=120")),
+    false,
   );
 
   const verify = buildVideoWebStreamVerificationArgs(

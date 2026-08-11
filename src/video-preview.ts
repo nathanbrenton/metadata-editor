@@ -32,3 +32,15 @@ export function buildLibraryVideoPreviewUrl(
 
   return `/api/library/video-preview?${query.toString()}`;
 }
+
+export function buildLibraryVideoPosterUrl(
+  releaseId: string,
+  videoId: string,
+): string {
+  const query = new URLSearchParams({
+    release: releaseId,
+    video: videoId,
+  });
+
+  return `/api/library/video-poster?${query.toString()}`;
+}

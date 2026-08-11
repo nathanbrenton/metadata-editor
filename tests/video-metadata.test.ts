@@ -43,7 +43,7 @@ async function createFixture() {
     [
       "[schema]",
       'name = "video-metadata"',
-      "version = 2",
+      "version = 3",
       "",
       "[video]",
       `id = "${videoId}"`,
@@ -54,6 +54,8 @@ async function createFixture() {
       'location = "Costa Mesa, CA"',
       'director = "Nathan Brenton"',
       'camera_operator = "Camera Operator"',
+      "display_order = 2",
+      "poster_time_seconds = 12.5",
       'master_path = "video-master.mp4"',
       'related_track_id = ""',
       'future_field = "preserve-me"',
@@ -125,6 +127,8 @@ test("reads editable video metadata with a concurrency hash", async () => {
     assert.equal(snapshot.location, "Costa Mesa, CA");
     assert.equal(snapshot.director, "Nathan Brenton");
     assert.equal(snapshot.cameraOperator, "Camera Operator");
+    assert.equal(snapshot.displayOrder, 2);
+    assert.equal(snapshot.posterTimeSeconds, 12.5);
     assert.equal(snapshot.relatedTrackId, "");
     assert.equal(snapshot.masterPath, "video-master.mp4");
     assert.match(snapshot.originalSha256, /^[a-f0-9]{64}$/);
@@ -158,6 +162,8 @@ test("updates only editable video fields and preserves identity/master/unknown d
         location: "Los Angeles, CA",
         director: "Director Name",
         cameraOperator: "Operator Name",
+        displayOrder: 1,
+        posterTimeSeconds: 4.25,
         relatedTrackId: "01_song",
       },
     );
@@ -181,7 +187,10 @@ test("updates only editable video fields and preserves identity/master/unknown d
     assert.equal(parsed.video.location, "Los Angeles, CA");
     assert.equal(parsed.video.director, "Director Name");
     assert.equal(parsed.video.camera_operator, "Operator Name");
+    assert.equal(parsed.video.display_order, 1);
+    assert.equal(parsed.video.poster_time_seconds, 4.25);
     assert.equal(parsed.video.related_track_id, "01_song");
+    assert.equal(parsed.schema.version, 3);
     assert.equal(parsed.video.future_field, "preserve-me");
     assert.match(receipt.savedSha256, /^[a-f0-9]{64}$/);
 
@@ -217,6 +226,7 @@ test("rejects stale saves and broken related-track references", async () => {
           originalSha256: "0".repeat(64),
           title: "Changed",
           videoType: "other",
+          displayOrder: 1,
           relatedTrackId: "",
         },
       ),
@@ -233,6 +243,7 @@ test("rejects stale saves and broken related-track references", async () => {
           title: "Changed",
           videoType: "other",
           date: "08/10/2026",
+          displayOrder: 1,
           relatedTrackId: "",
         },
       ),
@@ -248,10 +259,28 @@ test("rejects stale saves and broken related-track references", async () => {
           originalSha256: snapshot.originalSha256,
           title: "Changed",
           videoType: "other",
+          displayOrder: 1,
           relatedTrackId: "missing_track",
         },
       ),
       /Related track does not exist/,
+    );
+
+    await assert.rejects(
+      saveVideoMetadataEdits(
+        fixture.mediaRoot,
+        fixture.release,
+        {
+          videoId: fixture.videoId,
+          originalSha256: snapshot.originalSha256,
+          title: "Changed",
+          videoType: "other",
+          displayOrder: 1,
+          posterTimeSeconds: -1,
+          relatedTrackId: "",
+        },
+      ),
+      /Poster frame time/,
     );
   } finally {
     await rm(fixture.mediaRoot, {

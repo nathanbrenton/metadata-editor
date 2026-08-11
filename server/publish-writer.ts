@@ -374,7 +374,7 @@ function publicVideoDocument(
   return {
     schema: {
       name: "media-player-video",
-      version: 2,
+      version: 3,
     },
     id: video.id,
     releaseId: release.id,
@@ -387,6 +387,15 @@ function publicVideoDocument(
       ...(video.director ? { director: video.director } : {}),
       ...(video.cameraOperator
         ? { cameraOperator: video.cameraOperator }
+        : {}),
+      ...(video.displayOrder !== undefined
+        ? { displayOrder: video.displayOrder }
+        : {}),
+      ...(video.posterTimeSeconds !== undefined
+        ? {
+            posterTimeSeconds:
+              video.posterTimeSeconds,
+          }
         : {}),
       ...(video.relatedTrackId
         ? { relatedTrackId: video.relatedTrackId }
@@ -474,14 +483,37 @@ function publicReleaseDocument(
     })),
     ...((release.videos?.length ?? 0) > 0
       ? {
-          videos: (release.videos ?? []).map((video) => ({
-            id: video.id,
-            href: path.posix.join(
-              "videos",
-              video.id,
-              videoMetadataFilename,
-            ),
-          })),
+          videos: [...(release.videos ?? [])]
+            .sort((left, right) => {
+              const leftOrder =
+                left.displayOrder ??
+                Number.MAX_SAFE_INTEGER;
+              const rightOrder =
+                right.displayOrder ??
+                Number.MAX_SAFE_INTEGER;
+
+              return (
+                leftOrder - rightOrder ||
+                (left.title ?? left.id).localeCompare(
+                  right.title ?? right.id,
+                ) ||
+                left.id.localeCompare(right.id)
+              );
+            })
+            .map((video) => ({
+              id: video.id,
+              ...(video.displayOrder !== undefined
+                ? {
+                    displayOrder:
+                      video.displayOrder,
+                  }
+                : {}),
+              href: path.posix.join(
+                "videos",
+                video.id,
+                videoMetadataFilename,
+              ),
+            })),
         }
       : {}),
   };

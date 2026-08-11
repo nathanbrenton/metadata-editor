@@ -359,7 +359,7 @@ test(
         [
           "[schema]",
           'name = "video-metadata"',
-          "version = 2",
+          "version = 3",
           "",
           "[video]",
           'id = "video_wednesday-night"',
@@ -370,6 +370,8 @@ test(
           'location = "Costa Mesa, CA"',
           'director = "Nathan Brenton"',
           'camera_operator = "Camera Operator"',
+          "display_order = 2",
+          "poster_time_seconds = 7.5",
           'master_path = "video-master.mp4"',
           'related_track_id = "artist_01_track"',
           "",
@@ -389,6 +391,8 @@ test(
       assert.equal(video.location, "Costa Mesa, CA");
       assert.equal(video.director, "Nathan Brenton");
       assert.equal(video.cameraOperator, "Camera Operator");
+      assert.equal(video.displayOrder, 2);
+      assert.equal(video.posterTimeSeconds, 7.5);
       assert.equal(video.relatedTrackId, "artist_01_track");
       assert.equal(video.masterPath, "video-master.mp4");
       assert.equal(

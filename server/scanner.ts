@@ -181,6 +181,8 @@ async function readVideoLibraryIdentity(
     | "location"
     | "director"
     | "cameraOperator"
+    | "displayOrder"
+    | "posterTimeSeconds"
     | "relatedTrackId"
     | "masterPath"
   >
@@ -233,6 +235,18 @@ async function readVideoLibraryIdentity(
     const cameraOperator = readNonBlankString(
       videoTable.camera_operator,
     );
+    const displayOrder =
+      typeof videoTable.display_order === "number" &&
+      Number.isInteger(videoTable.display_order) &&
+      videoTable.display_order > 0
+        ? videoTable.display_order
+        : undefined;
+    const posterTimeSeconds =
+      typeof videoTable.poster_time_seconds === "number" &&
+      Number.isFinite(videoTable.poster_time_seconds) &&
+      videoTable.poster_time_seconds >= 0
+        ? videoTable.poster_time_seconds
+        : undefined;
     const relatedTrackId = readNonBlankString(
       videoTable.related_track_id,
     );
@@ -248,6 +262,10 @@ async function readVideoLibraryIdentity(
       ...(location ? { location } : {}),
       ...(director ? { director } : {}),
       ...(cameraOperator ? { cameraOperator } : {}),
+      ...(displayOrder ? { displayOrder } : {}),
+      ...(posterTimeSeconds !== undefined
+        ? { posterTimeSeconds }
+        : {}),
       ...(relatedTrackId ? { relatedTrackId } : {}),
       ...(masterPath ? { masterPath } : {}),
     };
@@ -529,6 +547,35 @@ async function scanRelease(
       releasePath,
       metadataFiles,
     );
+  const videos = await Promise.all(
+    videoDirectoryNames.map((videoDirectoryName) =>
+      scanVideo(
+        mediaRoot,
+        assertPathWithinRoot(
+          mediaRoot,
+          path.join(
+            videosPath,
+            videoDirectoryName,
+          ),
+        ),
+      ),
+    ),
+  );
+
+  videos.sort((left, right) => {
+    const leftOrder =
+      left.displayOrder ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder =
+      right.displayOrder ?? Number.MAX_SAFE_INTEGER;
+
+    return (
+      leftOrder - rightOrder ||
+      (left.title ?? left.id).localeCompare(
+        right.title ?? right.id,
+      ) ||
+      left.id.localeCompare(right.id)
+    );
+  });
 
   return {
     id: path.basename(releasePath),
@@ -563,20 +610,7 @@ async function scanRelease(
         ),
       ),
     ),
-    videos: await Promise.all(
-      videoDirectoryNames.map((videoDirectoryName) =>
-        scanVideo(
-          mediaRoot,
-          assertPathWithinRoot(
-            mediaRoot,
-            path.join(
-              videosPath,
-              videoDirectoryName,
-            ),
-          ),
-        ),
-      ),
-    ),
+    videos,
   };
 }
 
@@ -607,6 +641,24 @@ function buildScannerWarnings(
     const trackIds = new Set(
       release.tracks.map((track) => track.id),
     );
+    const videoOrderCounts = new Map<number, number>();
+
+    for (const video of release.videos ?? []) {
+      if (video.displayOrder !== undefined) {
+        videoOrderCounts.set(
+          video.displayOrder,
+          (videoOrderCounts.get(video.displayOrder) ?? 0) + 1,
+        );
+      }
+    }
+
+    for (const [displayOrder, count] of videoOrderCounts) {
+      if (count > 1) {
+        warnings.push(
+          `${release.relativePath}: video display order ${displayOrder} is used by ${count} videos`,
+        );
+      }
+    }
 
     for (const video of release.videos ?? []) {
       const videoMetadata = video.metadataFiles.find(

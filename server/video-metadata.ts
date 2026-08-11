@@ -40,6 +40,8 @@ export type VideoMetadataEditorSnapshot = {
   location: string;
   director: string;
   cameraOperator: string;
+  displayOrder: number;
+  posterTimeSeconds: number | null;
   relatedTrackId: string;
   masterPath: string;
 };
@@ -157,6 +159,49 @@ function normalizeOptionalIsoDate(
   }
 
   return normalized;
+}
+
+
+function normalizeDisplayOrder(
+  value: unknown,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > 9999
+  ) {
+    throw new Error(
+      "Video display order must be a positive whole number.",
+    );
+  }
+
+  return value;
+}
+
+function normalizePosterTimeSeconds(
+  value: unknown,
+): number | null {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  if (
+    typeof value !== "number" ||
+    !Number.isFinite(value) ||
+    value < 0 ||
+    value > 86400
+  ) {
+    throw new Error(
+      "Poster frame time must be between 0 and 86400 seconds.",
+    );
+  }
+
+  return Math.round(value * 1000) / 1000;
 }
 
 function findVideo(
@@ -326,6 +371,23 @@ export async function readVideoMetadataForEdit(
       typeof loaded.videoTable.camera_operator === "string"
         ? loaded.videoTable.camera_operator
         : "",
+    displayOrder:
+      typeof loaded.videoTable.display_order === "number" &&
+      Number.isInteger(loaded.videoTable.display_order) &&
+      loaded.videoTable.display_order > 0
+        ? loaded.videoTable.display_order
+        : Math.max(
+            1,
+            (release.videos ?? []).findIndex(
+              (video) => video.id === loaded.video.id,
+            ) + 1,
+          ),
+    posterTimeSeconds:
+      typeof loaded.videoTable.poster_time_seconds === "number" &&
+      Number.isFinite(loaded.videoTable.poster_time_seconds) &&
+      loaded.videoTable.poster_time_seconds >= 0
+        ? loaded.videoTable.poster_time_seconds
+        : null,
     relatedTrackId:
       typeof loaded.videoTable.related_track_id === "string"
         ? loaded.videoTable.related_track_id
@@ -350,6 +412,8 @@ export async function saveVideoMetadataEdits(
     location?: unknown;
     director?: unknown;
     cameraOperator?: unknown;
+    displayOrder: unknown;
+    posterTimeSeconds?: unknown;
     relatedTrackId: unknown;
   },
 ): Promise<VideoMetadataEditorSaveReceipt> {
@@ -392,6 +456,13 @@ export async function saveVideoMetadataEdits(
     "Video camera operator",
     300,
   );
+  const displayOrder = normalizeDisplayOrder(
+    input.displayOrder,
+  );
+  const posterTimeSeconds =
+    normalizePosterTimeSeconds(
+      input.posterTimeSeconds,
+    );
   const relatedTrackId =
     typeof input.relatedTrackId === "string"
       ? input.relatedTrackId.trim()
@@ -427,8 +498,24 @@ export async function saveVideoMetadataEdits(
   loaded.videoTable.location = location;
   loaded.videoTable.director = director;
   loaded.videoTable.camera_operator = cameraOperator;
+  loaded.videoTable.display_order = displayOrder;
+
+  if (posterTimeSeconds === null) {
+    delete loaded.videoTable.poster_time_seconds;
+  } else {
+    loaded.videoTable.poster_time_seconds =
+      posterTimeSeconds;
+  }
+
   loaded.videoTable.related_track_id =
     relatedTrackId;
+
+  if (
+    isRecord(loaded.parsed.schema) &&
+    loaded.parsed.schema.name === "video-metadata"
+  ) {
+    loaded.parsed.schema.version = 3;
+  }
 
   const updatedContent =
     `${stringify(loaded.parsed).trimEnd()}

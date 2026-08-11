@@ -19,10 +19,8 @@ test("models canonical videos in Library scan results", () => {
   assert.match(appSource, /type VideoScanResult = \{/);
   assert.match(appSource, /videos: VideoScanResult\[\];/);
   assert.match(appSource, /release\.videos\.length/);
-  assert.match(
-    appSource,
-    /release\.videos\.map\(\(video\) =>/,
-  );
+  assert.match(appSource, /\[\.\.\.release\.videos\]/);
+  assert.match(appSource, /\.map\(\(video\) =>/);
 });
 
 test("shows a compact first-class Videos disclosure on Library release cards", () => {
@@ -51,11 +49,11 @@ test("documents Library video inspection, guarded preparation, and public-packag
   );
   assert.match(
     helpSource,
-    /H\.264\/AAC HLS backend now also generates a deterministic PNG poster frame/,
+    /H\.264 High 4\.1\/yuv420p \+ AAC-LC HLS rendition/,
   );
   assert.match(
     helpSource,
-    /reviewed video-plan fingerprint/,
+    /Source\/profile\/presentation fingerprints/,
   );
   assert.match(
     helpSource,
@@ -63,7 +61,7 @@ test("documents Library video inspection, guarded preparation, and public-packag
   );
   assert.match(
     helpSource,
-    /contract v4 publishes sanitized/,
+    /contract v5 publishes ordered sanitized/,
   );
   assert.match(
     helpSource,

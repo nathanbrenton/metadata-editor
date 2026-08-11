@@ -383,6 +383,7 @@ async function stageVideoStream(
       masterPath,
       stageDirectory,
       plan.profile,
+      item.master.posterTimeSeconds,
     ),
   );
 

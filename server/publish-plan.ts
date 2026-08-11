@@ -105,7 +105,7 @@ export type PublishPlan = {
   };
   contract: {
     name: "audio-player-public-package";
-    version: 4;
+    version: 5;
     catalogSchemaVersion: 1;
     mediaBaseUrl: "/media";
     trackResources: {
@@ -1273,7 +1273,7 @@ export async function buildPublishPlan(
   };
   const contract: PublishPlan["contract"] = {
     name: "audio-player-public-package",
-    version: 4,
+    version: 5,
     catalogSchemaVersion: 1,
     mediaBaseUrl: "/media",
     trackResources: {

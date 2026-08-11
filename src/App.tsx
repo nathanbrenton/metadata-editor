@@ -31,6 +31,7 @@ import {
 } from "./ingest-audio-preview.js";
 
 import {
+  buildLibraryVideoPosterUrl,
   buildLibraryVideoPreviewUrl,
   canPreviewLibraryVideoExtension,
 } from "./video-preview.js";
@@ -339,6 +340,11 @@ const LazySampleClearanceRecordEditor = lazy(async () => {
   };
 });
 
+const hiplingoLogoUrl = new URL(
+  "./assets/hiplingo-logo.png",
+  import.meta.url,
+).href;
+
 type MetadataFileStatus = {
   filename: string;
   relativePath: string;
@@ -370,6 +376,8 @@ type VideoScanResult = {
   location?: string;
   director?: string;
   cameraOperator?: string;
+  displayOrder?: number;
+  posterTimeSeconds?: number;
   relatedTrackId?: string;
   masterPath?: string;
   metadataFiles: MetadataFileStatus[];
@@ -388,6 +396,8 @@ type VideoMetadataEditorSnapshot = {
   location: string;
   director: string;
   cameraOperator: string;
+  displayOrder: number;
+  posterTimeSeconds: number | null;
   relatedTrackId: string;
   masterPath: string;
 };
@@ -2017,8 +2027,12 @@ export function App() {
                 aria-label="Hiplingo · Back to Library"
                 onClick={returnToLibraryHome}
               >
-                <span className="hiplingo-mark" aria-hidden="true">H</span>
-                <span className="hiplingo-wordmark">HIPLINGO</span>
+                <img
+                  className="hiplingo-logo"
+                  src={hiplingoLogoUrl}
+                  alt=""
+                  aria-hidden="true"
+                />
               </button>
               <div className="page-header-title">
                 <h1>
@@ -9234,6 +9248,10 @@ function ReleaseCard({
             location: videoEditorDraft.location,
             director: videoEditorDraft.director,
             cameraOperator: videoEditorDraft.cameraOperator,
+            displayOrder:
+              videoEditorDraft.displayOrder,
+            posterTimeSeconds:
+              videoEditorDraft.posterTimeSeconds,
             relatedTrackId:
               videoEditorDraft.relatedTrackId,
           }),
@@ -9671,7 +9689,22 @@ function ReleaseCard({
           </summary>
 
           <div className="library-video-list">
-            {release.videos.map((video) => {
+            {[...release.videos]
+              .sort((left, right) => {
+                const leftOrder =
+                  left.displayOrder ?? Number.MAX_SAFE_INTEGER;
+                const rightOrder =
+                  right.displayOrder ?? Number.MAX_SAFE_INTEGER;
+
+                return (
+                  leftOrder - rightOrder ||
+                  (left.title ?? left.id).localeCompare(
+                    right.title ?? right.id,
+                  ) ||
+                  left.id.localeCompare(right.id)
+                );
+              })
+              .map((video) => {
               const master = video.videoMasters[0];
               const normalizedVideoType =
                 video.videoType?.trim() ?? "";
@@ -9694,17 +9727,35 @@ function ReleaseCard({
                   <div
                     className="library-video-row"
                   >
-                    <span
-                      className="library-video-kind"
-                      aria-hidden="true"
-                    >
-                      VID
+                    <span className="library-video-poster">
+                      <img
+                        src={buildLibraryVideoPosterUrl(
+                          release.id,
+                          video.id,
+                        )}
+                        alt=""
+                        loading="lazy"
+                        onError={(event) => {
+                          event.currentTarget.hidden = true;
+                        }}
+                      />
+                      <span aria-hidden="true">
+                        {video.displayOrder
+                          ? `#${video.displayOrder}`
+                          : "VID"}
+                      </span>
                     </span>
                     <span className="library-video-identity">
                       <strong>
                         {video.title?.trim() || video.id}
                       </strong>
                       <small>{video.id}</small>
+                      <small>
+                        Poster ·{" "}
+                        {video.posterTimeSeconds === undefined
+                          ? "automatic"
+                          : `${video.posterTimeSeconds}s`}
+                      </small>
                     </span>
                     <span className="library-video-type">
                       {videoType}
@@ -9948,6 +9999,70 @@ function ReleaseCard({
                                   )
                                 }
                               />
+                            </label>
+
+                            <label>
+                              <span>Display order</span>
+                              <input
+                                type="number"
+                                min={1}
+                                step={1}
+                                value={videoEditorDraft.displayOrder}
+                                disabled={videoEditorSaving}
+                                onChange={(event) =>
+                                  setVideoEditorDraft((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          displayOrder:
+                                            Math.max(
+                                              1,
+                                              Number.parseInt(
+                                                event.target.value || "1",
+                                                10,
+                                              ),
+                                            ),
+                                        }
+                                      : current,
+                                  )
+                                }
+                              />
+                            </label>
+
+                            <label>
+                              <span>Poster frame · seconds</span>
+                              <input
+                                type="number"
+                                min={0}
+                                step={0.1}
+                                placeholder="Automatic"
+                                value={
+                                  videoEditorDraft.posterTimeSeconds ??
+                                  ""
+                                }
+                                disabled={videoEditorSaving}
+                                onChange={(event) =>
+                                  setVideoEditorDraft((current) =>
+                                    current
+                                      ? {
+                                          ...current,
+                                          posterTimeSeconds:
+                                            event.target.value === ""
+                                              ? null
+                                              : Math.max(
+                                                  0,
+                                                  Number.parseFloat(
+                                                    event.target.value,
+                                                  ),
+                                                ),
+                                        }
+                                      : current,
+                                  )
+                                }
+                              />
+                              <small>
+                                Leave blank for automatic poster selection.
+                              </small>
                             </label>
 
                             <label>
@@ -19441,8 +19556,12 @@ function ReleaseMetadataDetailView({
               onBack();
             }}
           >
-            <span className="hiplingo-mark" aria-hidden="true">H</span>
-            <span className="hiplingo-wordmark">HIPLINGO</span>
+            <img
+              className="hiplingo-logo"
+              src={hiplingoLogoUrl}
+              alt=""
+              aria-hidden="true"
+            />
           </button>
 
           <span

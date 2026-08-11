@@ -17,7 +17,7 @@ import type {
   VideoScanResult,
 } from "../types.js";
 
-export const VIDEO_WEB_STREAM_PROFILE_VERSION = 2;
+export const VIDEO_WEB_STREAM_PROFILE_VERSION = 3;
 export const VIDEO_WEB_STREAM_DIRECTORY = "stream";
 export const VIDEO_WEB_STREAM_PLAYLIST_FILENAME =
   "index.m3u8";
@@ -63,7 +63,7 @@ export type VideoWebStreamProfile = {
   poster: {
     filename: string;
     format: "png";
-    framePolicy: "thumbnail-first-120-frames";
+    framePolicy: "auto-or-authored-seek";
     thumbnailFrames: number;
     maxWidth: number;
     maxHeight: number;
@@ -83,6 +83,7 @@ export type VideoWebStreamSourceIdentity = {
   relativePath: string;
   sizeBytes: number;
   modifiedAt: string;
+  posterTimeSeconds?: number;
 };
 
 export type VideoWebStreamPaths = {
@@ -234,7 +235,7 @@ export function buildVideoWebStreamProfile():
     poster: {
       filename: VIDEO_WEB_STREAM_POSTER_FILENAME,
       format: "png",
-      framePolicy: "thumbnail-first-120-frames",
+      framePolicy: "auto-or-authored-seek",
       thumbnailFrames: 120,
       maxWidth: 1280,
       maxHeight: 720,
@@ -401,9 +402,21 @@ export function buildVideoPosterFfmpegArgs(
   inputPath: string,
   outputDirectory: string,
   profile = buildVideoWebStreamProfile(),
+  posterTimeSeconds?: number,
 ): string[] {
   const scale =
     `scale=w='min(iw,${profile.poster.maxWidth})':h='min(ih,${profile.poster.maxHeight})':force_original_aspect_ratio=decrease:force_divisible_by=2`;
+  const authoredSeek =
+    posterTimeSeconds !== undefined
+      ? [
+          "-ss",
+          String(posterTimeSeconds),
+        ]
+      : [];
+  const videoFilter =
+    posterTimeSeconds !== undefined
+      ? scale
+      : `thumbnail=${profile.poster.thumbnailFrames},${scale}`;
 
   return [
     "-hide_banner",
@@ -412,13 +425,14 @@ export function buildVideoPosterFfmpegArgs(
     "-nostdin",
     "-i",
     inputPath,
+    ...authoredSeek,
     "-map",
     "0:v:0",
     "-an",
     "-sn",
     "-dn",
     "-vf",
-    `thumbnail=${profile.poster.thumbnailFrames},${scale}`,
+    videoFilter,
     "-frames:v",
     "1",
     "-compression_level",
@@ -682,6 +696,12 @@ async function inspectVideoMaster(
         relativePath: master.relativePath,
         sizeBytes: stats.size,
         modifiedAt: stats.mtime.toISOString(),
+        ...(video.posterTimeSeconds !== undefined
+          ? {
+              posterTimeSeconds:
+                video.posterTimeSeconds,
+            }
+          : {}),
         extension: master.extension,
       },
     };
@@ -811,7 +831,9 @@ async function buildVideoItemPlan(
       info.source.fingerprint === sourceFingerprint &&
       info.source.relativePath === master.relativePath &&
       info.source.sizeBytes === master.sizeBytes &&
-      info.source.modifiedAt === master.modifiedAt,
+      info.source.modifiedAt === master.modifiedAt &&
+      info.source.posterTimeSeconds ===
+        master.posterTimeSeconds,
     );
     const profileMatches = Boolean(
       info.profile &&

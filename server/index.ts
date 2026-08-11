@@ -1735,6 +1735,14 @@ const server = createServer(
                 "cameraOperator" in body
                   ? body.cameraOperator
                   : "",
+              displayOrder:
+                "displayOrder" in body
+                  ? body.displayOrder
+                  : 1,
+              posterTimeSeconds:
+                "posterTimeSeconds" in body
+                  ? body.posterTimeSeconds
+                  : null,
               relatedTrackId: body.relatedTrackId,
             },
           ),
@@ -1745,6 +1753,97 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unable to save video metadata",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/library/video-poster"
+    ) {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+      const videoId =
+        requestUrl.searchParams.get("video");
+
+      if (!releaseId || !videoId) {
+        sendJson(response, 400, {
+          error:
+            "Missing release or video query parameter",
+        });
+        return;
+      }
+
+      try {
+        const mediaRoot = await resolveMediaRoot();
+        const release = await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+        const video = (release?.videos ?? []).find(
+          (candidate) => candidate.id === videoId,
+        );
+
+        if (!release || !video) {
+          throw new Error("Video not found");
+        }
+
+        const posterRelativePath = path.posix.join(
+          video.relativePath.replaceAll("\\", "/"),
+          "stream",
+          "poster.png",
+        );
+        const posterPath = assertPathWithinRoot(
+          mediaRoot,
+          path.join(mediaRoot, posterRelativePath),
+        );
+        const canonicalPosterPath =
+          await realpath(posterPath);
+        assertPathWithinRoot(
+          mediaRoot,
+          canonicalPosterPath,
+        );
+        const posterStats =
+          await stat(canonicalPosterPath);
+
+        if (
+          !posterStats.isFile() ||
+          posterStats.size <= 0
+        ) {
+          throw new Error(
+            "Prepared video poster is unavailable",
+          );
+        }
+
+        response.statusCode = 200;
+        response.setHeader(
+          "Content-Type",
+          "image/png",
+        );
+        response.setHeader(
+          "Cache-Control",
+          "private, max-age=60",
+        );
+        response.setHeader(
+          "X-Content-Type-Options",
+          "nosniff",
+        );
+        response.setHeader(
+          "X-Metadata-Editor-Source",
+          "prepared-video-poster",
+        );
+        response.end(
+          await readFile(canonicalPosterPath),
+        );
+      } catch (error) {
+        sendJson(response, 404, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Video poster not found",
         });
       }
 

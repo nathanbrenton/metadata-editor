@@ -2722,11 +2722,12 @@ function buildUpdatedReceiptContent(
 function videoMetadataDocument(
   releaseRelativePath: string,
   video: PreparedIngestVideo,
+  displayOrder: number,
 ): GeneratedMetadataDocument {
   const data = {
     schema: {
       name: "video-metadata",
-      version: 2,
+      version: 3,
     },
     video: {
       id: video.id,
@@ -2737,6 +2738,7 @@ function videoMetadataDocument(
       location: "",
       director: "",
       camera_operator: "",
+      display_order: displayOrder,
       master_path: video.videoDestination,
       related_track_id: video.relatedTrackId ?? "",
     },
@@ -3446,11 +3448,16 @@ export async function prepareIngestReleaseBuild(
       releaseRelativePath,
     );
   const videoDocuments = videos
-    .filter((video) => !video.existingVideo)
-    .map((video) =>
+    .map((video, index) => ({
+      video,
+      displayOrder: index + 1,
+    }))
+    .filter(({ video }) => !video.existingVideo)
+    .map(({ video, displayOrder }) =>
       videoMetadataDocument(
         releaseRelativePath,
         video,
+        displayOrder,
       ),
     );
   const copies: PreparedCopy[] = [];
