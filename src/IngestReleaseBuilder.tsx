@@ -2153,7 +2153,7 @@ export function IngestReleaseBuilder({
 
   return (
     <section className="ingest-builder">
-      <header className="ingest-builder-header">
+      <header className="ingest-builder-header ingest-builder-header-context">
         <div className="ingest-inspection-identity">
           <button
             type="button"
@@ -2164,13 +2164,21 @@ export function IngestReleaseBuilder({
           >
             <span aria-hidden="true">←</span>
           </button>
-          <div>
-            <p className="eyebrow">
-              Staging release {stagingOperation === "update" ? "updater" : "builder"}
-            </p>
-            <h2>
-              {inspection.candidate.displayTitle}
-            </h2>
+          <div className="ingest-staging-candidate-context">
+            <div className="ingest-staging-candidate-line">
+              <span className="eyebrow ingest-staging-candidate-label">
+                Selected candidate
+              </span>
+              <span
+                className="ingest-staging-candidate-name"
+                title="Selected Ingest candidate"
+              >
+                {inspection.candidate.displayTitle}
+              </span>
+              <span className="ingest-staging-candidate-cue">
+                Continue below <span aria-hidden="true">↓</span>
+              </span>
+            </div>
             <code>
               {
                 inspection.candidate
@@ -2521,7 +2529,7 @@ function GuidedIngestBuilder({
 
   return (
     <>
-      <ol className="ingest-guided-steps">
+      <ol className="ingest-guided-steps ingest-guided-step-tabs">
         {steps.map((item) => (
           <li
             key={item.number}
@@ -2542,7 +2550,6 @@ function GuidedIngestBuilder({
                 onStepChange(item.number)
               }
             >
-              <span>{item.number}</span>
               {item.label}
             </button>
           </li>

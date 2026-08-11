@@ -56,5 +56,5 @@ test("footer stays in normal page flow", () => {
   const refinement = styles.slice(refinementStart);
 
   assert.match(refinement, /\.app-footer\s*\{[\s\S]*?position:\s*static/);
-  assert.match(helpSource, /page footer/i);
+  assert.match(appSource, /<footer className="app-footer">/);
 });

@@ -25,10 +25,9 @@ test("explains the private-to-public publish storage boundary", async () => {
 
   assert.match(source, /Private canonical source/);
   assert.match(source, /Sanitized public output/);
-  assert.match(
-    source,
-    /Validated snapshot output.*complete releases are atomically replaced/i,
-  );
+  assert.match(source, />\s*media-library\s*</);
+  assert.match(source, />\s*published-media\s*</);
+  assert.doesNotMatch(source, /Validated snapshot output/i);
 });
 
 

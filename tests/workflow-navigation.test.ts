@@ -45,10 +45,21 @@ test("uses workflow tabs instead of a standalone header ingest action", () => {
   assert.match(navigationSource, /Preflight and deploy releases/);
 });
 
-test("keeps Tag Search outside the primary four-step workflow", () => {
+test("keeps metadata reference contextual and outside the primary workflow", () => {
   assert.doesNotMatch(navigationSource, /Tag Search/);
-  assert.match(appSource, /Open Tag Search/);
-  assert.match(appSource, /Metadata Reference/);
+  assert.doesNotMatch(appSource, /Open Tag Search/);
+  assert.doesNotMatch(
+    appSource,
+    /<h2>Metadata Reference<\/h2>/,
+  );
+  assert.match(
+    appSource,
+    /className="metadata-field-control"/,
+  );
+  assert.match(
+    appSource,
+    /Help and field information for/,
+  );
 });
 
 test("renders desktop-first staging and publish workspaces", () => {
@@ -67,17 +78,11 @@ test("renders desktop-first staging and publish workspaces", () => {
 });
 
 
-test("moves tab-specific summaries into the sticky footer", () => {
+test("keeps the footer summary limited to media storage totals", () => {
   assert.match(appSource, /const footerSummary = useMemo/);
-  assert.match(appSource, /Drop point \$\{ingestScan\.configuredRoot\}/);
-  assert.match(appSource, /ffprobe \$\{/);
-  assert.match(appSource, /MediaInfo \$\{/);
-  assert.match(appSource, /preflight planning enabled · preparation writes enabled · public-package writes disabled/);
+  assert.match(appSource, /`Library \$\{/);
+  assert.match(appSource, /`Published \$\{/);
+  assert.match(appSource, /sizeBytes/);
+  assert.match(appSource, /Metadata Tag Info/);
   assert.match(appSource, /className="footer-summary"/);
-  assert.doesNotMatch(appSource, />\s*Drop summary\s*</);
-  assert.doesNotMatch(appSource, /ingest-safety-banner/);
-  assert.match(
-    styleSource,
-    /\.footer-summary\s*\{[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s,
-  );
 });

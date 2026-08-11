@@ -1,5 +1,7 @@
 import {
   access,
+  lstat,
+  readdir,
   realpath,
 } from "node:fs/promises";
 import os from "node:os";
@@ -36,6 +38,7 @@ export type WorkflowLocation = {
   displayPath: string;
   exists: boolean;
   writeEnabled: boolean;
+  sizeBytes?: number;
 };
 
 export type WorkflowLocations = {
@@ -64,6 +67,51 @@ async function pathExists(candidatePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+export async function directorySizeBytes(
+  root: string,
+): Promise<number> {
+  let total = 0;
+
+  const walk = async (candidatePath: string): Promise<void> => {
+    let metadata: Awaited<ReturnType<typeof lstat>>;
+
+    try {
+      metadata = await lstat(candidatePath);
+    } catch (error) {
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        return;
+      }
+      throw error;
+    }
+
+    if (metadata.isSymbolicLink()) {
+      return;
+    }
+
+    if (metadata.isFile()) {
+      total += metadata.size;
+      return;
+    }
+
+    if (!metadata.isDirectory()) {
+      return;
+    }
+
+    const entries = await readdir(candidatePath);
+    for (const entry of entries) {
+      await walk(path.join(candidatePath, entry));
+    }
+  };
+
+  await walk(root);
+  return total;
 }
 
 export async function resolveOptionalRoot(
@@ -111,6 +159,14 @@ export async function readWorkflowLocations(): Promise<WorkflowLocations> {
     resolveOptionalRoot(publishConfigured),
   ]);
 
+  const [librarySizeBytes, publishSizeBytes] =
+    await Promise.all([
+      directorySizeBytes(libraryAbsolute),
+      publish.exists
+        ? directorySizeBytes(publish.absolutePath)
+        : Promise.resolve(0),
+    ]);
+
   return {
     publishState: "available",
     locations: [
@@ -143,6 +199,7 @@ export async function readWorkflowLocations(): Promise<WorkflowLocations> {
         displayPath: displayPathFor(libraryAbsolute),
         exists: true,
         writeEnabled: true,
+        sizeBytes: librarySizeBytes,
       },
       {
         id: "publish",
@@ -153,6 +210,7 @@ export async function readWorkflowLocations(): Promise<WorkflowLocations> {
         displayPath: displayPathFor(publish.absolutePath),
         exists: publish.exists,
         writeEnabled: true,
+        sizeBytes: publishSizeBytes,
       },
     ],
   };

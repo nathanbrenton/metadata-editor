@@ -105,7 +105,7 @@ export const workflowStages: readonly WorkflowStage[] = [
       "Record publish history and support later republish, withdrawal, and rollback without deleting the private canonical release.",
     ],
     currentNote:
-      "The Publish tab starts with a compact four-column release table: Release, Sources, Public media, and Status. Release date · newest is the default list order, with alternate release-date, title, artist, and Library-order sorting available from the table header. Each release row includes a release-artwork thumbnail and the whole row opens preflight; the separate action column is intentionally omitted. Preflight opens in a wide modal above the readiness table, closes with Escape, the upper-right ×, or the backdrop when no preparation/publish operation is running, and returns keyboard focus to the release row that opened it. After preflight, the default view is deliberately concise: one plain-language result, Web stream, Waveform, and Browser artwork readiness, and one clearly labeled next action—Resolve blockers, Prepare release, Publish public package, or Update public package. Problems/warnings, the itemized package plan, and the technical contract/fingerprint remain collapsed until opened. Preflight itself is read-only. The main Publish workspace represents that mode with an amber Read-only preflight status beside Refresh Library and Publishing guide instead of a permanent explanatory notice card; this guide retains the detailed behavior. The website package never exposes the canonical master. Prepare release generates AAC-LC HLS with roughly three-second fMP4 segments, independent waveform-peaks.json data, and a browser-compatible PNG when the canonical release artwork is TIFF/TIF; generated artwork records source/profile freshness in a private artwork-info.json sidecar and never modifies the archival master. The HLS playlist uses relative segment references so future private storage/CDN authorization can be added without cloud-provider coupling. Publish public package stages only sanitized JSON metadata, browser-compatible release/track artwork, current waveform data, and current HLS files; it validates the complete staged tree and resource hashes before atomically promoting it under published-media and updating catalog.json. Republish uses the same operation as Update public package: the previous public release/catalog are backed up, the new snapshot replaces the release as a unit so obsolete files cannot survive, and a failed promotion rolls back. Publish records a stable content fingerprint in publication-manifest.json and compares it with the current canonical metadata/public-media inputs on later preflight runs. When they match, the UI reports Public package is up to date and removes the repeat publish action; a canonical metadata or public-media change changes that state to Update available. While Prepare release is running, Publish shows live server-reported progress for artwork, the active track, validation, and promotion without flooding the interface with per-track toasts. Successful Prepare and Publish/Update writes use the application's transient success toast while the persistent preflight state remains the source of truth. The CLI commands publish:plan and preflight:publish remain read-only.",
+      "The Publish tab starts with a compact four-column release table: Release, Sources, Public media, and Status. Release date · newest is the default list order, with alternate release-date, title, artist, and Library-order sorting available from the table header. Each release row includes a release-artwork thumbnail and the whole row opens preflight; the separate action column is intentionally omitted. Preflight opens in a wide modal above the readiness table, closes with Escape, the upper-right ×, or the backdrop when no preparation/publish operation is running, and returns keyboard focus to the release row that opened it. After preflight, the default view is deliberately concise: one plain-language result, Web stream, Waveform, and Browser artwork readiness, and one clearly labeled next action—Resolve blockers, Prepare release, Publish public package, or Update public package. Problems/warnings, the itemized package plan, and the technical contract/fingerprint remain collapsed until opened. Preflight itself is read-only. The main Publish workspace represents that mode with an amber Read-only preflight status beside Publishing guide instead of a permanent explanatory notice card. Refresh Library now lives in the application header on both Library and Publish, so the workspace card remains focused on publication actions; this guide retains the detailed behavior. The website package never exposes the canonical master. Prepare release generates AAC-LC HLS with roughly three-second fMP4 segments, independent waveform-peaks.json data, and a browser-compatible PNG when the canonical release artwork is TIFF/TIF; generated artwork records source/profile freshness in a private artwork-info.json sidecar and never modifies the archival master. The HLS playlist uses relative segment references so future private storage/CDN authorization can be added without cloud-provider coupling. Publish public package stages only sanitized JSON metadata, browser-compatible release/track artwork, current waveform data, and current HLS files; it validates the complete staged tree and resource hashes before atomically promoting it under published-media and updating catalog.json. Republish uses the same operation as Update public package: the previous public release/catalog are backed up, the new snapshot replaces the release as a unit so obsolete files cannot survive, and a failed promotion rolls back. Publish records a stable content fingerprint in publication-manifest.json and compares it with the current canonical metadata/public-media inputs on later preflight runs. When they match, the UI reports Public package is up to date and removes the repeat publish action; a canonical metadata or public-media change changes that state to Update available. While Prepare release is running, Publish shows live server-reported progress for artwork, the active track, validation, and promotion without flooding the interface with per-track toasts. Successful Prepare and Publish/Update writes use the application's transient success toast while the persistent preflight state remains the source of truth. The CLI commands publish:plan and preflight:publish remain read-only.",
   },
 ] as const;
 
@@ -158,9 +158,69 @@ export const workflowDerivativeStatuses: readonly WorkflowDefinition[] = [
 
 export const workflowFaqItems: readonly WorkflowFaqItem[] = [
   {
+    question: "What is the hover-over help pattern called?",
+    answer:
+      "It is a tooltip. Compact Ingest headings use native hover/focus title tooltips for short explanatory guidance so the workspace can stay dense. Metadata fields keep their dedicated ? help controls when richer field/tag guidance is needed.",
+  },
+  {
+    question: "How can I sort Ingest source files?",
+    answer:
+      "Source files default to Name order. The compact Sort menu can instead group by Type or order by largest size, smallest size, or longest duration. Sorting is inspection-only and also defines the local preview-next order while the chosen sort is active.",
+  },
+  {
+    question: "What do the color-coded Ingest readiness messages mean?",
+    answer:
+      "Ingest operational feedback now uses the same health/readiness language as the rest of the workflow: green Ready for verified conditions, amber Review for non-blocking attention, and red Blocked when the next operation cannot safely continue. This is not field provenance. Provenance remains reserved for Stored, Inherited, and Generated metadata values.",
+  },
+  {
+    question: "Where did the global Metadata Reference menu card go?",
+    answer:
+      "The application and release hamburger menus no longer duplicate Metadata Reference. Use the contextual ? help controls beside the corresponding metadata/tag areas for field guidance and player/tag mapping references.",
+  },
+  {
+    question: "Where does technical media health appear in the workflow?",
+    answer:
+      "Library release cards and Publish source summaries show Technical · Ready, Review, or Blocked from the same read-only ffprobe audit used by the CLI. The Library toolbar and Publish header show one compact overall technical state for the current Library scan. Technical Media Contract v1 remains advisory: it preserves accepted source masters, never requests automatic conversion, and does not enter Publish preflight gating.",
+  },
+  {
+    question: "How do I inspect technical media characteristics?",
+    answer:
+      "Run npm run audit:media-technical for a concise read-only ffprobe inventory of observed canonical-master characteristics. The default output aggregates codecs, sample rates, reported bit depths/sample formats, channels, artwork/video dimensions, pixel formats, video profiles, and frame rates, then reports per-release technical health based only on probeability, expected streams/dimensions, and intra-release audio consistency. A zero bits-per-sample value reported by compressed codecs means bit depth is not meaningfully reported and is treated as unknown rather than literal 0-bit audio. Use -- --release RELEASE_ID to scope one release, --releases to list every release summary, --verbose for file-level listings, --concurrency N to control 1-8 probe workers, or --json for structured output. It does not transcode files, grade sample rate/bit depth/resolution/codec quality, or change Publish gating.",
+  },
+  {
+    question: "Where did the Refresh controls move?",
+    answer:
+      "Refresh is now a contextual application-header command instead of a workspace-local or application-menu card. Ingest shows Refresh Ingest, Staging shows Refresh inputs and refreshes both the ingest drop and canonical Library scans used by that workspace, and Library/Publish show Refresh Library. The application hamburger no longer duplicates scan refresh controls. Release-detail metadata refresh remains separate because it refreshes the currently open canonical metadata detail rather than a workspace scan.",
+  },
+  {
+    question: "Why is audit:file-spec shorter now?",
+    answer:
+      "The default media-file-spec audit is intentionally concise: it prints release-wide and role-wide conformance, an extension inventory, then only true issues such as outside-spec formats or non-canonical master filenames. Use --compatible to list compatibility masters when reviewing historical/source-preservation formats, --verbose to list every canonical master, --release RELEASE_ID to scope the audit, or --json for the complete machine-readable result. Compatible remains accepted source material; it is not an automatic conversion request or publish blocker.",
+  },
+  {
+    question: "Where can I see release-level file-spec conformance?",
+    answer:
+      "Staging, Library release cards, and Publish source summaries now show the same release-level file-spec badge. Preferred means every visible canonical media master uses the preferred format set and canonical role filename. Compatible means one or more masters are accepted source-preserving formats outside the preferred archival set. Name review means a visible master needs canonical filename review. Outside spec means an audited master extension is not accepted. These badges are advisory and do not silently transcode or rename canonical media; existing validation and Publish preflight remain authoritative for write safety.",
+  },
+  {
+    question: "How do I audit the canonical Library against the media file spec?",
+    answer:
+      "Run npm run audit:file-spec for a read-only audit of canonical artwork-master, audio-master, and video-master files under media-library/releases. The default report stays concise by showing conformance totals, an extension inventory, and only true issue files. Add -- --compatible to inspect compatibility masters, -- --verbose for every master, -- --release RELEASE_ID for one release, or -- --json for machine-readable output. The audit never renames, transcodes, deletes, or rewrites media.",
+  },
+  {
+    question: "How are canonical master filenames formed?",
+    answer:
+      "Canonical media filenames use the stable role basename plus the normalized source extension: artwork-master.<ext>, audio-master.<ext>, and video-master.<ext>. Staging preserves the original master bytes and container type, so a WAV source becomes audio-master.wav and an M4A source becomes audio-master.m4a. This naming rule is independent from semantic metadata filenames such as release.toml, track.toml, and video.toml.",
+  },
+  {
+    question: "What do Preferred, Compatible, and metadata badges mean in Ingest?",
+    answer:
+      "The Source files table now surfaces the file spec without adding another column. Preferred means the source extension is in the current happy-path master set for that media role. Compatible means the scanner accepts the format but it is outside the preferred set; Staging still preserves the original source bytes/container rather than silently transcoding the archival master. Sidecar identifies recognized parsed metadata evidence such as FFmetadata. Candidate metadata identifies documented future evidence formats such as JSON or TXT that are not yet promoted to parsed sidecars. These badges are guidance, not provenance and not automatic conversion instructions.",
+  },
+  {
     question: "What does the current happy-path file spec mean?",
     answer:
-      "The file spec now separates preferred happy-path formats from broader accepted compatibility formats and from canonical Library naming. Canonical authored metadata remains semantic TOML documents such as release.toml, track.toml, and video.toml. Recognized FFmetadata sidecars (.ffmeta/.ffmetadata) are ingest evidence; JSON and TXT are documented candidate evidence formats but are not yet promoted to recognized metadata sidecars. Preferred artwork masters are TIF/TIFF, PNG, and JPG/JPEG; preferred audio masters are WAV, FLAC, AIF/AIFF, M4A, and MP3; preferred video masters are MOV, MP4, MXF, and MKV. The scanner continues accepting its broader compatibility set, so this milestone does not reject formats that already worked. Canonical media keeps the stable role basename artwork-master, audio-master, or video-master and preserves the source container extension rather than transcoding the archival master during Staging.",
+      "The file spec now separates preferred happy-path formats from broader accepted compatibility formats and from canonical Library naming. Canonical authored metadata remains semantic TOML documents such as release.toml, track.toml, and video.toml. Recognized FFmetadata sidecars (.ffmeta/.ffmetadata) are ingest evidence; JSON and TXT are documented candidate evidence formats but are not yet promoted to recognized metadata sidecars. Preferred artwork masters are lossless TIF/TIFF or PNG; JPG/JPEG remains accepted when it is the authoritative source but is treated as compatibility input. Preferred audio masters are lossless WAV, FLAC, and AIF/AIFF; M4A, MP3, AAC, and the broader recognized set remain accepted source-preserving compatibility inputs. Preferred video master containers remain MOV, MP4, MXF, and MKV for now; container extension alone is not treated as a video quality grade. The scanner continues accepting its broader compatibility set, so this milestone does not reject formats that already worked. Canonical media keeps the stable role basename artwork-master, audio-master, or video-master and preserves the source container extension rather than transcoding the archival master during Staging.",
   },
   {
     question: "Where do artwork creator names and roles go?",
@@ -223,9 +283,9 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
       "Yes. Staging → Tracks provides one play/pause button for every available inspected audio source. The same shared preview control is available beside audio rows in Review, including changed-source decisions and the generated build plan. MP3 files are served directly; other recognized formats are live-transcoded through FFmpeg to a temporary MP3 stream. Previewing is read-only and never writes a derivative or changes the ingest source.",
   },
   {
-    question: "Where is the summary for the current workflow tab?",
+    question: "What does the footer show?",
     answer:
-      "The left side of the page footer shows context for the active workspace. Ingest displays the drop point, candidate and file totals, and probe availability; Staging displays the selected candidate or release-workspace count; Library displays release, track, master, artwork, and metadata totals; Publish displays readiness counts and supports read-only preflight, private derivative preparation, and reviewed Publish or Update public package writes.",
+      "The footer is intentionally minimal. Its left side reports only the total on-disk size of the private media-library and generated published-media trees. Workflow & Help and Metadata Tag Info remain direct footer links on the right.",
   },
   {
     question: "Why are Developer / Admin Tools disabled after a reload?",

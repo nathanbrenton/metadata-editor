@@ -1,26 +1,18 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const viewSource = readFileSync(
+const source = await readFile(
   new URL("../src/WorkflowHelpView.tsx", import.meta.url),
   "utf8",
 );
-const styleSource = readFileSync(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
 
-test("uses desktop-first tables instead of workflow card grids", () => {
-  assert.match(viewSource, /workflow-stage-table/);
-  assert.match(viewSource, /Adjustment|Operator steps/);
-  assert.doesNotMatch(viewSource, /workflow-stage-card/);
-  assert.match(
-    styleSource,
-    /\.workflow-stage-table\s*\{[^}]*min-width:\s*82rem/s,
-  );
-  assert.match(
-    styleSource,
-    /\.workflow-table-scroll\s*\{[^}]*overflow-x:\s*auto/s,
-  );
+test("renders a compact four-workspace guide instead of the full feature-reference corpus", () => {
+  assert.match(source, /Four workspaces/);
+  assert.match(source, /What matters/);
+  assert.match(source, /Common questions/);
+  assert.match(source, /audit:media-technical/);
+  assert.doesNotMatch(source, /workflowStages\.map/);
+  assert.doesNotMatch(source, /workflowFaqItems\.map/);
+  assert.doesNotMatch(source, /Implementation status matters/);
 });

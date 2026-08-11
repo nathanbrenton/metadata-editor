@@ -18,8 +18,11 @@ const helpSource = readFileSync(
 test("models canonical videos in Library scan results", () => {
   assert.match(appSource, /type VideoScanResult = \{/);
   assert.match(appSource, /videos: VideoScanResult\[\];/);
-  assert.match(appSource, /summary\.videoCount/);
-  assert.match(appSource, /selectedRelease\.videos\.length/);
+  assert.match(appSource, /release\.videos\.length/);
+  assert.match(
+    appSource,
+    /release\.videos\.map\(\(video\) =>/,
+  );
 });
 
 test("shows a compact first-class Videos disclosure on Library release cards", () => {

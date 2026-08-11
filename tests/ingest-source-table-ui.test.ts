@@ -99,7 +99,7 @@ test("continues ingest source preview to the next available audio file", () => {
   );
   assert.match(
     appSource,
-    /handleEnded[\s\S]*getNextIngestAudioFile\([\s\S]*inspection\.files[\s\S]*startSourceAudioPreview\(audio, nextFile\)/,
+    /handleEnded[\s\S]*getNextIngestAudioFile\([\s\S]*sortedSourceFiles[\s\S]*startSourceAudioPreview\(audio, nextFile\)/,
   );
 });
 
@@ -111,6 +111,6 @@ test("allows detected video to continue into reviewed canonical Staging", () => 
   );
   assert.match(
     appSource,
-    /Continue to Staging to confirm each canonical video[\s\S]*stable ID/,
+    /Video sources are probe-verified[\s\S]*Continue to Staging to confirm canonical video destination[\s\S]*stable ID/,
   );
 });

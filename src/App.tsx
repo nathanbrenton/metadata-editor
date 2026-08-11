@@ -237,10 +237,6 @@ import type {
 } from "../shared/ingest-drafts.js";
 
 import {
-  workflowPath,
-} from "./workflow-help-content.js";
-
-import {
   WorkflowNavigation,
   type WorkflowApplicationView,
   type WorkflowLocationDisplay,
@@ -257,6 +253,16 @@ import {
   buildReleaseDirectoryId,
   ingestVideoTypeOptions,
 } from "../shared/ingest-builder.js";
+import {
+  canonicalMediaMasterFilename,
+  classifyMediaMasterExtension,
+  classifyMetadataFileExtension,
+  mediaMasterPreferredFormatGuidance,
+} from "../shared/media-file-spec.js";
+import {
+  presentMediaFileSpecSummary,
+  summarizeReleaseMediaFileSpec,
+} from "../shared/media-file-spec-summary.js";
 
 import {
   resolveReleaseDisplayTitle,
@@ -393,6 +399,69 @@ type LibraryScanResult = {
   scannedAt: string;
   releases: ReleaseScanResult[];
   warnings: string[];
+};
+
+type MediaTechnicalHealth =
+  | "ready"
+  | "review"
+  | "blocked";
+
+type MediaTechnicalReleaseSummary = {
+  releaseId: string;
+  health: MediaTechnicalHealth;
+  issues: Array<{
+    severity: "review" | "blocked";
+    message: string;
+  }>;
+};
+
+type MediaTechnicalContract = {
+  version: 1;
+  advisory: true;
+  publishGating: false;
+  audio: {
+    total: number;
+    preferredLossless: number;
+    compatibleLossless: number;
+    sourcePreservedLossy: number;
+    review: number;
+  };
+  artwork: {
+    total: number;
+    preferred: number;
+    compatible: number;
+    review: number;
+    geometry: {
+      square: number;
+      landscape: number;
+      portrait: number;
+      unknown: number;
+    };
+  };
+  video: {
+    total: number;
+    preferredContainers: number;
+    compatibleContainers: number;
+    review: number;
+    policy: "inventory-only";
+    codecProfileThresholdDefined: false;
+  };
+};
+
+type MediaTechnicalAuditResult = {
+  contract: MediaTechnicalContract;
+  releases: MediaTechnicalReleaseSummary[];
+  healthSummary: {
+    ready: number;
+    review: number;
+    blocked: number;
+  };
+};
+
+type MediaTechnicalAuditState = {
+  result: MediaTechnicalAuditResult | null;
+  loading: boolean;
+  error: string | null;
 };
 
 type IngestStagingIdentitySeed =
@@ -792,8 +861,13 @@ type ToastMessage = {
   tone: "success" | "info" | "error";
 };
 
+type WorkflowLocationWithSize =
+  WorkflowLocationDisplay & {
+    sizeBytes?: number;
+  };
+
 type WorkflowLocationsResponse = {
-  locations: WorkflowLocationDisplay[];
+  locations: WorkflowLocationWithSize[];
   publishState: "available";
 };
 
@@ -1124,7 +1198,13 @@ export function App() {
   const [metadataRegistry, setMetadataRegistry] =
     useState<MetadataFieldDefinition[]>([]);
   const [workflowLocations, setWorkflowLocations] =
-    useState<WorkflowLocationDisplay[]>([]);
+    useState<WorkflowLocationWithSize[]>([]);
+  const [mediaTechnicalAudit, setMediaTechnicalAudit] =
+    useState<MediaTechnicalAuditState>({
+      result: null,
+      loading: false,
+      error: null,
+    });
   const [applicationView, setApplicationView] =
     useState<ApplicationView>("library");
   const [
@@ -1262,7 +1342,69 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [scan?.scannedAt]);
+
+  useEffect(() => {
+    if (!scan || scan.releases.length === 0) {
+      setMediaTechnicalAudit({
+        result: null,
+        loading: false,
+        error: null,
+      });
+      return;
+    }
+
+    const controller = new AbortController();
+
+    setMediaTechnicalAudit((current) => ({
+      ...current,
+      loading: true,
+      error: null,
+    }));
+
+    void fetch("/api/library/media-technical", {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = (await response.json()) as
+          | MediaTechnicalAuditResult
+          | { error?: string };
+
+        if (
+          !response.ok ||
+          !("healthSummary" in payload) ||
+          !("contract" in payload)
+        ) {
+          throw new Error(
+            "error" in payload && payload.error
+              ? payload.error
+              : "Unable to load technical media health.",
+          );
+        }
+
+        setMediaTechnicalAudit({
+          result: payload,
+          loading: false,
+          error: null,
+        });
+      })
+      .catch((technicalError) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setMediaTechnicalAudit({
+          result: null,
+          loading: false,
+          error:
+            technicalError instanceof Error
+              ? technicalError.message
+              : "Unable to load technical media health.",
+        });
+      });
+
+    return () => controller.abort();
+  }, [scan?.scannedAt]);
 
   const openReleaseDetail = useCallback(
     async (releaseId: string) => {
@@ -1576,12 +1718,6 @@ export function App() {
     await openReleaseDetail(releaseId);
   }, [openReleaseDetail]);
 
-  const openTagSearch = useCallback(() => {
-    setSelectedReleaseDetail(null);
-    setApplicationView("compatibility");
-    setMenuOpen(false);
-  }, []);
-
   const summary = useMemo(() => {
     if (!scan) {
       return null;
@@ -1637,274 +1773,37 @@ export function App() {
     };
   }, [scan]);
 
+  const mediaTechnicalByRelease = useMemo(
+    () =>
+      new Map(
+        mediaTechnicalAudit.result?.releases.map(
+          (release) => [release.releaseId, release] as const,
+        ) ?? [],
+      ),
+    [mediaTechnicalAudit.result],
+  );
+
   const footerSummary = useMemo(() => {
-    const formatCount = (
-      count: number,
-      singular: string,
-      plural = `${singular}s`,
-    ) =>
-      `${count} ${count === 1 ? singular : plural}`;
+    const librarySize = workflowLocations.find(
+      (location) => location.id === "library",
+    )?.sizeBytes;
+    const publishedSize = workflowLocations.find(
+      (location) => location.id === "publish",
+    )?.sizeBytes;
 
-    const selectedRelease = selectedReleaseDetail
-      ? scan?.releases.find(
-          (release) =>
-            release.id ===
-            selectedReleaseDetail.releaseId,
-        )
-      : null;
-
-    if (selectedRelease) {
-      const readiness =
-        summarizeReleaseScanReadiness(
-          selectedRelease,
-        );
-      const audioMasterCount =
-        selectedRelease.tracks.reduce(
-          (count, track) =>
-            count + track.audioMasters.length,
-          0,
-        );
-      const artworkCount =
-        selectedRelease.artworkMasters.length +
-        selectedRelease.tracks.reduce(
-          (count, track) =>
-            count + track.artworkMasters.length,
-          0,
-        );
-
-      return [
-        "Library",
-        formatReleaseTitle(selectedRelease.id),
-        formatCount(
-          selectedRelease.tracks.length,
-          "track",
-        ),
-        formatCount(
-          selectedRelease.videos.length,
-          "video",
-        ),
-        formatCount(
-          audioMasterCount,
-          "audio master",
-        ),
-        formatCount(
-          artworkCount,
-          "artwork file",
-        ),
-        readinessBadgeLabel(readiness),
-      ].join(" · ");
-    }
-
-    if (applicationView === "ingest") {
-      if (ingestInspection) {
-        const candidate =
-          ingestInspection.candidate;
-
-        return [
-          "Ingest",
-          candidate.displayTitle,
-          formatCount(
-            candidate.fileCount,
-            "file",
-          ),
-          formatCount(
-            candidate.audioCount,
-            "audio file",
-          ),
-          formatCount(
-            candidate.videoCount,
-            "video file",
-          ),
-          formatCount(
-            candidate.imageCount,
-            "image",
-          ),
-          formatByteSize(
-            candidate.totalSizeBytes,
-          ),
-          "source read-only",
-        ].join(" · ");
-      }
-
-      if (ingestScan) {
-        return [
-          "Ingest",
-          `Drop point ${ingestScan.configuredRoot}`,
-          formatCount(
-            ingestScan.candidateCount,
-            "candidate",
-          ),
-          formatCount(
-            ingestScan.fileCount,
-            "file",
-          ),
-          `ffprobe ${
-            ingestScan.capabilities.ffprobe
-              .available
-              ? "available"
-              : "unavailable"
-          }`,
-          `MediaInfo ${
-            ingestScan.capabilities.mediainfo
-              .available
-              ? "available"
-              : "unavailable"
-          }`,
-          "inspection read-only",
-        ].join(" · ");
-      }
-
-      return ingestLoading
-        ? "Ingest · scanning drop point…"
-        : "Ingest · drop summary unavailable";
-    }
-
-    if (applicationView === "staging") {
-      if (ingestInspection) {
-        const candidate =
-          ingestInspection.candidate;
-
-        return [
-          "Staging",
-          candidate.displayTitle,
-          formatCount(
-            candidate.audioCount,
-            "audio file",
-          ),
-          formatCount(
-            candidate.videoCount,
-            "video file",
-          ),
-          formatCount(
-            candidate.imageCount,
-            "image",
-          ),
-          "candidate selected",
-        ].join(" · ");
-      }
-
-      return [
-        "Staging",
-        formatCount(
-          scan?.releases.length ?? 0,
-          "release workspace",
-        ),
-        "no ingest candidate selected",
-      ].join(" · ");
-    }
-
-    if (applicationView === "publish") {
-      const publishCounts = {
-        needsSourceWork: 0,
-        needsPreparation: 0,
-        readyToPreflight: 0,
-      };
-
-      for (const release of scan?.releases ?? []) {
-        const label =
-          assessPublishReadiness(
-            release,
-          ).preflightLabel;
-
-        if (label === "Needs source work") {
-          publishCounts.needsSourceWork += 1;
-        } else if (label === "Needs preparation") {
-          publishCounts.needsPreparation += 1;
-        } else {
-          publishCounts.readyToPreflight += 1;
-        }
-      }
-
-      return [
-        "Publish",
-        formatCount(
-          scan?.releases.length ?? 0,
-          "release",
-        ),
-        `${publishCounts.needsSourceWork} ${
-          publishCounts.needsSourceWork === 1
-            ? "needs"
-            : "need"
-        } source work`,
-        `${publishCounts.needsPreparation} ${
-          publishCounts.needsPreparation === 1
-            ? "needs"
-            : "need"
-        } preparation`,
-        formatCount(
-          publishCounts.readyToPreflight,
-          "ready to preflight",
-        ),
-        "preflight planning enabled · preparation writes enabled · public-package writes disabled",
-      ].join(" · ");
-    }
-
-    if (applicationView === "compatibility") {
-      return [
-        "Metadata Tag Search",
-        formatCount(
-          metadataRegistry.length,
-          "registered field",
-        ),
-        "player compatibility reference",
-      ].join(" · ");
-    }
-
-    if (applicationView === "help") {
-      return `Workflow & Help · ${workflowPath}`;
-    }
-
-    if (!summary) {
-      return loading
-        ? "Library · scanning releases…"
-        : "Library · summary unavailable";
-    }
-
-    const parts = [
-      "Library",
-      formatCount(
-        summary.releaseCount,
-        "release",
-      ),
-      formatCount(
-        summary.trackCount,
-        "track",
-      ),
-      formatCount(
-        summary.videoCount,
-        "video",
-      ),
-      formatCount(
-        summary.audioMasterCount,
-        "audio master",
-      ),
-      formatCount(
-        summary.artworkMasterCount,
-        "artwork file",
-      ),
-    ];
-
-    if (summary.missingMetadataCount > 0) {
-      parts.push(
-        summary.missingCoreMetadataCount > 0 ||
-          summary.missingCreditMetadataCount > 0
-          ? `${summary.missingMetadataCount} missing TOMLs (${summary.missingCoreMetadataCount} core · ${summary.missingCreditMetadataCount} credits · ${summary.missingSupplementalMetadataCount} optional)`
-          : `${summary.missingSupplementalMetadataCount} optional TOMLs not created`,
-      );
-    }
-
-    return parts.join(" · ");
-  }, [
-    applicationView,
-    ingestInspection,
-    ingestLoading,
-    ingestScan,
-    loading,
-    metadataRegistry.length,
-    scan,
-    selectedReleaseDetail,
-    summary,
-  ]);
+    return [
+      `Library ${
+        librarySize === undefined
+          ? "size unavailable"
+          : formatByteSize(librarySize)
+      }`,
+      `Published ${
+        publishedSize === undefined
+          ? "size unavailable"
+          : formatByteSize(publishedSize)
+      }`,
+    ].join(" · ");
+  }, [workflowLocations]);
 
   return (
     <main>
@@ -1943,7 +1842,6 @@ export function App() {
           }}
           onOpenWorkflowHelp={openWorkflowHelp}
           onNavigateWorkflow={navigateWorkflowView}
-          onOpenTagSearch={openTagSearch}
         />
       ) : (
         <>
@@ -1983,8 +1881,7 @@ export function App() {
                   </p>
                 )}
 
-              {(applicationView === "ingest" ||
-                applicationView === "staging") &&
+              {applicationView === "ingest" &&
                 ingestScan && (
                   <p className="scan-time">
                     Drop scan:{" "}
@@ -1993,6 +1890,74 @@ export function App() {
                     ).toLocaleString()}
                   </p>
                 )}
+
+              {applicationView === "staging" &&
+                (ingestScan || scan) && (
+                  <p className="scan-time">
+                    Inputs:{" "}
+                    {ingestScan
+                      ? `drop ${new Date(
+                          ingestScan.scannedAt,
+                        ).toLocaleTimeString()}`
+                      : "drop not scanned"}
+                    {" · "}
+                    {scan
+                      ? `Library ${new Date(
+                          scan.scannedAt,
+                        ).toLocaleTimeString()}`
+                      : "Library not scanned"}
+                  </p>
+                )}
+
+              {applicationView === "ingest" && (
+                <button
+                  type="button"
+                  className="page-header-refresh-button"
+                  disabled={ingestLoading}
+                  onClick={() =>
+                    void refreshIngest(true)
+                  }
+                >
+                  {ingestLoading
+                    ? "Inspecting…"
+                    : "Refresh Ingest"}
+                </button>
+              )}
+
+              {applicationView === "staging" && (
+                <button
+                  type="button"
+                  className="page-header-refresh-button"
+                  disabled={ingestLoading || loading}
+                  title="Refresh both the ingest drop and canonical Library inputs used by Staging."
+                  onClick={() => {
+                    void Promise.all([
+                      refreshIngest(false),
+                      refreshLibrary(false),
+                    ]);
+                  }}
+                >
+                  {ingestLoading || loading
+                    ? "Refreshing…"
+                    : "Refresh inputs"}
+                </button>
+              )}
+
+              {(applicationView === "library" ||
+                applicationView === "publish") && (
+                <button
+                  type="button"
+                  className="page-header-refresh-button"
+                  disabled={loading}
+                  onClick={() =>
+                    void refreshLibrary(true)
+                  }
+                >
+                  {loading
+                    ? "Refreshing…"
+                    : "Refresh Library"}
+                </button>
+              )}
 
               <button
                 type="button"
@@ -2014,87 +1979,6 @@ export function App() {
               className="application-menu"
               aria-label="Application menu"
             >
-              {(applicationView === "library" ||
-                applicationView === "publish") && (
-                <section className="menu-card">
-                  <h2>Refresh Library</h2>
-                  <button
-                    type="button"
-                    disabled={loading}
-                    onClick={() => {
-                      void refreshLibrary(true);
-                      setMenuOpen(false);
-                    }}
-                  >
-                    {loading
-                      ? "Scanning…"
-                      : "Refresh library"}
-                  </button>
-                </section>
-              )}
-
-              {(applicationView === "ingest" ||
-                applicationView === "staging") && (
-                <section className="menu-card">
-                  <h2>Refresh Ingest Drop</h2>
-                  <button
-                    type="button"
-                    disabled={ingestLoading}
-                    onClick={() => {
-                      void refreshIngest(true);
-                      setMenuOpen(false);
-                    }}
-                  >
-                    {ingestLoading
-                      ? "Inspecting drop…"
-                      : "Refresh drop point"}
-                  </button>
-                </section>
-              )}
-
-              {applicationView !== "help" && (
-                <section className="menu-card workflow-menu-card">
-                  <h2>Release workflow</h2>
-                  <p className="workflow-menu-path">
-                    {workflowPath}
-                  </p>
-                  <p>
-                    Inspect sources, stage a controlled
-                    release, author the private library,
-                    then validate and publish a sanitized
-                    deployment copy.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={openWorkflowHelp}
-                  >
-                    View workflow guide
-                  </button>
-                </section>
-              )}
-
-              {applicationView !== "help" && (
-                <section className="menu-card">
-                  <h2>Metadata Reference</h2>
-                  <p>
-                    Search canonical fields and verified
-                    player-visible tag mappings outside the
-                    four-step release workflow.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={
-                      applicationView === "compatibility"
-                        ? () => navigateWorkflowView("library")
-                        : openTagSearch
-                    }
-                  >
-                    {applicationView === "compatibility"
-                      ? "Return to Library"
-                      : "Open Tag Search"}
-                  </button>
-                </section>
-              )}
 
               <section className="menu-card">
                 <h2>About</h2>
@@ -2176,16 +2060,12 @@ export function App() {
               releases={scan?.releases ?? []}
               identitySeed={ingestIdentityOverride}
               error={ingestError}
-              loading={ingestLoading}
               inspection={ingestInspection}
               inspectionError={
                 ingestInspectionError
               }
               inspectionLoading={
                 ingestInspectionLoading
-              }
-              onRefresh={() =>
-                void refreshIngest(true)
               }
               onInspect={(candidateId) =>
                 void inspectCandidate(candidateId)
@@ -2256,6 +2136,8 @@ export function App() {
                 openWorkflowHelp
               }
               onNotify={notify}
+              technicalAudit={mediaTechnicalAudit}
+              technicalByRelease={mediaTechnicalByRelease}
             />
           ) : (
             <>
@@ -2283,6 +2165,8 @@ export function App() {
                     }
                     showAdminTools={showAdminTools}
                     onNotify={notify}
+                    technicalAudit={mediaTechnicalAudit}
+                    technicalByRelease={mediaTechnicalByRelease}
                   />
 
                 </>
@@ -2322,6 +2206,18 @@ export function App() {
                 onClick={openWorkflowHelp}
               >
                 Workflow &amp; Help
+              </button>
+              <span aria-hidden="true">·</span>
+              <button
+                type="button"
+                className="footer-link-button"
+                onClick={() => {
+                  setSelectedReleaseDetail(null);
+                  setApplicationView("compatibility");
+                  setMenuOpen(false);
+                }}
+              >
+                Metadata Tag Info
               </button>
               <span aria-hidden="true">·</span>
             </>
@@ -4296,6 +4192,178 @@ function CompatibilityPlayerCell({
   );
 }
 
+function MediaFileSpecBadge({
+  release,
+  prefix = false,
+}: {
+  release: ReleaseScanResult;
+  prefix?: boolean;
+}) {
+  const summary = summarizeReleaseMediaFileSpec(release);
+  const presentation = presentMediaFileSpecSummary(summary);
+
+  return (
+    <span
+      className={`badge ${presentation.tone} media-file-spec-badge`}
+      title={`Media file spec: ${presentation.title}`}
+      aria-label={`Media file spec: ${presentation.label}`}
+    >
+      {prefix ? "File spec · " : ""}
+      {presentation.label}
+    </span>
+  );
+}
+
+function technicalHealthLabel(
+  health: MediaTechnicalHealth,
+): string {
+  switch (health) {
+    case "ready":
+      return "Ready";
+    case "review":
+      return "Review";
+    case "blocked":
+      return "Blocked";
+  }
+}
+
+function technicalHealthTone(
+  health: MediaTechnicalHealth,
+): "success" | "warning" | "error" {
+  switch (health) {
+    case "ready":
+      return "success";
+    case "review":
+      return "warning";
+    case "blocked":
+      return "error";
+  }
+}
+
+function technicalContractTitle(
+  contract: MediaTechnicalContract,
+): string {
+  return [
+    "Technical Media Contract v1 is advisory and does not change Publish gating.",
+    `Audio: ${contract.audio.preferredLossless} preferred lossless · ${contract.audio.compatibleLossless} compatible lossless · ${contract.audio.sourcePreservedLossy} source-preserved lossy · ${contract.audio.review} review.`,
+    `Artwork: ${contract.artwork.preferred} preferred · ${contract.artwork.compatible} compatible · ${contract.artwork.review} review.`,
+    `Video: ${contract.video.total} inventory-only masters; no codec/profile quality threshold.`,
+  ].join(" ");
+}
+
+function TechnicalHealthBadge({
+  summary,
+  loading,
+  error,
+  prefix = true,
+}: {
+  summary?: MediaTechnicalReleaseSummary;
+  loading: boolean;
+  error: string | null;
+  prefix?: boolean;
+}) {
+  if (loading && !summary) {
+    return (
+      <span
+        className="badge technical-health-badge"
+        title="Running the read-only ffprobe technical-health audit."
+      >
+        {prefix ? "Technical · " : ""}
+        Checking…
+      </span>
+    );
+  }
+
+  if (!summary) {
+    return (
+      <span
+        className={`badge ${error ? "warning" : ""} technical-health-badge`}
+        title={
+          error ??
+          "Technical health has not been loaded yet."
+        }
+      >
+        {prefix ? "Technical · " : ""}
+        Unavailable
+      </span>
+    );
+  }
+
+  const issueTitle = summary.issues
+    .map((issue) => issue.message)
+    .join(" ");
+
+  return (
+    <span
+      className={`badge ${technicalHealthTone(summary.health)} technical-health-badge`}
+      title={[
+        "Advisory technical health only; this does not change Publish gating.",
+        issueTitle,
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {prefix ? "Technical · " : ""}
+      {technicalHealthLabel(summary.health)}
+    </span>
+  );
+}
+
+function TechnicalAuditSummaryBadge({
+  audit,
+}: {
+  audit: MediaTechnicalAuditState;
+}) {
+  if (audit.loading && !audit.result) {
+    return (
+      <span
+        className="badge technical-contract-badge"
+        title="Running a read-only technical audit of canonical masters."
+      >
+        Technical · Checking…
+      </span>
+    );
+  }
+
+  if (!audit.result) {
+    return (
+      <span
+        className={`badge ${audit.error ? "warning" : ""} technical-contract-badge`}
+        title={audit.error ?? "Technical audit unavailable."}
+      >
+        Technical · Unavailable
+      </span>
+    );
+  }
+
+  const { healthSummary, contract } = audit.result;
+  const total =
+    healthSummary.ready +
+    healthSummary.review +
+    healthSummary.blocked;
+  const tone =
+    healthSummary.blocked > 0
+      ? "error"
+      : healthSummary.review > 0
+        ? "warning"
+        : "success";
+  const label =
+    healthSummary.blocked > 0
+      ? `${healthSummary.blocked} blocked`
+      : healthSummary.review > 0
+        ? `${healthSummary.review} review`
+        : `${healthSummary.ready}/${total} ready`;
+
+  return (
+    <span
+      className={`badge ${tone} technical-contract-badge`}
+      title={technicalContractTitle(contract)}
+    >
+      Technical · {label}
+    </span>
+  );
+}
+
 function StagingWorkspace({
   inspection,
   identitySeed,
@@ -4365,6 +4433,16 @@ function StagingWorkspace({
             order, destinations, and create/update actions.
           </p>
         </div>
+      </header>
+
+      <div className="workflow-workspace-notice staging-ingest-candidate-notice">
+        <div className="staging-ingest-candidate-copy">
+          <strong>No Ingest candidate selected</strong>
+          <span>
+            Inspect and choose source media in Ingest before
+            building or updating a release.
+          </span>
+        </div>
         <button
           type="button"
           className="primary-button"
@@ -4372,15 +4450,6 @@ function StagingWorkspace({
         >
           Choose ingest candidate
         </button>
-      </header>
-
-      <div className="workflow-workspace-notice">
-        <strong>No candidate selected</strong>
-        <span>
-          Inspect a candidate first. Returning to this tab
-          preserves the selected inspection and opens its
-          staging builder or updater.
-        </span>
       </div>
 
       {inspectionError && (
@@ -4503,6 +4572,7 @@ function StagingWorkspace({
                           {release.primaryArtistName && (
                             <small>{release.primaryArtistName}</small>
                           )}
+                          <MediaFileSpecBadge release={release} />
                         </span>
                       </th>
                       <td className="numeric">{release.tracks.length}</td>
@@ -5022,6 +5092,8 @@ function PublishWorkspace({
   onRefresh,
   onOpenWorkflowHelp,
   onNotify,
+  technicalAudit,
+  technicalByRelease,
 }: {
   releases: ReleaseScanResult[];
   workflowLocations: WorkflowLocationDisplay[];
@@ -5033,6 +5105,11 @@ function PublishWorkspace({
     message: string,
     tone?: ToastMessage["tone"],
   ) => void;
+  technicalAudit: MediaTechnicalAuditState;
+  technicalByRelease: Map<
+    string,
+    MediaTechnicalReleaseSummary
+  >;
 }) {
   const [selectedPlan, setSelectedPlan] =
     useState<PublishPlan | null>(null);
@@ -5252,8 +5329,8 @@ function PublishWorkspace({
 
   return (
     <section className="workflow-workspace publish-workspace">
-      <header className="workflow-workspace-header">
-        <div>
+      <header className="workflow-workspace-header publish-workspace-header">
+        <div className="publish-workspace-header-copy">
           <p className="eyebrow">Step 4 · Publish</p>
           <h2>Preflight and package releases</h2>
           <p>
@@ -5262,45 +5339,54 @@ function PublishWorkspace({
           </p>
         </div>
         <div className="workflow-workspace-actions publish-workspace-actions">
-          <span
-            className="badge warning publish-read-only-status"
-            role="status"
-            title="Preflight planning is read-only. Choose a release row to open its preflight; planning itself writes nothing."
+          <div className="publish-workspace-action-row">
+            <TechnicalAuditSummaryBadge audit={technicalAudit} />
+            <span
+              className="badge warning publish-read-only-status"
+              role="status"
+              title="Preflight planning is read-only. Choose a release row to open its preflight; planning itself writes nothing."
+            >
+              Read-only preflight
+            </span>
+            <button
+              type="button"
+              onClick={onOpenWorkflowHelp}
+            >
+              Publishing guide
+            </button>
+          </div>
+          <div
+            className="publish-header-storage-boundary"
+            aria-label="Publish storage boundary"
           >
-            Read-only preflight
-          </span>
-          <button
-            type="button"
-            disabled={loading}
-            onClick={onRefresh}
-          >
-            {loading ? "Refreshing…" : "Refresh Library"}
-          </button>
-          <button
-            type="button"
-            onClick={onOpenWorkflowHelp}
-          >
-            Publishing guide
-          </button>
+            <div className="private">
+              <span>Private canonical source</span>
+              <code
+                title={
+                  workflowLocations.find(
+                    (location) => location.id === "library",
+                  )?.displayPath ?? "Configured Library root"
+                }
+              >
+                media-library
+              </code>
+            </div>
+            <span className="publish-location-arrow" aria-hidden="true">→</span>
+            <div className="planned">
+              <span>Sanitized public output</span>
+              <code
+                title={
+                  workflowLocations.find(
+                    (location) => location.id === "publish",
+                  )?.displayPath ?? "Configured published-media root"
+                }
+              >
+                published-media
+              </code>
+            </div>
+          </div>
         </div>
       </header>
-
-      <section className="publish-location-boundary" aria-label="Publish storage boundary">
-        <div>
-          <span>Private canonical source</span>
-          <code>
-            {workflowLocations.find((location) => location.id === "library")?.displayPath ?? "Configured Library root"}
-          </code>
-        </div>
-        <span className="publish-location-arrow" aria-hidden="true">→</span>
-        <div className="planned">
-          <span>Sanitized public output</span>
-          <code>
-            {workflowLocations.find((location) => location.id === "publish")?.displayPath ?? "Configured published-media root"}
-          </code>
-          <small>Validated snapshot output · complete releases are atomically replaced</small>
-        </div>
-      </section>
 
       {error && (
         <p className="message error">{error}</p>
@@ -5443,6 +5529,19 @@ function PublishWorkspace({
                             <span className={`badge ${assessment.metadataTone}`}>
                               {assessment.metadataLabel}
                             </span>
+                          </div>
+                          <div>
+                            <span>File spec</span>
+                            <MediaFileSpecBadge release={release} />
+                          </div>
+                          <div>
+                            <span>Technical</span>
+                            <TechnicalHealthBadge
+                              summary={technicalByRelease.get(release.id)}
+                              loading={technicalAudit.loading}
+                              error={technicalAudit.error}
+                              prefix={false}
+                            />
                           </div>
                           <div>
                             <span>Masters</span>
@@ -5818,11 +5917,9 @@ function IngestView({
   releases,
   identitySeed,
   error,
-  loading,
   inspection,
   inspectionError,
   inspectionLoading,
-  onRefresh,
   onInspect,
   onBackToCandidates,
   onOpenStaging,
@@ -5831,11 +5928,9 @@ function IngestView({
   releases: ReleaseScanResult[];
   identitySeed: IngestDraftIdentitySeed | null;
   error: string | null;
-  loading: boolean;
   inspection: IngestCandidateInspection | null;
   inspectionError: string | null;
   inspectionLoading: boolean;
-  onRefresh: () => void;
   onInspect: (candidateId: string) => void;
   onBackToCandidates: () => void;
   onOpenStaging: (
@@ -5869,15 +5964,6 @@ function IngestView({
           </p>
         </div>
 
-        <button
-          type="button"
-          disabled={loading}
-          onClick={onRefresh}
-        >
-          {loading
-            ? "Inspecting drop…"
-            : "Refresh drop point"}
-        </button>
       </header>
 
       {error && (
@@ -6068,11 +6154,7 @@ function IngestCandidateTable({
                 <td>
                   {candidate.dateCandidates.length > 0 ? (
                     <span
-                      className={`badge ingest-date-evidence ${
-                        candidate.dateCandidates.length > 1
-                          ? "warning"
-                          : "optional"
-                      }`}
+                      className="badge ingest-date-evidence"
                       title={`${candidate.dateCandidates.length} inferred date${
                         candidate.dateCandidates.length === 1 ? "" : "s"
                       }: ${candidate.dateCandidates.join(", ")}`}
@@ -6080,9 +6162,11 @@ function IngestCandidateTable({
                         candidate.dateCandidates.length === 1 ? "" : "s"
                       }: ${candidate.dateCandidates.join(", ")}`}
                     >
-                      {candidate.dateCandidates.length === 1
-                        ? "1"
-                        : `? ${candidate.dateCandidates.length}`}
+                      {`${candidate.dateCandidates.length} ${
+                        candidate.dateCandidates.length === 1
+                          ? "date"
+                          : "dates"
+                      }`}
                     </span>
                   ) : (
                     <span
@@ -6233,6 +6317,205 @@ function IngestSourcePreview({
       —
     </span>
   );
+}
+
+type IngestFileFormatStatus = {
+  label: string;
+  tone: "preferred" | "compatible" | "informational" | "warning";
+  title: string;
+};
+
+function ingestFileFormatStatus(
+  file: IngestFileInspection,
+): IngestFileFormatStatus | null {
+  if (file.metadataSidecar) {
+    return {
+      label: "Sidecar",
+      tone: "informational",
+      title:
+        "Recognized metadata sidecar. Its parsed values are evidence for review; canonical authored metadata remains TOML in the Library.",
+    };
+  }
+
+  const mediaRole =
+    file.mediaKind === "audio"
+      ? "audio-master"
+      : file.mediaKind === "image"
+        ? "artwork-master"
+        : file.mediaKind === "video"
+          ? "video-master"
+          : null;
+
+  if (mediaRole) {
+    const classification = classifyMediaMasterExtension(
+      mediaRole,
+      file.extension,
+    );
+    const canonicalFilename =
+      canonicalMediaMasterFilename(
+        mediaRole,
+        file.extension,
+      );
+    const formatGuidance =
+      mediaMasterPreferredFormatGuidance[mediaRole];
+
+    if (classification === "preferred") {
+      return {
+        label: "Preferred",
+        tone: "preferred",
+        title:
+          `Preferred happy-path master format. Staging preserves the source bytes and container extension. Canonical Library filename: ${canonicalFilename}. ${formatGuidance}`,
+      };
+    }
+
+    if (classification === "compatible") {
+      return {
+        label: "Compatible",
+        tone: "compatible",
+        title:
+          `Accepted compatibility format, but not in the preferred happy-path master set. It can still be staged without automatic archival transcoding. Canonical Library filename: ${canonicalFilename}. ${formatGuidance}`,
+      };
+    }
+
+    return {
+      label: "Outside spec",
+      tone: "warning",
+      title:
+        "The scanner identified this as media, but its extension is outside the current accepted file-spec set. Review before staging.",
+    };
+  }
+
+  const metadataClass = classifyMetadataFileExtension(
+    file.extension,
+  );
+
+  if (metadataClass === "candidate-evidence") {
+    return {
+      label: "Candidate metadata",
+      tone: "informational",
+      title:
+        "Candidate metadata/evidence format. This extension is documented for future ingest mapping but is not yet promoted to a recognized parsed sidecar.",
+    };
+  }
+
+  if (metadataClass === "recognized-sidecar") {
+    return {
+      label: "Sidecar format",
+      tone: "informational",
+      title:
+        "Recognized sidecar extension. Check Details for parsed entries or parser warnings.",
+    };
+  }
+
+  if (metadataClass === "canonical") {
+    return {
+      label: "Canonical TOML",
+      tone: "informational",
+      title:
+        "TOML is the canonical authored Library metadata format. Generic TOML files in ingest-drop are not automatically treated as trusted canonical metadata.",
+    };
+  }
+
+  return null;
+}
+
+function IngestFileFormatBadge({
+  file,
+}: {
+  file: IngestFileInspection;
+}) {
+  const status = ingestFileFormatStatus(file);
+
+  if (!status) {
+    return null;
+  }
+
+  return (
+    <span
+      className={`ingest-file-format-badge ${status.tone}`}
+      title={status.title}
+      aria-label={`File format status: ${status.label}`}
+    >
+      {status.label}
+    </span>
+  );
+}
+
+type IngestSourceSort =
+  | "name"
+  | "type"
+  | "size-desc"
+  | "size-asc"
+  | "duration-desc";
+
+const ingestMediaKindOrder = new Map<string, number>([
+  ["audio", 0],
+  ["video", 1],
+  ["image", 2],
+  ["text", 3],
+]);
+
+function ingestSourceDuration(
+  file: IngestFileInspection,
+): number {
+  return file.technical.durationSeconds ?? -1;
+}
+
+function sortIngestSourceFiles(
+  files: IngestFileInspection[],
+  sort: IngestSourceSort,
+): IngestFileInspection[] {
+  const byName = (
+    left: IngestFileInspection,
+    right: IngestFileInspection,
+  ) =>
+    left.filename.localeCompare(
+      right.filename,
+      undefined,
+      { numeric: true, sensitivity: "base" },
+    ) ||
+    left.relativePath.localeCompare(
+      right.relativePath,
+      undefined,
+      { numeric: true, sensitivity: "base" },
+    );
+
+  return files.slice().sort((left, right) => {
+    if (sort === "type") {
+      const leftRank =
+        ingestMediaKindOrder.get(left.mediaKind) ?? 99;
+      const rightRank =
+        ingestMediaKindOrder.get(right.mediaKind) ?? 99;
+
+      return (
+        leftRank - rightRank ||
+        left.extension.localeCompare(
+          right.extension,
+          undefined,
+          { sensitivity: "base" },
+        ) ||
+        byName(left, right)
+      );
+    }
+
+    if (sort === "size-desc") {
+      return right.sizeBytes - left.sizeBytes || byName(left, right);
+    }
+
+    if (sort === "size-asc") {
+      return left.sizeBytes - right.sizeBytes || byName(left, right);
+    }
+
+    if (sort === "duration-desc") {
+      return (
+        ingestSourceDuration(right) -
+          ingestSourceDuration(left) ||
+        byName(left, right)
+      );
+    }
+
+    return byName(left, right);
+  });
 }
 
 function getNextIngestAudioFile(
@@ -6396,6 +6679,42 @@ function IngestCandidateInspectionView({
       ),
     [candidate.evidence, identityOverride],
   );
+  const [sourceSort, setSourceSort] =
+    useState<IngestSourceSort>("name");
+  const sortedSourceFiles = useMemo(
+    () => sortIngestSourceFiles(inspection.files, sourceSort),
+    [inspection.files, sourceSort],
+  );
+  const candidateReadiness = targetSelectionRequired
+    ? {
+        tone: "warning",
+        label: "Review",
+        summary: "Target release selection required",
+        detail:
+          "Choose an existing Library release before continuing to Staging.",
+      }
+    : inspection.warnings.length > 0
+      ? {
+          tone: "warning",
+          label: "Review",
+          summary: `${inspection.warnings.length} inspection ${
+            inspection.warnings.length === 1 ? "warning" : "warnings"
+          }`,
+          detail:
+            "Review the inspection warnings below before continuing to Staging.",
+        }
+      : {
+          tone: "success",
+          label: "Ready",
+          summary:
+            candidate.videoCount > 0
+              ? `Video source${candidate.videoCount === 1 ? "" : "s"} probe-verified`
+              : "Candidate inspection complete",
+          detail:
+            candidate.videoCount > 0
+              ? "Video sources are probe-verified. Continue to Staging to confirm canonical video destination, stable ID, descriptive type, and optional related track."
+              : "The candidate is ready to continue to Staging for reviewed canonical placement.",
+        };
   const [expandedFiles, setExpandedFiles] = useState<
     string[]
   >([]);
@@ -6455,7 +6774,7 @@ function IngestCandidateInspectionView({
     };
     const handleEnded = () => {
       const nextFile = getNextIngestAudioFile(
-        inspection.files,
+        sortedSourceFiles,
         audio.dataset.ingestSourcePath ?? null,
       );
 
@@ -6501,7 +6820,7 @@ function IngestCandidateInspectionView({
       audio.removeEventListener("error", handleError);
       sourceAudioPreviewRef.current = null;
     };
-  }, [inspection.files, startSourceAudioPreview]);
+  }, [sortedSourceFiles, startSourceAudioPreview]);
 
   const toggleSourceAudioPreview = (
     file: IngestFileInspection,
@@ -6573,6 +6892,22 @@ function IngestCandidateInspectionView({
             <code>{candidate.relativePath}</code>
           </div>
         </div>
+        <div
+          className={`ingest-candidate-health ${candidateReadiness.tone}`}
+          role="status"
+          aria-label={`Ingest readiness: ${candidateReadiness.label}`}
+          title={candidateReadiness.detail}
+        >
+          <span className="ingest-candidate-health-label">
+            Readiness
+          </span>
+          <div>
+            <span className="ingest-candidate-health-badge">
+              {candidateReadiness.label}
+            </span>
+            <strong>{candidateReadiness.summary}</strong>
+          </div>
+        </div>
         <div className="ingest-inspection-actions">
           <span className="badge">
             {candidate.kind === "folder"
@@ -6609,90 +6944,21 @@ function IngestCandidateInspectionView({
         </div>
       </header>
 
-      {candidate.videoCount > 0 && (
-        <p className="status-message">
-          Video source{candidate.videoCount === 1 ? "" : "s"} detected and
-          probe-verified. Continue to Staging to confirm each canonical video
-          destination, stable ID, descriptive type, and optional related track.
-        </p>
-      )}
 
       <section
-        className="ingest-table-panel"
-        aria-labelledby="candidate-evidence-heading"
+        className="ingest-table-panel ingest-target-release-card"
+        aria-labelledby="ingest-target-release-heading"
       >
         <header className="ingest-table-panel-header">
-          <div>
-            <h3 id="candidate-evidence-heading">
-              Inferred metadata
-            </h3>
-            <p>
-              Deterministic local rules report suggestions,
-              not authoritative metadata.
-            </p>
-          </div>
+          <h3
+            id="ingest-target-release-heading"
+            className="hover-help-label"
+            title="Choose whether this candidate creates a new release or updates an existing canonical Library release. Source-folder naming is evidence only and never determines the destination by itself."
+          >
+            Target release
+          </h3>
         </header>
-        <div className="ingest-identity-tools">
-          <div className="ingest-identity-tools-intro">
-            <strong>Release identity detection</strong>
-            <small>
-              Choose folder fields, embedded tags, or recognized metadata sidecars. These selections seed Staging and remain manually editable.
-            </small>
-          </div>
-
-          <label>
-            <span>Artist source</span>
-            <select
-              value={artistSourceId}
-              onChange={(event) =>
-                setArtistSourceId(event.target.value)
-              }
-            >
-              {identityPlan.artistOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            <span>Release title source</span>
-            <select
-              value={titleSourceId}
-              onChange={(event) =>
-                setTitleSourceId(event.target.value)
-              }
-            >
-              {identityPlan.titleOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div className="ingest-identity-preview">
-            <span>Candidate identity</span>
-            <strong>
-              {identityOverride.releaseArtist || "Artist not inferred"}
-            </strong>
-            <small>{identityOverride.releaseTitle}</small>
-          </div>
-        </div>
-
-        <section
-          className="ingest-target-release-panel"
-          aria-labelledby="ingest-target-release-heading"
-        >
-          <div className="ingest-target-release-intro">
-            <strong id="ingest-target-release-heading">
-              Target release
-            </strong>
-            <small>
-              Choose where this candidate belongs. Source-folder naming is evidence only and does not determine the Library destination.
-            </small>
-          </div>
+        <div className="ingest-target-release-panel">
 
           <fieldset className="ingest-target-release-modes">
             <legend>
@@ -6772,16 +7038,18 @@ function IngestCandidateInspectionView({
               resolvedTargetRelease
                 ? "existing"
                 : targetReleaseMode === "auto"
-                  ? "unresolved"
-                  : "new",
+                  ? "suggested"
+                  : targetReleaseMode === "new"
+                    ? "new"
+                    : "blocked",
             ].join(" ")}
           >
             {resolvedTargetRelease ? (
               <>
-                <span className="badge complete">
-                  Existing Library release
-                </span>
-                <strong>
+                <span className="badge complete">Matched</span>
+                <strong
+                  title="An unambiguous existing canonical Library release is selected as the update destination."
+                >
                   {resolvedTargetRelease.releaseTitle?.trim() ||
                     resolvedTargetRelease.id}
                 </strong>
@@ -6801,41 +7069,113 @@ function IngestCandidateInspectionView({
                   ) !== 0
                 ) && (
                   <small className="ingest-target-release-note">
-                    Candidate title differs from the selected Library release. The canonical Library identity remains the destination; candidate values remain evidence.
+                    Candidate title differs from the canonical destination.
                   </small>
                 )}
               </>
             ) : targetReleaseMode === "auto" ? (
               <>
-                <span className="badge">
-                  No exact Library match
+                <span
+                  className="badge ingest-target-suggested-badge"
+                  title="No unambiguous exact Library match was found, so Auto currently recommends creating a new release."
+                >
+                  Suggested
                 </span>
-                <strong>New release suggested</strong>
-                <small>
-                  Auto only targets an existing release when the candidate identity has one unambiguous exact match. Choose Existing Library release to override this suggestion.
-                </small>
+                <strong
+                  className="hover-help-label"
+                  title="Auto suggests a new release only when it cannot resolve one unambiguous exact canonical Library match. You can override this by choosing Existing Library release."
+                >
+                  New release suggested
+                </strong>
               </>
             ) : targetReleaseMode === "new" ? (
               <>
-                <span className="badge">New release</span>
+                <span className="badge ingest-target-suggested-badge">
+                  New
+                </span>
                 <strong>{identityOverride.releaseTitle}</strong>
-                <small>
-                  Staging will generate the destination from the reviewed candidate identity.
-                </small>
               </>
             ) : (
               <>
-                <span className="badge missing">
-                  Selection required
-                </span>
-                <strong>Choose an existing Library release</strong>
-                <small>
-                  Continue to Staging is disabled until a destination is selected.
-                </small>
+                <span className="badge missing">Blocked</span>
+                <strong
+                  title="Select an existing Library destination before Continue to Staging becomes available."
+                >
+                  Choose an existing Library release
+                </strong>
               </>
             )}
           </div>
-        </section>
+        </div>
+      </section>
+
+
+      <section
+        className="ingest-table-panel"
+        aria-labelledby="candidate-evidence-heading"
+      >
+        <header className="ingest-table-panel-header">
+          <div>
+            <h3
+              id="candidate-evidence-heading"
+              className="hover-help-label"
+              title="Deterministic local rules report candidate suggestions and evidence; they do not become authoritative metadata until reviewed and staged."
+            >
+              Inferred metadata
+            </h3>
+          </div>
+        </header>
+        <div className="ingest-identity-tools">
+          <div className="ingest-identity-tools-intro">
+            <strong
+              className="hover-help-label"
+              title="Choose folder fields, embedded tags, or recognized metadata sidecars as the candidate identity source. These selections seed Staging and remain manually editable."
+            >
+              Release identity detection
+            </strong>
+          </div>
+
+          <label>
+            <span>Artist source</span>
+            <select
+              value={artistSourceId}
+              onChange={(event) =>
+                setArtistSourceId(event.target.value)
+              }
+            >
+              {identityPlan.artistOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label>
+            <span>Release title source</span>
+            <select
+              value={titleSourceId}
+              onChange={(event) =>
+                setTitleSourceId(event.target.value)
+              }
+            >
+              {identityPlan.titleOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="ingest-identity-preview">
+            <span>Candidate identity</span>
+            <strong>
+              {identityOverride.releaseArtist || "Artist not inferred"}
+            </strong>
+            <small>{identityOverride.releaseTitle}</small>
+          </div>
+        </div>
+
 
         <details className="ingest-evidence-disclosure">
           <summary>
@@ -6874,17 +7214,36 @@ function IngestCandidateInspectionView({
       >
         <header className="ingest-table-panel-header ingest-source-panel-header">
           <div>
-            <h3 id="source-files-heading">
+            <h3
+              id="source-files-heading"
+              className="hover-help-label"
+              title="Technical properties, embedded tags, and recognized metadata sidecars are inspected read-only; source files are never modified by inspection."
+            >
               Source files
             </h3>
-            <p>
-              Technical properties, embedded tags, and recognized metadata sidecars are collected without modifying the files.
-            </p>
           </div>
-          <div
-            className="ingest-source-summary"
-            aria-label="Candidate source summary"
-          >
+          <div className="ingest-source-header-tools">
+            <label className="ingest-source-sort-control">
+              <span>Sort</span>
+              <select
+                value={sourceSort}
+                onChange={(event) =>
+                  setSourceSort(
+                    event.target.value as IngestSourceSort,
+                  )
+                }
+              >
+                <option value="name">Name</option>
+                <option value="type">Type</option>
+                <option value="size-desc">Size · largest</option>
+                <option value="size-asc">Size · smallest</option>
+                <option value="duration-desc">Duration · longest</option>
+              </select>
+            </label>
+            <div
+              className="ingest-source-summary"
+              aria-label="Candidate source summary"
+            >
             <span>
               {candidate.kind === "folder"
                 ? "Folder"
@@ -6897,6 +7256,7 @@ function IngestCandidateInspectionView({
             <span>
               {formatByteSize(candidate.totalSizeBytes)}
             </span>
+            </div>
           </div>
         </header>
 
@@ -6933,7 +7293,7 @@ function IngestCandidateInspectionView({
                 </th>
               </tr>
             </thead>
-            {inspection.files.map((file) => {
+            {sortedSourceFiles.map((file) => {
               const expanded = expandedFiles.includes(
                 file.relativePath,
               );
@@ -6954,7 +7314,10 @@ function IngestCandidateInspectionView({
                       scope="row"
                       className="ingest-sticky-column ingest-source-filename-column"
                     >
-                      <strong>{file.filename}</strong>
+                      <span className="ingest-source-filename-heading">
+                        <strong>{file.filename}</strong>
+                        <IngestFileFormatBadge file={file} />
+                      </span>
                       <code>{file.relativePath}</code>
                       {file.warnings.length > 0 && (
                         <span className="ingest-row-warning">
@@ -7444,6 +7807,8 @@ function LibraryReleaseBrowser({
   onOpenMetadata,
   showAdminTools,
   onNotify,
+  technicalAudit,
+  technicalByRelease,
 }: {
   releases: ReleaseScanResult[];
   onLibraryChanged: () => Promise<void>;
@@ -7453,6 +7818,11 @@ function LibraryReleaseBrowser({
     message: string,
     tone?: ToastMessage["tone"],
   ) => void;
+  technicalAudit: MediaTechnicalAuditState;
+  technicalByRelease: Map<
+    string,
+    MediaTechnicalReleaseSummary
+  >;
 }) {
   const [viewMode, setViewMode] =
     useState<LibraryReleaseViewMode>(
@@ -7506,6 +7876,7 @@ function LibraryReleaseBrowser({
           <small>
             {releases.length} {releases.length === 1 ? "release" : "releases"}
           </small>
+          <TechnicalAuditSummaryBadge audit={technicalAudit} />
         </div>
 
         <div className="library-release-browser-controls">
@@ -7568,6 +7939,9 @@ function LibraryReleaseBrowser({
             }
             showAdminTools={showAdminTools}
             onNotify={onNotify}
+            technicalSummary={technicalByRelease.get(release.id)}
+            technicalLoading={technicalAudit.loading}
+            technicalError={technicalAudit.error}
           />
         ))}
       </section>
@@ -7595,6 +7969,9 @@ function ReleaseCard({
   onOpenMetadata,
   showAdminTools,
   onNotify,
+  technicalSummary,
+  technicalLoading,
+  technicalError,
 }: {
   release: ReleaseScanResult;
   onLibraryChanged: () => Promise<void>;
@@ -7604,6 +7981,9 @@ function ReleaseCard({
     message: string,
     tone?: ToastMessage["tone"],
   ) => void;
+  technicalSummary?: MediaTechnicalReleaseSummary;
+  technicalLoading: boolean;
+  technicalError: string | null;
 }) {
   const [adminToolsOpen, setAdminToolsOpen] =
     useState(false);
@@ -8076,6 +8456,14 @@ function ReleaseCard({
         </button>
 
         <div className="release-status-actions">
+          <MediaFileSpecBadge release={release} prefix />
+
+          <TechnicalHealthBadge
+            summary={technicalSummary}
+            loading={technicalLoading}
+            error={technicalError}
+          />
+
           <span
             className={`badge ${readinessTone(
               metadataReadiness,
@@ -13865,7 +14253,6 @@ function ReleaseMetadataDetailView({
   onRefresh,
   onOpenWorkflowHelp,
   onNavigateWorkflow,
-  onOpenTagSearch,
 }: {
   detail: ReleaseMetadataDetail;
   release: ReleaseScanResult | null;
@@ -13886,7 +14273,6 @@ function ReleaseMetadataDetailView({
   onNavigateWorkflow: (
     view: WorkflowApplicationView,
   ) => void;
-  onOpenTagSearch: () => void;
 }) {
   const [setupMode, setSetupMode] =
     useState(false);
@@ -17785,19 +18171,6 @@ function ReleaseMetadataDetailView({
     onNavigateWorkflow(view);
   };
 
-  const openTagSearchFromRelease = () => {
-    if (
-      dirtyCount > 0 &&
-      !window.confirm(
-        "Discard all unsaved metadata changes and open Metadata Tag Search?",
-      )
-    ) {
-      return;
-    }
-
-    onOpenTagSearch();
-  };
-
   return (
     <section className="metadata-detail">
       <header className="metadata-detail-header">
@@ -17997,53 +18370,6 @@ function ReleaseMetadataDetailView({
                 }}
               >
                 View activity log
-              </button>
-            </section>
-
-            <section className="menu-card workflow-menu-card">
-              <h2>Release workflow</h2>
-              <p className="workflow-menu-path">
-                {workflowPath}
-              </p>
-              <p>
-                Review the full ingest, authoring,
-                preparation, preflight, and publishing
-                guide.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  if (
-                    dirtyCount > 0 &&
-                    !window.confirm(
-                      "Discard unsaved metadata changes and open Workflow & Help?",
-                    )
-                  ) {
-                    return;
-                  }
-
-                  setDetailMenuOpen(false);
-                  onOpenWorkflowHelp();
-                }}
-              >
-                View workflow guide
-              </button>
-            </section>
-
-            <section className="menu-card">
-              <h2>Metadata Reference</h2>
-              <p>
-                Search canonical fields and verified
-                player-visible tag mappings.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  setDetailMenuOpen(false);
-                  openTagSearchFromRelease();
-                }}
-              >
-                Open Tag Search
               </button>
             </section>
 

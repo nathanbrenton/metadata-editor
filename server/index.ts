@@ -164,6 +164,10 @@ import {
   resolvePublishRoot,
 } from "./workflow-locations.js";
 
+import {
+  auditMediaLibraryTechnical,
+} from "./media-technical-audit.js";
+
 const host = "127.0.0.1";
 const port = Number.parseInt(
   process.env.METADATA_EDITOR_PORT ?? "4174",
@@ -5043,6 +5047,35 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown public-package error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/library/media-technical"
+    ) {
+      try {
+        const releaseId =
+          requestUrl.searchParams.get("release") ?? undefined;
+        const mediaRoot = await resolveMediaRoot();
+
+        sendJson(
+          response,
+          200,
+          await auditMediaLibraryTechnical(
+            mediaRoot,
+            releaseId,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown technical-media audit error",
         });
       }
 

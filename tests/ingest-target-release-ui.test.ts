@@ -30,7 +30,7 @@ test("Ingest separates source identity from the target Library release", () => {
   assert.match(appSource, /Auto/);
   assert.match(
     appSource,
-    /Source-folder naming is evidence only and does not determine the Library destination/,
+    /Source-folder naming is evidence only and never determines the destination by itself/,
   );
   assert.match(
     appSource,

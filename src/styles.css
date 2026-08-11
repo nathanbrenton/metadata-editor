@@ -7192,6 +7192,11 @@ input[aria-invalid="true"] {
 }
 
 .ingest-inspection-header {
+  display: grid;
+  grid-template-columns:
+    minmax(18rem, 1.5fr)
+    minmax(16rem, 0.85fr)
+    minmax(15rem, auto);
   align-items: center;
 }
 
@@ -7587,8 +7592,13 @@ input[aria-invalid="true"] {
 
 @media (max-width: 560px) {
   .ingest-inspection-header {
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
-    flex-direction: column;
+  }
+
+  .ingest-inspection-actions {
+    grid-column: auto;
+    justify-content: flex-start;
   }
 }
 
@@ -10727,21 +10737,22 @@ input[aria-invalid="true"] {
   white-space: nowrap;
 }
 
+.ingest-target-release-card {
+  overflow: visible;
+}
+
 .ingest-target-release-panel {
   display: grid;
   grid-template-columns:
-    minmax(12rem, 0.8fr)
-    minmax(18rem, 1.25fr)
     minmax(17rem, 1fr)
-    minmax(18rem, 1.25fr);
+    minmax(20rem, 1.25fr)
+    minmax(18rem, 1fr);
   align-items: center;
   gap: 0.75rem;
-  border-bottom: 1px solid var(--document-border);
   padding: 0.75rem 1rem;
   background: #12171b;
 }
 
-.ingest-target-release-intro,
 .ingest-target-release-select,
 .ingest-target-release-resolution {
   display: grid;
@@ -10749,7 +10760,6 @@ input[aria-invalid="true"] {
   gap: 0.28rem;
 }
 
-.ingest-target-release-intro small,
 .ingest-target-release-resolution small {
   color: #9ba6b1;
   line-height: 1.35;
@@ -10803,8 +10813,15 @@ input[aria-invalid="true"] {
   border-color: #41624d;
 }
 
-.ingest-target-release-resolution.unresolved {
-  border-color: #655a3e;
+.ingest-target-release-resolution.suggested,
+.ingest-target-release-resolution.new {
+  border-color: #4c6f8c;
+  background: #15222c;
+}
+
+.ingest-target-release-resolution.blocked {
+  border-color: rgba(143, 77, 86, 0.72);
+  background: rgba(82, 44, 51, 0.22);
 }
 
 .ingest-target-release-resolution strong,
@@ -10817,8 +10834,48 @@ input[aria-invalid="true"] {
   color: #c7b27c !important;
 }
 
+.ingest-target-suggested-badge {
+  border-color: #4c6f8c;
+  background: #1a2b38;
+  color: #b7d2e8;
+}
+
+.hover-help-label {
+  cursor: help;
+  text-decoration: underline dotted #65727d;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+}
+
 .ingest-source-panel-header {
   min-width: 0;
+}
+
+.ingest-source-header-tools {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.8rem;
+}
+
+.ingest-source-sort-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.4rem;
+  color: #9aa6b2;
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.ingest-source-sort-control select {
+  min-width: 9.5rem;
+  padding-block: 0.35rem;
+  font-size: 0.76rem;
+  text-transform: none;
 }
 
 .ingest-source-summary {
@@ -10847,6 +10904,14 @@ input[aria-invalid="true"] {
 }
 
 @media (max-width: 70rem) {
+  .ingest-inspection-header {
+    grid-template-columns: minmax(18rem, 1fr) minmax(15rem, 1fr);
+  }
+
+  .ingest-inspection-actions {
+    grid-column: 1 / -1;
+  }
+
   .ingest-identity-tools,
   .ingest-target-release-panel {
     grid-template-columns: minmax(12rem, 1fr) minmax(15rem, 1fr);
@@ -10855,12 +10920,14 @@ input[aria-invalid="true"] {
 
 @media (max-width: 860px) {
   .ingest-source-panel-header {
-    align-items: center;
-    flex-direction: row;
+    align-items: stretch;
+    flex-direction: column;
   }
 
-  .ingest-source-panel-header > div:first-child {
-    flex: 0 0 auto;
+  .ingest-source-header-tools {
+    align-items: flex-start;
+    justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
   .ingest-source-summary {
@@ -12456,4 +12523,485 @@ main {
     flex-direction: column;
     gap: 0.35rem;
   }
+}
+
+
+/* Ingest file-spec conformance lives beside the filename, not in a new column. */
+.ingest-source-filename-heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ingest-source-filename-heading > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ingest-file-format-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 1.15rem;
+  padding: 0.08rem 0.38rem;
+  border: 1px solid #46515b;
+  border-radius: 999px;
+  color: #b8c2cb;
+  background: #171c20;
+  font-size: 0.61rem;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  line-height: 1;
+  cursor: help;
+}
+
+.ingest-file-format-badge.preferred {
+  border-color: rgba(83, 151, 103, 0.7);
+  color: #a9d9b5;
+  background: rgba(36, 83, 48, 0.34);
+}
+
+.ingest-file-format-badge.compatible {
+  border-color: rgba(127, 151, 173, 0.68);
+  color: #bdcad6;
+  background: rgba(57, 75, 91, 0.38);
+}
+
+.ingest-file-format-badge.informational {
+  border-color: rgba(117, 142, 166, 0.55);
+  color: #afc3d5;
+}
+
+.ingest-file-format-badge.warning {
+  border-color: rgba(190, 139, 57, 0.72);
+  color: #e0c082;
+  background: rgba(96, 67, 26, 0.34);
+}
+
+
+/* Media File Contract v1 workspace reconciliation */
+.staging-ingest-candidate-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.staging-ingest-candidate-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.staging-ingest-candidate-notice .primary-button {
+  flex: 0 0 auto;
+}
+
+.publish-workspace-header {
+  align-items: flex-start;
+}
+
+.publish-workspace-header-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.publish-header-storage-boundary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0.65rem;
+  margin-top: 0.75rem;
+  padding-top: 0.7rem;
+  border-top: 1px solid rgba(143, 179, 212, 0.18);
+}
+
+.publish-header-storage-boundary > .private,
+.publish-header-storage-boundary > .planned {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.18rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: 0.4rem;
+}
+
+.publish-header-storage-boundary > .private {
+  border-color: rgba(105, 139, 169, 0.5);
+  background: rgba(44, 65, 83, 0.27);
+}
+
+.publish-header-storage-boundary > .private span {
+  color: #b9ccdc;
+}
+
+.publish-header-storage-boundary > .planned {
+  border-color: rgba(171, 131, 58, 0.55);
+  background: rgba(91, 65, 25, 0.31);
+}
+
+.publish-header-storage-boundary > .planned span {
+  color: #dfc37f;
+}
+
+.publish-header-storage-boundary code {
+  overflow: hidden;
+  color: #d7dee4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publish-header-storage-boundary small {
+  color: #9fa9b2;
+}
+
+.publish-header-storage-boundary .publish-location-arrow {
+  align-self: center;
+  color: #8d99a3;
+}
+
+@media (max-width: 72rem) {
+  .publish-header-storage-boundary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .publish-header-storage-boundary .publish-location-arrow {
+    display: none;
+  }
+}
+
+@media (max-width: 48rem) {
+  .staging-ingest-candidate-notice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* Media File Contract v2 release-level conformance. */
+.media-file-spec-badge {
+  width: max-content;
+  max-width: 100%;
+  cursor: help;
+  white-space: nowrap;
+}
+
+.staging-release-identity .media-file-spec-badge {
+  margin-top: 0.28rem;
+  font-size: 0.62rem;
+}
+
+.release-status-actions .media-file-spec-badge {
+  order: -1;
+}
+
+.publish-readiness-stack .media-file-spec-badge {
+  margin-left: auto;
+}
+
+
+/* Workspace header refresh commands */
+.page-header-refresh-button {
+  min-width: 8.4rem;
+  white-space: nowrap;
+}
+
+.ingest-view-header > div:first-child {
+  min-width: 0;
+}
+
+.publish-workspace-actions {
+  gap: 0.55rem;
+}
+
+@media (max-width: 58rem) {
+  .page-header-refresh-button {
+    min-width: 0;
+  }
+}
+
+
+/* Ingest candidate health belongs to the Candidate Inspection card. */
+.ingest-candidate-health {
+  display: grid;
+  min-width: 0;
+  gap: 0.3rem;
+  border: 1px solid #46515b;
+  border-radius: 0.4rem;
+  padding: 0.55rem 0.7rem;
+  background: #171c20;
+}
+
+.ingest-candidate-health-label {
+  color: #8e99a3;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.ingest-candidate-health > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.ingest-candidate-health strong {
+  overflow: hidden;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ingest-candidate-health-badge {
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.14rem 0.45rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.ingest-candidate-health.success {
+  border-color: rgba(83, 151, 103, 0.62);
+  background: rgba(36, 83, 48, 0.24);
+}
+
+.ingest-candidate-health.success .ingest-candidate-health-badge,
+.ingest-candidate-health.success strong {
+  color: #a9d9b5;
+}
+
+.ingest-candidate-health.warning {
+  border-color: rgba(190, 139, 57, 0.66);
+  background: rgba(96, 67, 26, 0.25);
+}
+
+.ingest-candidate-health.warning .ingest-candidate-health-badge,
+.ingest-candidate-health.warning strong {
+  color: #e0c082;
+}
+
+.ingest-candidate-health.error {
+  border-color: rgba(143, 77, 86, 0.72);
+  background: rgba(82, 44, 51, 0.28);
+}
+
+.ingest-candidate-health.error .ingest-candidate-health-badge,
+.ingest-candidate-health.error strong {
+  color: #f0cbd1;
+}
+
+/* Live UI reconciliation — exact render paths */
+
+/* Multiple inferred dates are evidence for review, not an amber warning. */
+.ingest-date-evidence {
+  min-width: 3.7rem;
+  justify-content: center;
+  border: 1px solid #46515b;
+  background: #222a30;
+  color: #b8c4cd;
+  white-space: nowrap;
+}
+
+/* Selected candidate is compact Staging context, below the application header. */
+.ingest-builder-header-context {
+  padding: 0.62rem 0.8rem;
+}
+
+.ingest-builder-header-context .ingest-inspection-identity {
+  min-width: 0;
+}
+
+.ingest-staging-candidate-context {
+  min-width: 0;
+}
+
+.ingest-staging-candidate-context .eyebrow {
+  margin-bottom: 0.12rem;
+  font-size: 0.61rem;
+}
+
+.ingest-staging-candidate-line {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.18rem 0.65rem;
+}
+
+.ingest-staging-candidate-name {
+  min-width: 0;
+  overflow: hidden;
+  color: #c9d1d7;
+  font-size: 0.84rem;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ingest-staging-candidate-cue {
+  color: #8f9aa4;
+  font-size: 0.68rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ingest-builder-header-context code {
+  margin-top: 0.2rem;
+  color: #9aa5ae;
+  font-size: 0.7rem;
+}
+
+/* Five short guided steps remain one desktop row. */
+.ingest-guided-steps.ingest-guided-step-tabs {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 0.34rem;
+}
+
+.ingest-guided-steps.ingest-guided-step-tabs > li {
+  min-width: 0;
+}
+
+.ingest-guided-steps.ingest-guided-step-tabs button {
+  justify-content: center;
+  min-width: 0;
+  gap: 0;
+  padding: 0.56rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .ingest-guided-steps.ingest-guided-step-tabs {
+    grid-template-columns: repeat(5, minmax(7rem, 1fr)) !important;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .ingest-staging-candidate-cue {
+    flex-basis: 100%;
+  }
+}
+
+/* Workspace visual reconciliation — candidate context + Publish controls */
+
+.ingest-builder-header-context {
+  padding-block: 0.48rem;
+}
+
+.ingest-staging-candidate-line {
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.45rem;
+}
+
+.ingest-staging-candidate-label {
+  flex: 0 0 auto;
+  margin: 0 !important;
+  color: #8f9aa4;
+  font-size: 0.58rem !important;
+  letter-spacing: 0.08em;
+}
+
+.ingest-staging-candidate-name {
+  flex: 0 1 auto;
+  max-width: min(26rem, 38vw);
+  color: #b7c0c7;
+  font-size: 0.74rem !important;
+  font-weight: 550 !important;
+}
+
+.ingest-staging-candidate-cue {
+  flex: 0 0 auto;
+  font-size: 0.64rem;
+}
+
+.ingest-builder-header-context code {
+  margin-top: 0.12rem;
+  font-size: 0.64rem;
+}
+
+.publish-workspace-actions {
+  width: min(100%, 29rem);
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.publish-workspace-action-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.publish-workspace-actions .publish-header-storage-boundary {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  width: 100%;
+  margin-top: 0.15rem;
+  padding-top: 0.45rem;
+  gap: 0.4rem;
+}
+
+.publish-workspace-actions .publish-header-storage-boundary > .private,
+.publish-workspace-actions .publish-header-storage-boundary > .planned {
+  padding: 0.36rem 0.45rem;
+  gap: 0.08rem;
+}
+
+.publish-workspace-actions .publish-header-storage-boundary > .private span,
+.publish-workspace-actions .publish-header-storage-boundary > .planned span {
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.publish-workspace-actions .publish-header-storage-boundary code {
+  font-size: 0.7rem;
+}
+
+@media (max-width: 760px) {
+  .ingest-staging-candidate-line {
+    flex-wrap: wrap;
+  }
+
+  .publish-workspace-actions {
+    width: 100%;
+  }
+
+  .publish-workspace-action-row {
+    width: 100%;
+  }
+
+  .publish-workspace-action-row button {
+    flex: 1 1 0;
+  }
+}
+
+/* Technical Media Contract v1 — compact advisory health in Library/Publish. */
+.technical-contract-badge,
+.technical-health-badge {
+  white-space: nowrap;
+}
+
+.library-release-browser-toolbar > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.28rem 0.55rem;
+}
+
+.library-release-browser-toolbar .technical-contract-badge {
+  margin-left: 0.15rem;
+}
+
+.publish-workspace-action-row .technical-contract-badge {
+  order: -1;
 }

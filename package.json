@@ -14,7 +14,9 @@
     "preflight:publish": "tsx scripts/plan-publish.ts --strict",
     "preview": "vite preview",
     "tags:generate": "scripts/player-tag-tests/generate-fixtures.sh",
-    "tags:summarize": "scripts/player-tag-tests/summarize-probes.py"
+    "tags:summarize": "scripts/player-tag-tests/summarize-probes.py",
+    "audit:file-spec": "tsx scripts/audit-media-file-spec.ts",
+    "audit:media-technical": "tsx scripts/audit-media-technical.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.4",
