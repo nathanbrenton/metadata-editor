@@ -158,6 +158,11 @@ export const workflowDerivativeStatuses: readonly WorkflowDefinition[] = [
 
 export const workflowFaqItems: readonly WorkflowFaqItem[] = [
   {
+    question: "What does the Library Tiles tooltip show?",
+    answer:
+      "Rows and Cards keep their existing visible provenance and health information. Tiles keeps the album artwork clear at rest; hover a tile or move keyboard focus into it to reveal release title, artist, date, track/video counts, canonical Library and artwork source paths, and the same file-spec, technical-health, metadata-readiness, and Library-health badges used by the other Library views. While Tiles is active, the Library toolbar also shows a persisted Tile size slider so the artwork grid can be made denser or larger without changing Rows or Cards.",
+  },
+  {
     question: "What is the hover-over help pattern called?",
     answer:
       "It is a tooltip. Compact Ingest headings use native hover/focus title tooltips for short explanatory guidance so the workspace can stay dense. Metadata fields keep their dedicated ? help controls when richer field/tag guidance is needed.",
@@ -180,7 +185,7 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
   {
     question: "Where does technical media health appear in the workflow?",
     answer:
-      "Library release cards and Publish source summaries show Technical · Ready, Review, or Blocked from the same read-only ffprobe audit used by the CLI. The Library toolbar and Publish header show one compact overall technical state for the current Library scan. Technical Media Contract v1 remains advisory: it preserves accepted source masters, never requests automatic conversion, and does not enter Publish preflight gating.",
+      "Library release cards and Publish source summaries show compact Technical Ready, Review, or Blocked state from the shared read-only ffprobe audit. Open a Library release and expand Release health to inspect that release's canonical-master counts, audio codec/sample-rate/bit-depth/channel inventory, artwork dimensions/pixel formats, video codec/profile/dimensions/frame rate, and any technical issues. The Publish preflight dialog reuses the same per-release inspector. Technical Media Contract v1 remains advisory: accepted source masters are preserved, no automatic conversion is requested, and technical health does not enter Publish gating.",
   },
   {
     question: "How do I inspect technical media characteristics?",

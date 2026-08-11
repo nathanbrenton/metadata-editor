@@ -40,7 +40,7 @@ test("Library offers persisted Rows Cards and Tiles views without a redundant me
   assert.match(appSource, /\["cards", "Cards", "Expanded release cards"\]/);
   assert.match(appSource, /\["tiles", "Tiles", "Artwork-first browsing"\]/);
   assert.match(appSource, /Metadata complete/);
-  assert.match(appSource, /Up to date/);
+  assert.match(appSource, /Library ready/);
   assert.doesNotMatch(appSource, />\s*View metadata\s*<\/button>/);
   assert.match(styleSource, /\.library-release-list--rows/);
   assert.match(styleSource, /\.library-release-list--tiles/);

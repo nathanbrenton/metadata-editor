@@ -4920,6 +4920,11 @@ const server = createServer(
           typeof body.operationId === "string"
             ? body.operationId
             : "";
+        const scope =
+          "scope" in body &&
+          typeof body.scope === "string"
+            ? body.scope
+            : "all";
 
         if (
           !releaseId ||
@@ -4943,6 +4948,13 @@ const server = createServer(
           return;
         }
 
+        if (scope !== "all" && scope !== "playback") {
+          sendJson(response, 400, {
+            error: "scope must be all or playback",
+          });
+          return;
+        }
+
         const [mediaRoot, publishRoot] =
           await Promise.all([
             resolveMediaRoot(),
@@ -4958,6 +4970,7 @@ const server = createServer(
               planFingerprint,
             publishPlanGeneratedAt:
               planGeneratedAt,
+            scope,
             ...(operationId ? { operationId } : {}),
             onProgress: recordMediaPreparationProgress,
           },

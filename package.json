@@ -16,7 +16,8 @@
     "tags:generate": "scripts/player-tag-tests/generate-fixtures.sh",
     "tags:summarize": "scripts/player-tag-tests/summarize-probes.py",
     "audit:file-spec": "tsx scripts/audit-media-file-spec.ts",
-    "audit:media-technical": "tsx scripts/audit-media-technical.ts"
+    "audit:media-technical": "tsx scripts/audit-media-technical.ts",
+    "repair:ingest-receipt-release-prefix": "tsx scripts/repair-ingest-receipt-release-prefix.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.1.4",

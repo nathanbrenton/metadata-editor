@@ -68,7 +68,7 @@ const quickQuestions = [
   {
     question: "Where does technical media health appear in the workflow?",
     answer:
-      "Library and Publish show compact Technical Ready, Review, or Blocked indicators from one background read-only audit per Library scan. Hover for the advisory preservation-policy summary; technical health does not change Publish gating.",
+      "Library release detail and Publish preflight now share one compact technical inspector. It summarizes canonical-master counts and the observed audio, artwork, and video inventory from the background read-only audit; Technical Media Contract v1 remains advisory and does not change Publish gating.",
   },
   {
     question: "What audit commands are available?",

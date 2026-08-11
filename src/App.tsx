@@ -406,6 +406,33 @@ type MediaTechnicalHealth =
   | "review"
   | "blocked";
 
+type MediaTechnicalInventoryEntry = {
+  value: string;
+  count: number;
+};
+
+type MediaTechnicalInventory = {
+  audio: {
+    codecs: MediaTechnicalInventoryEntry[];
+    sampleRates: MediaTechnicalInventoryEntry[];
+    bitDepths: MediaTechnicalInventoryEntry[];
+    sampleFormats: MediaTechnicalInventoryEntry[];
+    channels: MediaTechnicalInventoryEntry[];
+  };
+  artwork: {
+    codecs: MediaTechnicalInventoryEntry[];
+    dimensions: MediaTechnicalInventoryEntry[];
+    pixelFormats: MediaTechnicalInventoryEntry[];
+  };
+  video: {
+    codecs: MediaTechnicalInventoryEntry[];
+    profiles: MediaTechnicalInventoryEntry[];
+    dimensions: MediaTechnicalInventoryEntry[];
+    pixelFormats: MediaTechnicalInventoryEntry[];
+    frameRates: MediaTechnicalInventoryEntry[];
+  };
+};
+
 type MediaTechnicalReleaseSummary = {
   releaseId: string;
   health: MediaTechnicalHealth;
@@ -413,6 +440,15 @@ type MediaTechnicalReleaseSummary = {
     severity: "review" | "blocked";
     message: string;
   }>;
+  inventory: MediaTechnicalInventory;
+  summary: {
+    total: number;
+    probed: number;
+    failed: number;
+    audio: number;
+    artwork: number;
+    video: number;
+  };
 };
 
 type MediaTechnicalContract = {
@@ -1817,6 +1853,10 @@ export function App() {
                 selectedReleaseDetail.releaseId,
             ) ?? null
           }
+          technicalAudit={mediaTechnicalAudit}
+          technicalSummary={mediaTechnicalByRelease.get(
+            selectedReleaseDetail.releaseId,
+          )}
           metadataRegistry={metadataRegistry}
           showAdminTools={showAdminTools}
           onShowAdminToolsChange={
@@ -4364,6 +4404,204 @@ function TechnicalAuditSummaryBadge({
   );
 }
 
+function technicalInventoryEntryLabel(
+  entries: MediaTechnicalInventoryEntry[],
+): string {
+  if (entries.length === 0) {
+    return "—";
+  }
+
+  return entries
+    .map((entry) => `${entry.value} × ${entry.count}`)
+    .join(" · ");
+}
+
+function TechnicalInventoryFact({
+  label,
+  entries,
+}: {
+  label: string;
+  entries: MediaTechnicalInventoryEntry[];
+}) {
+  return (
+    <div className="technical-inspector-fact">
+      <dt>{label}</dt>
+      <dd>{technicalInventoryEntryLabel(entries)}</dd>
+    </div>
+  );
+}
+
+function TechnicalReleaseInspector({
+  summary,
+  audit,
+  compact = false,
+}: {
+  summary?: MediaTechnicalReleaseSummary;
+  audit: MediaTechnicalAuditState;
+  compact?: boolean;
+}) {
+  const contract = audit.result?.contract;
+
+  return (
+    <section
+      className={`technical-release-inspector${compact ? " compact" : ""}`}
+      aria-label="Technical media inspector"
+    >
+      <header>
+        <div>
+          <span className="eyebrow">Technical media</span>
+          <strong>Canonical master inspection</strong>
+        </div>
+        <TechnicalHealthBadge
+          summary={summary}
+          loading={audit.loading}
+          error={audit.error}
+        />
+      </header>
+
+      {contract && (
+        <p
+          className="technical-release-policy"
+          title={technicalContractTitle(contract)}
+        >
+          Contract v{contract.version} · advisory · preserve source masters · no Publish gating
+        </p>
+      )}
+
+      {audit.loading && !summary ? (
+        <p className="technical-release-message">
+          Running the read-only ffprobe audit…
+        </p>
+      ) : audit.error && !summary ? (
+        <p className="technical-release-message warning">
+          {audit.error}
+        </p>
+      ) : summary ? (
+        <>
+          <div className="technical-release-counts">
+            <span>{summary.summary.total} masters</span>
+            <span>{summary.summary.probed} probed</span>
+            <span>{summary.summary.failed} failed</span>
+            <span>{summary.summary.audio} audio</span>
+            <span>{summary.summary.artwork} artwork</span>
+            <span>{summary.summary.video} video</span>
+          </div>
+
+          {summary.issues.length > 0 && (
+            <div className="technical-release-issues">
+              {summary.issues.map((issue, index) => (
+                <div key={`${issue.severity}:${index}`}>
+                  <span
+                    className={`badge ${
+                      issue.severity === "blocked"
+                        ? "missing"
+                        : "warning"
+                    }`}
+                  >
+                    {issue.severity}
+                  </span>
+                  <span>{issue.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="technical-release-domains">
+            {summary.summary.audio > 0 && (
+              <details open={!compact}>
+                <summary>
+                  <span>Audio</span>
+                  <small>{summary.summary.audio} masters</small>
+                </summary>
+                <dl>
+                  <TechnicalInventoryFact
+                    label="Codec"
+                    entries={summary.inventory.audio.codecs}
+                  />
+                  <TechnicalInventoryFact
+                    label="Sample rate"
+                    entries={summary.inventory.audio.sampleRates}
+                  />
+                  <TechnicalInventoryFact
+                    label="Bit depth"
+                    entries={summary.inventory.audio.bitDepths}
+                  />
+                  <TechnicalInventoryFact
+                    label="Channels"
+                    entries={summary.inventory.audio.channels}
+                  />
+                  <TechnicalInventoryFact
+                    label="Sample format"
+                    entries={summary.inventory.audio.sampleFormats}
+                  />
+                </dl>
+              </details>
+            )}
+
+            {summary.summary.artwork > 0 && (
+              <details open={!compact}>
+                <summary>
+                  <span>Artwork</span>
+                  <small>{summary.summary.artwork} masters</small>
+                </summary>
+                <dl>
+                  <TechnicalInventoryFact
+                    label="Codec"
+                    entries={summary.inventory.artwork.codecs}
+                  />
+                  <TechnicalInventoryFact
+                    label="Dimensions"
+                    entries={summary.inventory.artwork.dimensions}
+                  />
+                  <TechnicalInventoryFact
+                    label="Pixel format"
+                    entries={summary.inventory.artwork.pixelFormats}
+                  />
+                </dl>
+              </details>
+            )}
+
+            {summary.summary.video > 0 && (
+              <details open={!compact}>
+                <summary>
+                  <span>Video</span>
+                  <small>{summary.summary.video} masters</small>
+                </summary>
+                <dl>
+                  <TechnicalInventoryFact
+                    label="Codec"
+                    entries={summary.inventory.video.codecs}
+                  />
+                  <TechnicalInventoryFact
+                    label="Profile"
+                    entries={summary.inventory.video.profiles}
+                  />
+                  <TechnicalInventoryFact
+                    label="Dimensions"
+                    entries={summary.inventory.video.dimensions}
+                  />
+                  <TechnicalInventoryFact
+                    label="Frame rate"
+                    entries={summary.inventory.video.frameRates}
+                  />
+                  <TechnicalInventoryFact
+                    label="Pixel format"
+                    entries={summary.inventory.video.pixelFormats}
+                  />
+                </dl>
+              </details>
+            )}
+          </div>
+        </>
+      ) : (
+        <p className="technical-release-message">
+          Technical media health has not been loaded yet.
+        </p>
+      )}
+    </section>
+  );
+}
+
 function StagingWorkspace({
   inspection,
   identitySeed,
@@ -4821,7 +5059,7 @@ function libraryHealthTitle(
 
   return parts.length > 0
     ? parts.join(" · ")
-    : "Up to date";
+    : "Library ready";
 }
 
 function browserArtworkNeedsPreparation(
@@ -4893,7 +5131,7 @@ function publishPreflightStatus(
   }
 
   if (publicPackageIsUpToDate(plan)) {
-    return { label: "Up to date", tone: "success" };
+    return { label: "Published · current", tone: "success" };
   }
 
   return { label: "Ready", tone: "preview" };
@@ -5166,6 +5404,7 @@ function PublishWorkspace({
 
   const prepareRelease = useCallback(async (
     plan: PublishPlan,
+    scope: "all" | "playback" = "all",
   ) => {
     const operationId =
       `media-preparation-${crypto.randomUUID()}`;
@@ -5178,7 +5417,10 @@ function PublishWorkspace({
       releaseId: plan.releaseId,
       status: "running",
       phase: "starting",
-      message: "Starting media preparation…",
+      message:
+        scope === "playback"
+          ? "Starting Library MP3 preparation…"
+          : "Starting media preparation…",
       completedUnits: 0,
       totalUnits: 0,
       trackCount: plan.derivatives.trackCount,
@@ -5224,6 +5466,7 @@ function PublishWorkspace({
             planFingerprint: plan.planFingerprint,
             planGeneratedAt: plan.generatedAt,
             operationId,
+            scope,
           }),
         },
       );
@@ -5259,7 +5502,11 @@ function PublishWorkspace({
       ].filter((part): part is string => Boolean(part));
 
       onNotify(
-        `Prepared ${preparedParts.join(", ")}.`,
+        preparedParts.length > 0
+          ? `Prepared ${preparedParts.join(", ")}.`
+          : scope === "playback"
+            ? "Library playback MP3s are already current."
+            : "Release media is already current.",
         "success",
       );
     } catch (prepareError) {
@@ -5682,8 +5929,8 @@ function PublishWorkspace({
               )}
               {publicPackageIsUpToDate(selectedPlan) ? (
                 <div className="publish-package-current" role="status">
-                  <span className="badge success">✓ Up to date</span>
-                  <strong>Public package is up to date</strong>
+                  <span className="badge success">✓ Published · current</span>
+                  <strong>Published package matches the current Library inputs</strong>
                   <small>
                     {selectedPlan.publication.publishedAt
                       ? `Published ${new Date(selectedPlan.publication.publishedAt).toLocaleString()}. `
@@ -5754,7 +6001,9 @@ function PublishWorkspace({
                   <button
                     type="button"
                     disabled={prepareLoading || publishLoading}
-                    onClick={() => void prepareRelease(selectedPlan)}
+                    onClick={() =>
+                      void prepareRelease(selectedPlan, "playback")
+                    }
                     title="Generate or refresh private 320 kbps playback MP3s in media-library. These files are never copied into published-media."
                   >
                     Prepare Library MP3s
@@ -5787,10 +6036,10 @@ function PublishWorkspace({
               <dt>Public package</dt>
               <dd>
                 {selectedPlan.publication.state === "up-to-date"
-                  ? "Up to date"
+                  ? "Published · current"
                   : selectedPlan.publication.state === "update-available"
-                    ? "Update available"
-                    : "Not yet published"}
+                    ? "Published · update available"
+                    : "Not published"}
               </dd>
             </div>
             <div>
@@ -5798,6 +6047,12 @@ function PublishWorkspace({
               <dd><code>{selectedPlan.destinationReleaseRelativePath}</code></dd>
             </div>
           </dl>
+
+          <TechnicalReleaseInspector
+            summary={technicalByRelease.get(selectedPlan.releaseId)}
+            audit={technicalAudit}
+            compact
+          />
 
           {selectedPlan.issues.length > 0 && (
             <details className="publish-plan-disclosure publish-plan-issues">
@@ -5811,6 +6066,7 @@ function PublishWorkspace({
                 <table>
                   <thead>
                     <tr>
+                      <th scope="col" className="publish-issue-number-column">#</th>
                       <th scope="col">Status</th>
                       <th scope="col">Path</th>
                       <th scope="col">Issue</th>
@@ -5819,6 +6075,9 @@ function PublishWorkspace({
                   <tbody>
                     {selectedPlan.issues.map((item, index) => (
                       <tr key={`${item.code}-${item.relativePath}-${index}`}>
+                        <td className="publish-issue-number-cell">
+                          {index + 1}
+                        </td>
                         <td>
                           <span className={`badge ${item.severity === "blocked" ? "missing" : "warning"}`}>
                             {item.severity}
@@ -7652,6 +7911,12 @@ const LIBRARY_RELEASE_VIEW_STORAGE_KEY =
   "metadata-editor.library-release-view";
 const LIBRARY_RELEASE_SORT_STORAGE_KEY =
   "metadata-editor.library-release-sort";
+const LIBRARY_TILE_SIZE_STORAGE_KEY =
+  "metadata-editor.library-tile-size-rem";
+
+const LIBRARY_TILE_SIZE_MIN_REM = 9;
+const LIBRARY_TILE_SIZE_MAX_REM = 24;
+const LIBRARY_TILE_SIZE_DEFAULT_REM = 14;
 
 function readLibraryReleaseViewMode(): LibraryReleaseViewMode {
   if (typeof window === "undefined") {
@@ -7670,6 +7935,31 @@ function readLibraryReleaseViewMode(): LibraryReleaseViewMode {
       : "cards";
   } catch {
     return "cards";
+  }
+}
+
+function readLibraryTileSizeRem(): number {
+  if (typeof window === "undefined") {
+    return LIBRARY_TILE_SIZE_DEFAULT_REM;
+  }
+
+  try {
+    const stored = Number.parseFloat(
+      window.localStorage.getItem(
+        LIBRARY_TILE_SIZE_STORAGE_KEY,
+      ) ?? "",
+    );
+
+    if (!Number.isFinite(stored)) {
+      return LIBRARY_TILE_SIZE_DEFAULT_REM;
+    }
+
+    return Math.min(
+      LIBRARY_TILE_SIZE_MAX_REM,
+      Math.max(LIBRARY_TILE_SIZE_MIN_REM, stored),
+    );
+  } catch {
+    return LIBRARY_TILE_SIZE_DEFAULT_REM;
   }
 }
 
@@ -7832,6 +8122,10 @@ function LibraryReleaseBrowser({
     useState<LibraryReleaseSortMode>(
       readLibraryReleaseSortMode,
     );
+  const [tileSizeRem, setTileSizeRem] =
+    useState<number>(
+      readLibraryTileSizeRem,
+    );
 
   const sortedReleases = useMemo(
     () => sortLibraryReleases(releases, sortMode),
@@ -7850,6 +8144,26 @@ function LibraryReleaseBrowser({
       );
     } catch {
       // Sort preference persistence is optional UI convenience.
+    }
+  };
+
+  const chooseTileSizeRem = (
+    nextValue: number,
+  ) => {
+    const clamped = Math.min(
+      LIBRARY_TILE_SIZE_MAX_REM,
+      Math.max(LIBRARY_TILE_SIZE_MIN_REM, nextValue),
+    );
+
+    setTileSizeRem(clamped);
+
+    try {
+      window.localStorage.setItem(
+        LIBRARY_TILE_SIZE_STORAGE_KEY,
+        String(clamped),
+      );
+    } catch {
+      // Tile-size persistence is optional UI convenience.
     }
   };
 
@@ -7898,6 +8212,30 @@ function LibraryReleaseBrowser({
             </select>
           </label>
 
+          {viewMode === "tiles" && (
+            <label
+              className="library-tile-size-control"
+              title="Adjust Library tile size"
+            >
+              <span>Tile size</span>
+              <input
+                type="range"
+                min={LIBRARY_TILE_SIZE_MIN_REM}
+                max={LIBRARY_TILE_SIZE_MAX_REM}
+                step={0.5}
+                value={tileSizeRem}
+                aria-label="Library tile size"
+                aria-valuetext={`${tileSizeRem} rem`}
+                onChange={(event) =>
+                  chooseTileSizeRem(
+                    Number.parseFloat(event.target.value),
+                  )
+                }
+              />
+              <output>{tileSizeRem}rem</output>
+            </label>
+          )}
+
           <div
             className="library-release-view-switcher"
             role="group"
@@ -7928,6 +8266,14 @@ function LibraryReleaseBrowser({
       <section
         className={`release-list library-release-list library-release-list--${viewMode}`}
         aria-label={`Library releases in ${viewMode} view`}
+        style={
+          viewMode === "tiles"
+            ? {
+                gridTemplateColumns:
+                  `repeat(auto-fill, minmax(${tileSizeRem}rem, 1fr))`,
+              }
+            : undefined
+        }
       >
         {sortedReleases.map((release) => (
           <ReleaseCard
@@ -8454,6 +8800,51 @@ function ReleaseCard({
             </span>
           </span>
         </button>
+
+        <span
+          className="library-tile-details-tooltip"
+          role="tooltip"
+        >
+          <span className="library-tile-tooltip-kicker">
+            Release details
+          </span>
+          <strong className="library-tile-tooltip-title">
+            {releaseDisplayTitle}
+          </strong>
+          <span>
+            Artist · {releaseArtistName || "Artist not set"}
+          </span>
+          <span>
+            {releaseDateLabel}
+            {" · "}
+            {release.tracks.length}{" "}
+            {release.tracks.length === 1 ? "track" : "tracks"}
+            {release.videos.length > 0 && (
+              <>
+                {" · "}
+                {release.videos.length}{" "}
+                {release.videos.length === 1 ? "video" : "videos"}
+              </>
+            )}
+          </span>
+
+          <span className="library-tile-tooltip-divider" />
+
+          <small>
+            <span>Library</span>
+            <code>{release.relativePath}</code>
+          </small>
+          <small>
+            <span>Artwork</span>
+            <code>
+              {releaseArtwork?.relativePath ?? "No release artwork"}
+            </code>
+          </small>
+
+          <span className="library-tile-tooltip-status-heading">
+            Health &amp; provenance
+          </span>
+        </span>
 
         <div className="release-status-actions">
           <MediaFileSpecBadge release={release} prefix />
@@ -14243,6 +14634,8 @@ function readMetadataSidebarWidth(
 function ReleaseMetadataDetailView({
   detail,
   release,
+  technicalAudit,
+  technicalSummary,
   metadataRegistry,
   showAdminTools,
   onShowAdminToolsChange,
@@ -14256,6 +14649,8 @@ function ReleaseMetadataDetailView({
 }: {
   detail: ReleaseMetadataDetail;
   release: ReleaseScanResult | null;
+  technicalAudit: MediaTechnicalAuditState;
+  technicalSummary?: MediaTechnicalReleaseSummary;
   metadataRegistry: MetadataFieldDefinition[];
   showAdminTools: boolean;
   onShowAdminToolsChange: (
@@ -18250,6 +18645,12 @@ function ReleaseMetadataDetailView({
                 {detail.warnings.length} metadata warnings
               </span>
 
+              <TechnicalHealthBadge
+                summary={technicalSummary}
+                loading={technicalAudit.loading}
+                error={technicalAudit.error}
+              />
+
               <button
                 type="button"
                 className={`library-health-toggle badge ${libraryHealthTone(
@@ -18424,6 +18825,11 @@ function ReleaseMetadataDetailView({
               Open Publish preflight
             </button>
           </header>
+
+          <TechnicalReleaseInspector
+            summary={technicalSummary}
+            audit={technicalAudit}
+          />
 
           <div className="library-health-bubbles">
             <span

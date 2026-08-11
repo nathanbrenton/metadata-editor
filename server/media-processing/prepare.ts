@@ -90,6 +90,7 @@ export type ProcessRunner = (
 export type PrepareReleaseMediaOptions = {
   expectedPublishPlanFingerprint: string;
   publishPlanGeneratedAt: string;
+  scope?: "all" | "playback";
   ffmpegCapabilities?: FfmpegCapabilities;
   processRunner?: ProcessRunner;
   now?: () => Date;
@@ -1040,6 +1041,7 @@ export async function prepareReleaseMedia(
     throw new Error("The reviewed publish-plan generation time is required.");
   }
 
+  const scope = options.scope ?? "all";
   const capabilities =
     options.ffmpegCapabilities ??
     await detectFfmpegCapabilities();
@@ -1065,12 +1067,14 @@ export async function prepareReleaseMedia(
     );
   }
 
-  const unsupportedBlockedIssues = reviewedPlan.issues.filter(
-    (issue) =>
-      issue.severity === "blocked" &&
-      !allowedPreparationPublishBlockers.has(issue.code) &&
-      !isPreparableMissingDerivativeReference(issue),
-  );
+  const unsupportedBlockedIssues = scope === "all"
+    ? reviewedPlan.issues.filter(
+        (issue) =>
+          issue.severity === "blocked" &&
+          !allowedPreparationPublishBlockers.has(issue.code) &&
+          !isPreparableMissingDerivativeReference(issue),
+      )
+    : [];
 
   if (unsupportedBlockedIssues.length > 0) {
     throw new Error(
@@ -1109,24 +1113,36 @@ export async function prepareReleaseMedia(
     webStreamPlan.summary.blockedCount > 0 ||
     browserArtworkPlan.status === "blocked";
 
-  if (blockedPublicDerivative) {
+  if (scope === "all" && blockedPublicDerivative) {
     throw new Error(
       "Media preparation is blocked by the canonical source, HLS stream, waveform, or browser-artwork plan.",
     );
   }
 
-  const itemsToPrepare = preparationItems(mediaPlan);
-  const streamsToPrepare = streamPreparationItems(webStreamPlan);
+  const itemsToPrepare = preparationItems(mediaPlan).filter(
+    ({ derivative }) =>
+      scope === "all" ||
+      derivative.kind === "playback-mp3",
+  );
+  const streamsToPrepare =
+    scope === "all"
+      ? streamPreparationItems(webStreamPlan)
+      : [];
   const artworkNeedsPreparation =
-    browserArtworkPlan.action === "create" ||
-    browserArtworkPlan.action === "replace";
+    scope === "all" &&
+    (
+      browserArtworkPlan.action === "create" ||
+      browserArtworkPlan.action === "replace"
+    );
   if (
     itemsToPrepare.length === 0 &&
     streamsToPrepare.length === 0 &&
     !artworkNeedsPreparation
   ) {
     throw new Error(
-      "No missing or stale private playback/HLS/waveform/browser-artwork derivatives need preparation.",
+      scope === "playback"
+        ? "No missing or stale Library playback MP3 derivatives need preparation."
+        : "No missing or stale private playback/HLS/waveform/browser-artwork derivatives need preparation.",
     );
   }
 
@@ -1578,13 +1594,16 @@ export async function prepareReleaseMedia(
 
         if (
           incompletePreparedFiles.length > 0 ||
-          verifiedWebStreams.summary.currentCount !==
-            verifiedWebStreams.summary.trackCount ||
+          (scope === "all" &&
+            verifiedWebStreams.summary.currentCount !==
+              verifiedWebStreams.summary.trackCount) ||
           (artworkNeedsPreparation &&
             verifiedBrowserArtwork.status !== "current")
         ) {
           throw new Error(
-            "Prepared private playback/HLS/waveform/browser-artwork derivatives did not validate as current after promotion.",
+            scope === "playback"
+              ? "Prepared Library playback MP3 derivatives did not validate as current after promotion."
+              : "Prepared private playback/HLS/waveform/browser-artwork derivatives did not validate as current after promotion.",
           );
         }
       },
@@ -1594,7 +1613,10 @@ export async function prepareReleaseMedia(
     await reportProgress({
       status: "completed",
       phase: "completed",
-      message: "Media preparation complete.",
+      message:
+        scope === "playback"
+          ? "Library playback MP3 preparation complete."
+          : "Media preparation complete.",
     });
 
     const completedAt = now().toISOString();
