@@ -326,7 +326,7 @@ test("builds a read-only audio-player package plan for a publishable release", a
     assert.equal(plan.writesEnabled, false);
     assert.notEqual(plan.status, "blocked");
     assert.equal(plan.summary.blockedCount, 0);
-    assert.equal(plan.contract.version, 2);
+    assert.equal(plan.contract.version, 3);
     assert.equal(plan.contract.trackResources.stream.protocol, "hls");
     assert.equal(plan.contract.trackResources.stream.bitrateKbps, 192);
     assert.equal(

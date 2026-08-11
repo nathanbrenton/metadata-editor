@@ -36,7 +36,7 @@ test("shows a compact first-class Videos disclosure on Library release cards", (
   assert.match(styleSource, /\.library-video-row\s*\{[\s\S]*?grid-template-columns:/);
 });
 
-test("documents Library video inspection, preview, and guarded V3b private preparation", () => {
+test("documents Library video inspection, guarded preparation, and public-package readiness", () => {
   assert.match(
     helpSource,
     /Library scanner recognizes those canonical video directories/,
@@ -51,7 +51,7 @@ test("documents Library video inspection, preview, and guarded V3b private prepa
   );
   assert.match(
     helpSource,
-    /V3b H\.264\/AAC HLS backend can now produce the private/,
+    /V3b H\.264\/AAC HLS backend produces the private/,
   );
   assert.match(
     helpSource,
@@ -59,10 +59,14 @@ test("documents Library video inspection, preview, and guarded V3b private prepa
   );
   assert.match(
     helpSource,
-    /existing Publish UI still operates on audio readiness/,
+    /Publish preflight now includes video readiness/,
   );
   assert.match(
     helpSource,
-    /public web-video publication remain later milestones/,
+    /contract v3 packages sanitized/,
+  );
+  assert.match(
+    helpSource,
+    /without exposing canonical video masters/,
   );
 });

@@ -4936,10 +4936,11 @@ const server = createServer(
           return;
         }
 
-        const [mediaRoot, publishRoot] =
+        const [mediaRoot, publishRoot, capabilities] =
           await Promise.all([
             resolveMediaRoot(),
             resolvePublishRoot(),
+            detectFfmpegCapabilities(),
           ]);
         const results: Array<Record<string, unknown>> = [];
 
@@ -4950,23 +4951,44 @@ const server = createServer(
               mediaRoot,
               publishRoot,
               releaseId,
-              { generatedAt },
+              {
+                generatedAt,
+                ffmpegCapabilities: capabilities,
+              },
             );
-            const needsPreparation =
+            const regularNeedsPreparation =
               scope === "playback"
                 ? plan.libraryPlayback.createCount > 0 ||
                   plan.libraryPlayback.replaceCount > 0
                 : plan.libraryPlayback.createCount > 0 ||
                   plan.libraryPlayback.replaceCount > 0 ||
-                  plan.derivatives.createCount > 0 ||
-                  plan.derivatives.replaceCount > 0 ||
+                  plan.webStreams.createCount > 0 ||
+                  plan.webStreams.replaceCount > 0 ||
+                  plan.waveforms.createCount > 0 ||
+                  plan.waveforms.replaceCount > 0 ||
                   plan.issues.some(
                     (issue) =>
                       issue.code ===
                         "browser-artwork-preparation-required",
                   );
+            const videoNeedsPreparation =
+              scope === "all" &&
+              (plan.videoStreams.createCount > 0 ||
+                plan.videoStreams.replaceCount > 0);
 
-            if (!needsPreparation) {
+            if (
+              scope === "all" &&
+              plan.videoStreams.blockedCount > 0
+            ) {
+              throw new Error(
+                "Video preparation is blocked by one or more canonical video sources or required FFmpeg encoders.",
+              );
+            }
+
+            if (
+              !regularNeedsPreparation &&
+              !videoNeedsPreparation
+            ) {
               results.push({
                 releaseId,
                 status: "skipped",
@@ -4978,23 +5000,69 @@ const server = createServer(
               continue;
             }
 
-            const receipt = await prepareReleaseMedia(
-              mediaRoot,
-              publishRoot,
-              releaseId,
-              {
-                expectedPublishPlanFingerprint:
-                  plan.planFingerprint,
-                publishPlanGeneratedAt:
-                  plan.generatedAt,
-                scope,
-              },
-            );
+            let mediaReceipt: unknown;
+            let videoReceipt: unknown;
+
+            if (regularNeedsPreparation) {
+              mediaReceipt = await prepareReleaseMedia(
+                mediaRoot,
+                publishRoot,
+                releaseId,
+                {
+                  expectedPublishPlanFingerprint:
+                    plan.planFingerprint,
+                  publishPlanGeneratedAt:
+                    plan.generatedAt,
+                  scope,
+                  ffmpegCapabilities: capabilities,
+                },
+              );
+            }
+
+            if (videoNeedsPreparation) {
+              const release = await scanReleaseById(
+                mediaRoot,
+                releaseId,
+              );
+              if (!release) {
+                throw new Error(
+                  `Release not found: ${releaseId}`,
+                );
+              }
+
+              const videoPlan =
+                await buildVideoWebStreamPlan(
+                  mediaRoot,
+                  release,
+                  capabilities,
+                  { generatedAt },
+                );
+
+              if (videoPlan.summary.blockedCount > 0) {
+                throw new Error(
+                  "Video preparation is blocked by one or more canonical video sources or required FFmpeg encoders.",
+                );
+              }
+
+              videoReceipt =
+                await prepareReleaseVideoWebStreams(
+                  mediaRoot,
+                  releaseId,
+                  {
+                    expectedPlanFingerprint:
+                      videoPlan.planFingerprint,
+                    planGeneratedAt:
+                      videoPlan.generatedAt,
+                    ffmpegCapabilities: capabilities,
+                  },
+                );
+            }
 
             results.push({
               releaseId,
               status: "prepared",
-              receipt,
+              ...(mediaReceipt ? { receipt: mediaReceipt } : {}),
+              ...(videoReceipt ? { videoReceipt } : {}),
             });
           } catch (error) {
             results.push({

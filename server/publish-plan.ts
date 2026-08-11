@@ -26,6 +26,10 @@ import {
   type WebStreamPlanSummary,
 } from "./media-processing/web-stream.js";
 import {
+  buildVideoWebStreamPlan,
+  type VideoWebStreamPlan,
+} from "./media-processing/video-web-stream.js";
+import {
   browserArtworkAssetFromPlan,
   buildBrowserArtworkPlan,
 } from "./media-processing/browser-artwork.js";
@@ -62,7 +66,11 @@ export type PublishPlanItemKind =
   | "track-stream-manifest"
   | "track-stream-init"
   | "track-stream-segment"
-  | "track-waveform";
+  | "track-waveform"
+  | "video-metadata"
+  | "video-stream-manifest"
+  | "video-stream-init"
+  | "video-stream-segment";
 
 export type PublishPlanIssue = {
   code: string;
@@ -79,6 +87,7 @@ export type PublishPlanItem = {
   reason: string;
   sourceRelativePath?: string;
   trackId?: string;
+  videoId?: string;
   sizeBytes?: number;
   sourceSha256?: string;
 };
@@ -95,7 +104,7 @@ export type PublishPlan = {
   };
   contract: {
     name: "audio-player-public-package";
-    version: 2;
+    version: 3;
     catalogSchemaVersion: 1;
     mediaBaseUrl: "/media";
     trackResources: {
@@ -112,6 +121,24 @@ export type PublishPlan = {
         hrefField: "waveform.href";
         filename: "waveform-peaks.json";
         schemaVersion: number;
+      };
+    };
+    videoResources: {
+      metadataHrefField: "videos[].href";
+      stream: {
+        hrefField: "stream.href";
+        protocol: "hls";
+        manifestRelativePath: "stream/index.m3u8";
+        videoCodec: "h264";
+        videoProfile: "high";
+        videoLevel: "4.1";
+        maxWidth: number;
+        maxHeight: number;
+        maxFrameRate: number;
+        audioCodec: "aac";
+        audioBitrateKbps: number;
+        segmentDurationSeconds: number;
+        segmentType: "fmp4";
       };
     };
     privateContentExcluded: readonly string[];
@@ -142,6 +169,7 @@ export type PublishPlan = {
   };
   derivatives: {
     trackCount: number;
+    videoCount: number;
     currentCount: number;
     createCount: number;
     replaceCount: number;
@@ -155,6 +183,10 @@ export type PublishPlan = {
     blockedCount: number;
   };
   webStreams: WebStreamPlanSummary;
+  videoStreams: VideoWebStreamPlan["summary"] & {
+    planFingerprint: string;
+    generatedAt: string;
+  };
   waveforms: {
     trackCount: number;
     currentCount: number;
@@ -189,6 +221,7 @@ const browserArtworkExtensions = new Set([
 const privateContentExcluded = [
   "audio masters",
   "distribution masters and full-quality audio derivatives",
+  "canonical video masters and other full-quality video sources",
   "private playback MP3 and other monolithic listening derivatives",
   "private stream generation sidecars such as stream-info.json",
   "private browser-artwork generation sidecars such as artwork-info.json",
@@ -436,6 +469,7 @@ function hashPublicationContent(
       kind: item.kind,
       destinationRelativePath: item.destinationRelativePath,
       ...(item.trackId ? { trackId: item.trackId } : {}),
+      ...(item.videoId ? { videoId: item.videoId } : {}),
       ...(item.sourceSha256
         ? { sourceSha256: item.sourceSha256 }
         : {}),
@@ -579,6 +613,7 @@ export function formatPublishPlan(
     `Library playback MP3s: ${plan.libraryPlayback.currentCount}/${plan.libraryPlayback.trackCount} current (private; not published)`,
     `Web streams: ${plan.webStreams.currentCount}/${plan.webStreams.trackCount} current`,
     `Waveforms: ${plan.waveforms.currentCount}/${plan.waveforms.trackCount} current`,
+    `Video streams: ${plan.videoStreams.currentCount}/${plan.videoStreams.videoCount} current`,
     "",
   ];
 
@@ -653,6 +688,12 @@ export async function buildPublishPlan(
     derivatives,
     capabilities,
   );
+  const videoWebStreams = await buildVideoWebStreamPlan(
+    mediaRoot,
+    release,
+    capabilities,
+    { generatedAt },
+  );
   const playbackItems = derivatives.items.map(
     (item) => item.playback,
   );
@@ -691,14 +732,23 @@ export async function buildPublishPlan(
   };
   const publicDerivatives = {
     trackCount: derivatives.items.length,
+    videoCount: videoWebStreams.summary.videoCount,
     currentCount:
-      webStreams.summary.currentCount + waveforms.currentCount,
+      webStreams.summary.currentCount +
+      waveforms.currentCount +
+      videoWebStreams.summary.currentCount,
     createCount:
-      webStreams.summary.createCount + waveforms.createCount,
+      webStreams.summary.createCount +
+      waveforms.createCount +
+      videoWebStreams.summary.createCount,
     replaceCount:
-      webStreams.summary.replaceCount + waveforms.replaceCount,
+      webStreams.summary.replaceCount +
+      waveforms.replaceCount +
+      videoWebStreams.summary.replaceCount,
     blockedCount:
-      webStreams.summary.blockedCount + waveforms.blockedCount,
+      webStreams.summary.blockedCount +
+      waveforms.blockedCount +
+      videoWebStreams.summary.blockedCount,
   };
   const validationIssues = [
     ...validationReport.issues,
@@ -723,6 +773,13 @@ export async function buildPublishPlan(
         (file) =>
           (file.filename === "track.toml" ||
             file.filename === "track-credits.toml") &&
+          file.exists,
+      ),
+    ),
+    ...(release.videos ?? []).flatMap((video) =>
+      video.metadataFiles.filter(
+        (file) =>
+          file.filename === "video.toml" &&
           file.exists,
       ),
     ),
@@ -1058,6 +1115,114 @@ export async function buildPublishPlan(
     });
   }
 
+  for (const video of release.videos ?? []) {
+    const videoDestination = path.posix.join(
+      destinationReleaseRelativePath,
+      "videos",
+      video.id,
+    );
+    const videoStream = videoWebStreams.items.find(
+      (item) => item.videoId === video.id,
+    );
+
+    if (!videoStream) {
+      throw new Error(
+        `Video web-stream plan is missing video ${video.id}.`,
+      );
+    }
+
+    if (
+      videoStream.status !== "current" ||
+      videoStream.action !== "none"
+    ) {
+      issues.push({
+        code: "video-web-stream-not-current",
+        severity: "blocked",
+        relativePath: videoStream.directoryRelativePath,
+        message:
+          `Video web stream must be current before it can enter the hosted package. Current status: ${videoStream.status}.`,
+        suggestion:
+          "Use Prepare video streams to generate the reviewed H.264/AAC HLS derivative, then refresh preflight.",
+      });
+      items.push({
+        kind: "video-stream-manifest",
+        action: "blocked",
+        sourceRelativePath: videoStream.manifestRelativePath,
+        destinationRelativePath: path.posix.join(
+          videoDestination,
+          "stream/index.m3u8",
+        ),
+        videoId: video.id,
+        reason: videoStream.reason,
+      });
+    } else {
+      for (const streamFile of videoStream.files) {
+        const streamKind: PublishPlanItemKind =
+          streamFile.kind === "manifest"
+            ? "video-stream-manifest"
+            : streamFile.kind === "initialization"
+              ? "video-stream-init"
+              : "video-stream-segment";
+        const destinationRelativePath = path.posix.join(
+          videoDestination,
+          "stream",
+          streamFile.filename,
+        );
+        const streamInspection = await inspectRegularFile(
+          mediaRoot,
+          streamFile.relativePath,
+        );
+
+        if (!streamInspection.exists || !streamInspection.sha256) {
+          issues.push({
+            code: "current-video-stream-file-missing",
+            severity: "blocked",
+            relativePath: streamFile.relativePath,
+            message:
+              "The video web-stream plan reported current media, but a referenced stream file is no longer present.",
+            suggestion:
+              "Refresh preflight and prepare the video stream again if necessary.",
+          });
+        }
+
+        items.push({
+          kind: streamKind,
+          action: await destinationExists(
+            publishRoot,
+            destinationRelativePath,
+          )
+            ? "replace"
+            : "create",
+          sourceRelativePath: streamFile.relativePath,
+          destinationRelativePath,
+          videoId: video.id,
+          reason:
+            streamFile.kind === "manifest"
+              ? "Copy the portable HLS video playlist used as the public video stream resource."
+              : streamFile.kind === "initialization"
+                ? "Copy the video HLS fMP4 initialization segment referenced by the playlist."
+                : "Copy one short H.264/AAC HLS video media segment referenced by the playlist.",
+          sizeBytes: streamFile.sizeBytes,
+          ...(streamInspection.sha256
+            ? { sourceSha256: streamInspection.sha256 }
+            : {}),
+        });
+      }
+    }
+
+    items.push({
+      kind: "video-metadata",
+      action: "generate",
+      destinationRelativePath: path.posix.join(
+        videoDestination,
+        "video.json",
+      ),
+      videoId: video.id,
+      reason:
+        "Generate sanitized player-facing video metadata with a relative HLS stream resource; omit the canonical video-master path.",
+    });
+  }
+
   items.push(
     {
       kind: "release-metadata",
@@ -1077,7 +1242,7 @@ export async function buildPublishPlan(
         "publication-manifest.json",
       ),
       reason:
-        "Record stable track identities, relative HLS stream and waveform resources, public package hashes, generation profiles, and publish timestamp for validation and rollback.",
+        "Record stable track/video identities, relative HLS stream and waveform resources, public package hashes, generation profiles, and publish timestamp for validation and rollback.",
     },
     {
       kind: "catalog",
@@ -1098,7 +1263,7 @@ export async function buildPublishPlan(
   };
   const contract: PublishPlan["contract"] = {
     name: "audio-player-public-package",
-    version: 2,
+    version: 3,
     catalogSchemaVersion: 1,
     mediaBaseUrl: "/media",
     trackResources: {
@@ -1117,6 +1282,26 @@ export async function buildPublishPlan(
         filename: derivatives.profile.waveform.filename,
         schemaVersion:
           derivatives.profile.waveform.schemaVersion,
+      },
+    },
+    videoResources: {
+      metadataHrefField: "videos[].href",
+      stream: {
+        hrefField: "stream.href",
+        protocol: "hls",
+        manifestRelativePath: "stream/index.m3u8",
+        videoCodec: "h264",
+        videoProfile: "high",
+        videoLevel: "4.1",
+        maxWidth: videoWebStreams.profile.video.maxWidth,
+        maxHeight: videoWebStreams.profile.video.maxHeight,
+        maxFrameRate: videoWebStreams.profile.video.maxFrameRate,
+        audioCodec: "aac",
+        audioBitrateKbps:
+          videoWebStreams.profile.audio.bitrateKbps,
+        segmentDurationSeconds:
+          videoWebStreams.profile.playlist.segmentDurationSeconds,
+        segmentType: "fmp4",
       },
     },
     privateContentExcluded,
@@ -1172,6 +1357,11 @@ export async function buildPublishPlan(
     derivatives: publicDerivatives,
     libraryPlayback,
     webStreams: webStreams.summary,
+    videoStreams: {
+      ...videoWebStreams.summary,
+      planFingerprint: videoWebStreams.planFingerprint,
+      generatedAt: videoWebStreams.generatedAt,
+    },
     waveforms,
     summary,
   };

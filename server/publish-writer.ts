@@ -56,6 +56,7 @@ export type PublicationResource = {
   sha256: string;
   bytes: number;
   trackId?: string;
+  videoId?: string;
 };
 
 export type PublicationManifest = {
@@ -80,6 +81,8 @@ export type PublishPackageReceipt = {
   trackCount: number;
   streamCount: number;
   waveformCount: number;
+  videoCount: number;
+  videoStreamCount: number;
   artworkCount: number;
   completedAt: string;
 };
@@ -106,6 +109,7 @@ type PublicCatalog = {
 const publicationManifestFilename = "publication-manifest.json";
 const releaseMetadataFilename = "release.json";
 const trackMetadataFilename = "track.json";
+const videoMetadataFilename = "video.json";
 const catalogFilename = "catalog.json";
 
 const forbiddenPublicBasenames = new Set([
@@ -118,6 +122,7 @@ const forbiddenPublicBasenames = new Set([
   "ingest-receipt.json",
   "stream-info.json",
   "audio-playback.mp3",
+  "video.toml",
 ]);
 
 function rootPath(
@@ -361,6 +366,50 @@ function publicTrackDocument(
   };
 }
 
+function publicVideoDocument(
+  plan: PublishPlan,
+  release: ReleaseScanResult,
+  video: NonNullable<ReleaseScanResult["videos"]>[number],
+): Record<string, unknown> {
+  return {
+    schema: {
+      name: "media-player-video",
+      version: 1,
+    },
+    id: video.id,
+    releaseId: release.id,
+    metadata: {
+      ...(video.title ? { title: video.title } : {}),
+      ...(video.videoType ? { type: video.videoType } : {}),
+      ...(video.relatedTrackId
+        ? { relatedTrackId: video.relatedTrackId }
+        : {}),
+    },
+    stream: {
+      href: plan.contract.videoResources.stream.manifestRelativePath,
+      protocol: plan.contract.videoResources.stream.protocol,
+      videoCodec:
+        plan.contract.videoResources.stream.videoCodec,
+      videoProfile:
+        plan.contract.videoResources.stream.videoProfile,
+      videoLevel:
+        plan.contract.videoResources.stream.videoLevel,
+      maxWidth: plan.contract.videoResources.stream.maxWidth,
+      maxHeight: plan.contract.videoResources.stream.maxHeight,
+      maxFrameRate:
+        plan.contract.videoResources.stream.maxFrameRate,
+      audioCodec:
+        plan.contract.videoResources.stream.audioCodec,
+      audioBitrateKbps:
+        plan.contract.videoResources.stream.audioBitrateKbps,
+      segmentDurationSeconds:
+        plan.contract.videoResources.stream.segmentDurationSeconds,
+      segmentType:
+        plan.contract.videoResources.stream.segmentType,
+    },
+  };
+}
+
 function publicReleaseDocument(
   plan: PublishPlan,
   release: ReleaseScanResult,
@@ -412,6 +461,18 @@ function publicReleaseDocument(
         trackMetadataFilename,
       ),
     })),
+    ...((release.videos?.length ?? 0) > 0
+      ? {
+          videos: (release.videos ?? []).map((video) => ({
+            id: video.id,
+            href: path.posix.join(
+              "videos",
+              video.id,
+              videoMetadataFilename,
+            ),
+          })),
+        }
+      : {}),
   };
 }
 
@@ -518,6 +579,7 @@ function assertSafePublicFilename(
   if (
     forbiddenPublicBasenames.has(lower) ||
     lower.startsWith("audio-master.") ||
+    lower.startsWith("video-master.") ||
     lower.startsWith("distribution-master.") ||
     lower.endsWith(".toml") ||
     lower.endsWith(".tif") ||
@@ -577,7 +639,21 @@ async function buildStagedRelease(
       input.relativePath,
     );
 
-    if (!document || document.sha256 !== input.sha256) {
+    if (document) {
+      if (document.sha256 !== input.sha256) {
+        throw new Error(
+          `Canonical metadata changed after preflight: ${input.relativePath}`,
+        );
+      }
+      continue;
+    }
+
+    const sourcePath = await ensureRegularSourceFile(
+      mediaRoot,
+      input.relativePath,
+    );
+    const digest = await sha256File(sourcePath);
+    if (digest.sha256 !== input.sha256) {
       throw new Error(
         `Canonical metadata changed after preflight: ${input.relativePath}`,
       );
@@ -592,6 +668,7 @@ async function buildStagedRelease(
       item.kind === "publication-manifest" ||
       item.kind === "release-metadata" ||
       item.kind === "track-metadata" ||
+      item.kind === "video-metadata" ||
       item.action === "blocked"
     ) {
       continue;
@@ -685,6 +762,26 @@ async function buildStagedRelease(
     );
   }
 
+  for (const video of release.videos ?? []) {
+    const videoJsonPath = rootPath(
+      stageReleasePath,
+      path.posix.join(
+        "videos",
+        video.id,
+        videoMetadataFilename,
+      ),
+    );
+
+    await writeJson(
+      videoJsonPath,
+      publicVideoDocument(
+        plan,
+        release,
+        video,
+      ),
+    );
+  }
+
   const plannedFiles = new Map<
     string,
     PublishPlanItem
@@ -761,6 +858,9 @@ async function buildStagedRelease(
       bytes: digest.bytes,
       ...(item.trackId
         ? { trackId: item.trackId }
+        : {}),
+      ...(item.videoId
+        ? { videoId: item.videoId }
         : {}),
     });
   }
@@ -1373,6 +1473,8 @@ export async function publishReleasePackage(
       trackCount: release.tracks.length,
       streamCount: release.tracks.length,
       waveformCount: release.tracks.length,
+      videoCount: release.videos?.length ?? 0,
+      videoStreamCount: reviewedPlan.videoStreams.currentCount,
       artworkCount: reviewedPlan.items.filter(
         (item) =>
           item.kind === "release-artwork" ||

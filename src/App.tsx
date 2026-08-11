@@ -524,7 +524,11 @@ type PublishPlanItem = {
     | "track-stream-manifest"
     | "track-stream-init"
     | "track-stream-segment"
-    | "track-waveform";
+    | "track-waveform"
+    | "video-metadata"
+    | "video-stream-manifest"
+    | "video-stream-init"
+    | "video-stream-segment";
   action:
     | "create"
     | "replace"
@@ -535,6 +539,7 @@ type PublishPlanItem = {
   reason: string;
   sourceRelativePath?: string;
   trackId?: string;
+  videoId?: string;
   sizeBytes?: number;
 };
 
@@ -564,6 +569,7 @@ type PublishPlan = {
   };
   derivatives: {
     trackCount: number;
+    videoCount: number;
     currentCount: number;
     createCount: number;
     replaceCount: number;
@@ -582,6 +588,15 @@ type PublishPlan = {
     createCount: number;
     replaceCount: number;
     blockedCount: number;
+  };
+  videoStreams: {
+    videoCount: number;
+    currentCount: number;
+    createCount: number;
+    replaceCount: number;
+    blockedCount: number;
+    planFingerprint: string;
+    generatedAt: string;
   };
   waveforms: {
     trackCount: number;
@@ -619,6 +634,24 @@ type PublishPlan = {
         schemaVersion: number;
       };
     };
+    videoResources: {
+      metadataHrefField: string;
+      stream: {
+        hrefField: string;
+        protocol: "hls";
+        manifestRelativePath: string;
+        videoCodec: "h264";
+        videoProfile: "high";
+        videoLevel: "4.1";
+        maxWidth: number;
+        maxHeight: number;
+        maxFrameRate: number;
+        audioCodec: "aac";
+        audioBitrateKbps: number;
+        segmentDurationSeconds: number;
+        segmentType: "fmp4";
+      };
+    };
     privateContentExcluded: readonly string[];
   };
 };
@@ -636,6 +669,16 @@ type MediaPreparationReceipt = {
   completedAt: string;
 };
 
+type VideoPreparationReceipt = {
+  releaseId: string;
+  operationId: string;
+  operationRelativePath: string;
+  createdCount: number;
+  replacedCount: number;
+  streamCount: number;
+  completedAt: string;
+};
+
 type MediaPreparationProgress = {
   operationId: string;
   releaseId: string;
@@ -643,6 +686,7 @@ type MediaPreparationProgress = {
   phase:
     | "starting"
     | "web-stream-hls"
+    | "video-web-stream-hls"
     | "browser-artwork"
     | "playback-mp3"
     | "waveform-peaks"
@@ -654,9 +698,13 @@ type MediaPreparationProgress = {
   completedUnits: number;
   totalUnits: number;
   trackCount: number;
+  videoCount?: number;
   trackId?: string;
   trackLabel?: string;
   trackIndex?: number;
+  videoId?: string;
+  videoLabel?: string;
+  videoIndex?: number;
   updatedAt: string;
 };
 
@@ -669,6 +717,8 @@ type PublishPackageReceipt = {
   trackCount: number;
   streamCount: number;
   waveformCount: number;
+  videoCount: number;
+  videoStreamCount: number;
   artworkCount: number;
   completedAt: string;
 };
@@ -5008,6 +5058,7 @@ const mediaPreparationAllowedPublishBlockers = new Set([
   "playback-not-current",
   "web-stream-not-current",
   "waveform-not-current",
+  "video-web-stream-not-current",
   "browser-artwork-preparation-required",
 ]);
 
@@ -5138,6 +5189,7 @@ function hasNonDerivativePublishBlockers(
       issue.code !== "playback-not-current" &&
       issue.code !== "web-stream-not-current" &&
       issue.code !== "waveform-not-current" &&
+      issue.code !== "video-web-stream-not-current" &&
       issue.code !== "browser-artwork-preparation-required",
   );
 }
@@ -5157,7 +5209,10 @@ function hasMediaPreparationPublishBlockers(
 function publishPreflightStatus(
   plan: PublishPlan,
 ): { label: string; tone: string } {
-  if (canPreparePublishPlan(plan)) {
+  if (
+    canPreparePublishPlan(plan) ||
+    canPrepareVideoPublishPlan(plan)
+  ) {
     return { label: "Needs preparation", tone: "warning" };
   }
 
@@ -5190,15 +5245,33 @@ function publishPreflightStatus(
 function canPreparePublishPlan(
   plan: PublishPlan,
 ): boolean {
+  const audioPreparationBlocked =
+    plan.webStreams.blockedCount > 0 ||
+    plan.waveforms.blockedCount > 0;
+  const audioNeedsPreparation =
+    plan.webStreams.createCount > 0 ||
+    plan.webStreams.replaceCount > 0 ||
+    plan.waveforms.createCount > 0 ||
+    plan.waveforms.replaceCount > 0 ||
+    browserArtworkNeedsPreparation(plan);
+
   return (
     plan.validation.blockedCount === 0 &&
-    plan.derivatives.blockedCount === 0 &&
+    !audioPreparationBlocked &&
     !hasMediaPreparationPublishBlockers(plan) &&
-    (
-      plan.derivatives.createCount > 0 ||
-      plan.derivatives.replaceCount > 0 ||
-      browserArtworkNeedsPreparation(plan)
-    )
+    audioNeedsPreparation
+  );
+}
+
+function canPrepareVideoPublishPlan(
+  plan: PublishPlan,
+): boolean {
+  return (
+    plan.validation.blockedCount === 0 &&
+    plan.videoStreams.blockedCount === 0 &&
+    !hasMediaPreparationPublishBlockers(plan) &&
+    (plan.videoStreams.createCount > 0 ||
+      plan.videoStreams.replaceCount > 0)
   );
 }
 
@@ -5274,7 +5347,10 @@ function formatPublishPlanKind(
 function publishPreflightHeadline(
   plan: PublishPlan,
 ): string {
-  if (canPreparePublishPlan(plan)) {
+  if (
+    canPreparePublishPlan(plan) ||
+    canPrepareVideoPublishPlan(plan)
+  ) {
     return "Web media needs preparation";
   }
 
@@ -5311,8 +5387,12 @@ function publishPreflightGuidance(
     return hasNonDerivativePublishBlockers(plan)
       ? "Prepare the reproducible private media that can be generated now. Other publish-only blockers remain visible and must still be resolved before the public package can be built."
       : browserArtworkNeedsPreparation(plan)
-        ? "The release is ready for derivative preparation. Prepare release will generate current browser artwork from the canonical TIFF/TIF master along with any missing HLS or waveform resources."
-        : "The canonical release can continue, but its segmented HLS web stream or waveform derivatives must be prepared first.";
+        ? "The release is ready for derivative preparation. Prepare release will generate current browser artwork from the canonical TIFF/TIF master along with any missing audio HLS or waveform resources."
+        : "The canonical release can continue, but its segmented audio HLS stream or waveform derivatives must be prepared first.";
+  }
+
+  if (canPrepareVideoPublishPlan(plan)) {
+    return "Canonical video masters are ready, but one or more private H.264/AAC segmented video HLS derivatives must be prepared before the public package can include video.";
   }
 
   if (
@@ -5346,6 +5426,10 @@ function publishNextStepLabel(
 ): string {
   if (canPreparePublishPlan(plan)) {
     return "Prepare release";
+  }
+
+  if (canPrepareVideoPublishPlan(plan)) {
+    return "Prepare video streams";
   }
 
   if (
@@ -5811,6 +5895,106 @@ function PublishWorkspace({
     }
   }, [loadPublishPlan, onNotify, onRefresh]);
 
+  const prepareVideoRelease = useCallback(async (
+    plan: PublishPlan,
+  ) => {
+    const operationId =
+      `video-preparation-${crypto.randomUUID()}`;
+    let progressTimer: number | undefined;
+
+    setPrepareLoading(true);
+    setPlanError(null);
+    setPrepareProgress({
+      operationId,
+      releaseId: plan.releaseId,
+      status: "running",
+      phase: "starting",
+      message: "Starting video web-stream preparation…",
+      completedUnits: 0,
+      totalUnits: 0,
+      trackCount: 0,
+      videoCount: plan.videoStreams.videoCount,
+      updatedAt: new Date().toISOString(),
+    });
+
+    const pollProgress = async () => {
+      try {
+        const progressResponse = await fetch(
+          `/api/publish/prepare-progress?operationId=${encodeURIComponent(operationId)}`,
+        );
+        if (!progressResponse.ok) {
+          return;
+        }
+
+        const progress = await progressResponse.json() as
+          MediaPreparationProgress;
+        if (progress.operationId === operationId) {
+          setPrepareProgress(progress);
+        }
+      } catch {
+        // The preparation request remains authoritative.
+      }
+    };
+
+    progressTimer = window.setInterval(
+      () => void pollProgress(),
+      350,
+    );
+    void pollProgress();
+
+    try {
+      const response = await fetch(
+        "/api/publish/prepare-video",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: plan.releaseId,
+            planFingerprint:
+              plan.videoStreams.planFingerprint,
+            planGeneratedAt:
+              plan.videoStreams.generatedAt,
+            operationId,
+          }),
+        },
+      );
+      const payload = await response.json() as
+        | VideoPreparationReceipt
+        | { error?: string };
+
+      await pollProgress();
+
+      if (!response.ok || !("operationId" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to prepare release video streams.",
+        );
+      }
+
+      await loadPublishPlan(plan.releaseId);
+      await Promise.resolve(onRefresh());
+      onNotify(
+        `Prepared ${payload.streamCount} video HLS ${payload.streamCount === 1 ? "stream" : "streams"}.`,
+        "success",
+      );
+    } catch (prepareError) {
+      setPlanError(
+        prepareError instanceof Error
+          ? prepareError.message
+          : "Unable to prepare release video streams.",
+      );
+    } finally {
+      if (progressTimer !== undefined) {
+        window.clearInterval(progressTimer);
+      }
+      setPrepareLoading(false);
+      setPrepareProgress(null);
+    }
+  }, [loadPublishPlan, onNotify, onRefresh]);
+
   const publishRelease = useCallback(async (
     plan: PublishPlan,
   ) => {
@@ -5875,7 +6059,7 @@ function PublishWorkspace({
           <h2>Preflight and package releases</h2>
           <p>
             Review canonical readiness, prepare reproducible web media when
-            needed, then publish or update the sanitized audio-player snapshot.
+            needed, then publish or update the sanitized player-facing media snapshot.
           </p>
         </div>
         <div className="workflow-workspace-actions publish-workspace-actions">
@@ -6406,12 +6590,15 @@ function PublishWorkspace({
                     )}
                   />
                   <small>
-                    {prepareProgress?.trackIndex &&
-                    prepareProgress.trackCount > 0
-                      ? `Track ${prepareProgress.trackIndex} of ${prepareProgress.trackCount}`
-                      : prepareProgress?.totalUnits
-                        ? `${prepareProgress.completedUnits} of ${prepareProgress.totalUnits} preparation steps complete`
-                        : "Building the reviewed preparation plan…"}
+                    {prepareProgress?.videoIndex &&
+                    (prepareProgress.videoCount ?? 0) > 0
+                      ? `Video ${prepareProgress.videoIndex} of ${prepareProgress.videoCount}`
+                      : prepareProgress?.trackIndex &&
+                          prepareProgress.trackCount > 0
+                        ? `Track ${prepareProgress.trackIndex} of ${prepareProgress.trackCount}`
+                        : prepareProgress?.totalUnits
+                          ? `${prepareProgress.completedUnits} of ${prepareProgress.totalUnits} preparation steps complete`
+                          : "Building the reviewed preparation plan…"}
                   </small>
                 </div>
               )}
@@ -6437,6 +6624,7 @@ function PublishWorkspace({
                       prepareLoading ||
                       publishLoading ||
                       (!canPreparePublishPlan(selectedPlan) &&
+                        !canPrepareVideoPublishPlan(selectedPlan) &&
                         (
                           !canBuildPublishPlan(selectedPlan) ||
                           Boolean(
@@ -6450,7 +6638,9 @@ function PublishWorkspace({
                     onClick={() =>
                       canPreparePublishPlan(selectedPlan)
                         ? void prepareRelease(selectedPlan)
-                        : unresolvedPublishOperationForRelease(
+                        : canPrepareVideoPublishPlan(selectedPlan)
+                          ? void prepareVideoRelease(selectedPlan)
+                          : unresolvedPublishOperationForRelease(
                               publishOperations,
                               selectedPlan.releaseId,
                             )
@@ -6459,8 +6649,10 @@ function PublishWorkspace({
                     }
                     title={
                       canPreparePublishPlan(selectedPlan)
-                        ? "Generate reviewed private playback MP3s, segmented AAC-LC HLS streams, waveform derivatives, and browser-compatible release artwork in the private Library."
-                        : unresolvedPublishOperationForRelease(
+                        ? "Generate reviewed private playback MP3s, segmented AAC-LC audio HLS streams, waveform derivatives, and browser-compatible release artwork in the private Library."
+                        : canPrepareVideoPublishPlan(selectedPlan)
+                          ? "Generate reviewed private H.264/AAC segmented video HLS streams from canonical video masters. Canonical video files are never modified."
+                          : unresolvedPublishOperationForRelease(
                               publishOperations,
                               selectedPlan.releaseId,
                             )
@@ -6478,14 +6670,17 @@ function PublishWorkspace({
                               publishOperations,
                               selectedPlan.releaseId,
                             ) &&
-                            !canPreparePublishPlan(selectedPlan)
+                            !canPreparePublishPlan(selectedPlan) &&
+                            !canPrepareVideoPublishPlan(selectedPlan)
                           ? "Recover interrupted publish"
                           : publishNextStepLabel(selectedPlan)}
                   </button>
                   <small>
                     {canPreparePublishPlan(selectedPlan)
-                      ? "Creates reproducible private playback MP3, HLS stream, waveform, and browser-artwork derivatives. Canonical masters are never modified, and private MP3s are never copied into published-media."
-                      : unresolvedPublishOperationForRelease(
+                      ? "Creates reproducible private playback MP3, audio HLS stream, waveform, and browser-artwork derivatives. Canonical masters are never modified, and private MP3s are never copied into published-media."
+                      : canPrepareVideoPublishPlan(selectedPlan)
+                        ? "Creates reproducible private H.264/AAC video HLS streams from canonical video masters. Only the segmented browser-ready stream and sanitized video metadata enter published-media."
+                        : unresolvedPublishOperationForRelease(
                             publishOperations,
                             selectedPlan.releaseId,
                           )
@@ -6537,6 +6732,12 @@ function PublishWorkspace({
               <dt>Waveform</dt>
               <dd>
                 {selectedPlan.waveforms.currentCount} current · {selectedPlan.waveforms.createCount} missing · {selectedPlan.waveforms.replaceCount} stale
+              </dd>
+            </div>
+            <div>
+              <dt>Video stream</dt>
+              <dd>
+                {selectedPlan.videoStreams.currentCount} current · {selectedPlan.videoStreams.createCount} missing · {selectedPlan.videoStreams.replaceCount} stale
               </dd>
             </div>
             <div>
@@ -6686,6 +6887,13 @@ function PublishWorkspace({
                 {" → "}{selectedPlan.contract.trackResources.stream.manifestRelativePath}
                 {" · "}{selectedPlan.contract.trackResources.waveform.hrefField}
                 {" → "}{selectedPlan.contract.trackResources.waveform.filename}
+              </p>
+              <p>
+                Video: {selectedPlan.contract.videoResources.stream.protocol.toUpperCase()}
+                {" · "}{selectedPlan.contract.videoResources.stream.videoCodec.toUpperCase()} {selectedPlan.contract.videoResources.stream.videoProfile} {selectedPlan.contract.videoResources.stream.videoLevel}
+                {" · "}≤ {selectedPlan.contract.videoResources.stream.maxWidth}×{selectedPlan.contract.videoResources.stream.maxHeight}
+                {" · "}≤ {selectedPlan.contract.videoResources.stream.maxFrameRate} fps
+                {" · "}{selectedPlan.contract.videoResources.stream.audioCodec.toUpperCase()} {selectedPlan.contract.videoResources.stream.audioBitrateKbps} kbps
               </p>
               <p>
                 Private content excluded: {selectedPlan.contract.privateContentExcluded.join(", ")}.

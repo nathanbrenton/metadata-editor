@@ -155,6 +155,7 @@ const allowedPreparationPublishBlockers = new Set([
   "playback-not-current",
   "web-stream-not-current",
   "waveform-not-current",
+  "video-web-stream-not-current",
   // A supported TIFF/TIF artwork master can be converted during the
   // same reviewed preparation operation as audio derivatives.
   "browser-artwork-preparation-required",
