@@ -8,7 +8,7 @@ const source = await readFile(
 );
 
 test("renders a compact four-workspace guide instead of the full feature-reference corpus", () => {
-  assert.match(source, /Four workspaces/);
+  assert.match(source, /Five workspaces/);
   assert.match(source, /What matters/);
   assert.match(source, /Common questions/);
   assert.match(source, /audit:media-technical/);

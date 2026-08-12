@@ -7,14 +7,14 @@ import {
   workflowStages,
 } from "../src/workflow-help-content.js";
 
-test("documents the current four-workspace product flow", () => {
+test("documents the current five-workspace product flow", () => {
   assert.equal(
     workflowPath,
-    "Ingest → Staging → Library → Publish",
+    "Ingest → Staging → Library → Web Package → Live",
   );
   assert.deepEqual(
     workflowStages.map(({ id }) => id),
-    ["ingest", "staging", "library", "publish"],
+    ["ingest", "staging", "library", "public-package", "production"],
   );
 });
 
@@ -37,6 +37,8 @@ test("retains detailed feature reference while the rendered guide stays concise"
 
   assert.match(text, /media-library root/i);
   assert.match(text, /published-media/i);
+  assert.match(text, /private canonical Library/i);
+  assert.match(text, /Hiplingo visitors can currently access/i);
   assert.match(text, /preferred happy-path formats/i);
   assert.match(text, /Field-level provenance chips/i);
   assert.match(text, /audit:file-spec/i);

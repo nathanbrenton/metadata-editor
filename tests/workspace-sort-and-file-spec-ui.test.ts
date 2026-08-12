@@ -46,14 +46,14 @@ test("Library defaults to expanded cards sorted by newest release date", () => {
   );
 });
 
-test("Publish defaults to newest release date and renders a sort selector", () => {
+test("Web Package and Live default to newest release date and render a sort selector", () => {
   const publish = appSource.slice(
     appSource.indexOf("function PublishWorkspace"),
     appSource.indexOf("type LibraryReleaseViewMode"),
   );
 
   assert.match(publish, /useState<LibraryReleaseSortMode>\("date-desc"\)/);
-  assert.match(publish, /sortedReleases\.map/);
+  assert.match(publish, /workspaceReleases\.map/);
   assert.match(publish, /workspace-release-sort-control/);
   assert.match(publish, /Release date · newest/);
 });

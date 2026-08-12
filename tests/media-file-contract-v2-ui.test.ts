@@ -16,7 +16,7 @@ const helpSource = await readFile(
   "utf8",
 );
 
-test("uses one release-level file-spec badge across Staging, Library, and Publish", () => {
+test("keeps release-level file-spec badges in Staging and Library while Web Package stays compact", () => {
   assert.match(
     appSource,
     /function MediaFileSpecBadge\(/,
@@ -44,8 +44,8 @@ test("uses one release-level file-spec badge across Staging, Library, and Publis
     appSource.indexOf("function PublishWorkspace"),
     appSource.indexOf("type LibraryReleaseViewMode"),
   );
-  assert.match(publish, /<span>File spec<\/span>/);
-  assert.match(
+  assert.doesNotMatch(publish, /<span>File spec<\/span>/);
+  assert.doesNotMatch(
     publish,
     /<MediaFileSpecBadge release=\{release\} \/>/,
   );

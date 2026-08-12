@@ -60,6 +60,10 @@ import {
 import {
   buildIngestAudioPreviewUrl,
 } from "./ingest-audio-preview.js";
+import type {
+  PersistentLibraryPlaybackController,
+  PersistentPlaybackTrack,
+} from "./PersistentLibraryPlayer.js";
 import {
   useIngestDraft,
 } from "./useIngestDraft.js";
@@ -1252,6 +1256,7 @@ export function IngestReleaseBuilder({
   onCancel,
   onReleaseCreated,
   onNotify,
+  playback,
 }: {
   inspection: IngestCandidateInspection;
   identitySeed?: IngestDraftIdentitySeed | null;
@@ -1263,6 +1268,7 @@ export function IngestReleaseBuilder({
     message: string,
     tone?: "success" | "info" | "error",
   ) => void;
+  playback: PersistentLibraryPlaybackController;
 }) {
   const {
     draft,
@@ -1316,16 +1322,6 @@ export function IngestReleaseBuilder({
     useState(false);
   const canonicalTargetAppliedRef =
     useRef<string | null>(null);
-  const audioPreviewRef =
-    useRef<HTMLAudioElement | null>(null);
-  const [audioPreviewSourcePath, setAudioPreviewSourcePath] =
-    useState<string | null>(null);
-  const [audioPreviewPlaying, setAudioPreviewPlaying] =
-    useState(false);
-  const [audioPreviewLoading, setAudioPreviewLoading] =
-    useState(false);
-  const [audioPreviewError, setAudioPreviewError] =
-    useState<string | null>(null);
   const blockingSources =
     buildBlockingSourceStatuses(
       draft,
@@ -1336,101 +1332,52 @@ export function IngestReleaseBuilder({
     targetStatus?.operation ??
     "create";
 
-  useEffect(() => {
-    const audio = new Audio();
-    audio.preload = "metadata";
-
-    const handlePlay = () => {
-      setAudioPreviewPlaying(true);
-      setAudioPreviewLoading(false);
-    };
-    const handlePause = () => {
-      setAudioPreviewPlaying(false);
-      setAudioPreviewLoading(false);
-    };
-    const handleWaiting = () => {
-      setAudioPreviewLoading(true);
-    };
-    const handleCanPlay = () => {
-      setAudioPreviewLoading(false);
-    };
-    const handleError = () => {
-      setAudioPreviewPlaying(false);
-      setAudioPreviewLoading(false);
-      setAudioPreviewError(
-        "The selected ingest source could not be decoded or transcoded for preview. Confirm FFmpeg and an MP3 encoder are available for non-MP3 sources.",
-      );
-    };
-
-    audio.addEventListener("play", handlePlay);
-    audio.addEventListener("pause", handlePause);
-    audio.addEventListener("ended", handlePause);
-    audio.addEventListener("waiting", handleWaiting);
-    audio.addEventListener("canplay", handleCanPlay);
-    audio.addEventListener("error", handleError);
-    audioPreviewRef.current = audio;
-
-    return () => {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
-      audio.removeEventListener("play", handlePlay);
-      audio.removeEventListener("pause", handlePause);
-      audio.removeEventListener("ended", handlePause);
-      audio.removeEventListener("waiting", handleWaiting);
-      audio.removeEventListener("canplay", handleCanPlay);
-      audio.removeEventListener("error", handleError);
-      audioPreviewRef.current = null;
-    };
-  }, []);
+  const stagingPlaybackQueue: PersistentPlaybackTrack[] =
+    trackSourceFiles.map((file) => ({
+      key: `ingest:${currentInspection.candidate.id}:${file.relativePath}`,
+      sourceUrl: buildIngestAudioPreviewUrl(
+        file.relativePath,
+        file.modifiedAt,
+      ),
+      title: file.filename,
+      subtitle: currentInspection.candidate.displayTitle,
+      sourceLabel: [
+        "Ingest source",
+        file.technical.codec ?? file.technical.container,
+      ].filter(Boolean).join(" · "),
+    }));
+  const stagingPlaybackPrefix =
+    `ingest:${currentInspection.candidate.id}:`;
+  const audioPreviewSourcePath =
+    playback.currentTrack?.key.startsWith(
+      stagingPlaybackPrefix,
+    )
+      ? playback.currentTrack.key.slice(
+          stagingPlaybackPrefix.length,
+        )
+      : null;
+  const audioPreviewPlaying =
+    audioPreviewSourcePath !== null && playback.isPlaying;
+  const audioPreviewLoading =
+    audioPreviewSourcePath !== null && playback.isLoading;
+  const audioPreviewError =
+    audioPreviewSourcePath !== null ? playback.error : null;
 
   const toggleIngestAudioPreview = (
     sourceRelativePath: string,
   ) => {
-    const audio = audioPreviewRef.current;
-    const source = currentInspection.files.find(
-      (file) =>
-        file.relativePath === sourceRelativePath &&
-        file.mediaKind === "audio",
+    const source = trackSourceFiles.find(
+      (file) => file.relativePath === sourceRelativePath,
     );
 
-    if (!audio || !source) {
-      setAudioPreviewError(
-        "This source is not available as an inspected audio file.",
-      );
+    if (!source) {
       return;
     }
 
-    setAudioPreviewError(null);
-
-    if (
-      audioPreviewSourcePath === sourceRelativePath &&
-      !audio.paused
-    ) {
-      audio.pause();
-      return;
-    }
-
-    if (audioPreviewSourcePath !== sourceRelativePath) {
-      audio.pause();
-      audio.src = buildIngestAudioPreviewUrl(
-        sourceRelativePath,
-        source.modifiedAt,
-      );
-      audio.load();
-      setAudioPreviewSourcePath(sourceRelativePath);
-      setAudioPreviewLoading(true);
-    }
-
-    void audio.play().catch((previewError: unknown) => {
-      setAudioPreviewPlaying(false);
-      setAudioPreviewLoading(false);
-      setAudioPreviewError(
-        previewError instanceof Error
-          ? previewError.message
-          : "Audio preview could not start.",
-      );
-    });
+    playback.toggleTrack(
+      `ingest:${currentInspection.candidate.id}:${sourceRelativePath}`,
+      stagingPlaybackQueue,
+    );
   };
 
   const audioPreviewControls: IngestAudioPreviewControls = {

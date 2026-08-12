@@ -22,10 +22,16 @@ const workspaceRows = [
       "Edit release/track/video metadata, review inheritance, provenance, readiness, masters, and private derivatives.",
   },
   {
-    name: "Publish",
-    purpose: "Prepare and build sanitized public output.",
+    name: "Web Package",
+    purpose: "Prepare sanitized releases for the Hiplingo web app.",
     action:
-      "Run preflight, prepare current web derivatives, then publish or update the complete public snapshot.",
+      "Run Ready Check, prepare current web derivatives, then prepare or update the Web Package.",
+  },
+  {
+    name: "Live",
+    purpose: "See what Hiplingo visitors can currently access.",
+    action:
+      "Compare the Web Package with Live, review changes, and keep public writes explicitly gated.",
   },
 ] as const;
 
@@ -33,7 +39,7 @@ const quickQuestions = [
   {
     question: "Where do the files live?",
     answer:
-      "ingest-drop is disposable source input. media-library is the sizeable private canonical source of truth. published-media is generated sanitized deployment output that can be rebuilt from the Library.",
+      "ingest-drop is disposable source input. media-library is the private canonical Library and is never deployed directly. published-media is the generated Web Package. Live is the separately inspected remote public state.",
   },
   {
     question: "What does Preferred vs Compatible mean?",
@@ -68,7 +74,7 @@ const quickQuestions = [
   {
     question: "Where does technical media health appear in the workflow?",
     answer:
-      "Library release detail and Publish preflight now share one compact technical inspector. It summarizes canonical-master counts and the observed audio, artwork, and video inventory from the background read-only audit; Technical Media Contract v1 remains advisory and does not change Publish gating.",
+      "Library release detail and Web Package Ready Check share one compact technical inspector. It summarizes canonical-master counts and the observed audio, artwork, and video inventory from the background read-only audit; Technical Media Contract v1 remains advisory and does not change Web Package readiness.",
   },
   {
     question: "What audit commands are available?",
@@ -78,17 +84,17 @@ const quickQuestions = [
   {
     question: "Where did the Publishing Guide button go?",
     answer:
-      "Publishing guidance now lives here in Workflow & Help instead of taking permanent space in the Publish header. The Publish workspace remains action-focused; use this FAQ for the relationship between preflight, Update public package, deployment-manifest verification, host comparison, and deployment.",
+      "Publication guidance now lives here in Workflow & Help. Web Package owns Ready Check and web preparation; Live owns remote comparison and reviewed deployment changes. The Library never deploys directly.",
   },
   {
     question: "What if the Library changed after a release was published?",
     answer:
-      "A published release with newer canonical Library inputs becomes Update available. Verify snapshot and Refresh deployment manifest only verify/hash the current published-media tree; they do not copy new Library changes into it. Run Update public package first. Deployment is blocked by default while published releases have pending Library changes; intentionally deploying the older public snapshot requires an explicit override. Not-published Library releases are intentionally excluded and do not block deployment.",
+      "A packaged release with newer canonical Library inputs becomes Update available. Verify snapshot and Refresh deployment manifest only verify/hash the current local Public Package; they do not copy new Library changes into it. Rebuild the Local Public Package first. Deployment is blocked by default while published releases have pending Library changes; intentionally deploying the older public snapshot requires an explicit override. Not-published Library releases are intentionally excluded and do not block deployment.",
   },
   {
     question: "How do I remove a release from the public catalog?",
     answer:
-      "Use Publish → Review unpublish on an already-published release. The first step is a read-only plan that fingerprints the complete public release and catalog state. Confirmed unpublish removes only the sanitized public package and catalog membership; the canonical Library release and masters remain private and unchanged. Then refresh the deployment manifest, Check host, and deploy the reviewed removals to the sandbox or production target.",
+      "Use Public Package → Review unpublish on an already-packaged release. The first step is a read-only plan that fingerprints the complete public release and catalog state. Confirmed unpublish removes only the sanitized public package and catalog membership; the canonical Library release and masters remain private and unchanged. Then refresh the deployment manifest, Check host, and deploy the reviewed removals to the sandbox or production target.",
   },
   {
     question: "What does Published-only mean?",
@@ -114,8 +120,8 @@ export function WorkflowHelpView({
             Workflow &amp; Help
           </h2>
           <p>
-            Four workspaces, one private canonical Library,
-            and one reproducible public output.
+            Five workspaces with explicit boundaries between the private
+            Library, generated Web Package, and remote Live state.
           </p>
         </div>
         <button type="button" onClick={onBack}>
@@ -127,7 +133,7 @@ export function WorkflowHelpView({
 
       <section className="workflow-reference-section">
         <header>
-          <p className="eyebrow">Four workspaces</p>
+          <p className="eyebrow">Five workspaces</p>
           <h2>Release flow</h2>
         </header>
 
@@ -163,9 +169,9 @@ export function WorkflowHelpView({
           <article>
             <h3>Private → public</h3>
             <p>
-              <code>media-library/</code> is canonical.
-              <code> published-media/</code> is generated,
-              sanitized deployment output.
+              <code>media-library/</code> is the private canonical Library.
+              <code> published-media/</code> is the generated Web Package.
+              Live is the separately inspected remote public state.
             </p>
           </article>
 
@@ -174,7 +180,7 @@ export function WorkflowHelpView({
             <p>
               Refresh lives in the top header: Ingest refreshes
               the drop, Staging refreshes both inputs, and
-              Library/Publish refresh the Library.
+              Library/Web Package refresh the Library; Live inspection uses its own read-only comparison controls.
             </p>
           </article>
 
@@ -182,7 +188,7 @@ export function WorkflowHelpView({
             <h3>Footer storage totals</h3>
             <p>
               The footer reports only total Library and
-              Published media sizes. Metadata Tag Info is
+              Web Package sizes. Metadata Tag Info is
               linked there as a separate reference page.
             </p>
           </article>

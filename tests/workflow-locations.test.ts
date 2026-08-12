@@ -13,7 +13,7 @@ import {
   readWorkflowLocations,
 } from "../server/workflow-locations.js";
 
-test("reports configured private roots and an available public output", async () => {
+test("reports configured private roots and an available local Web Package", async () => {
   const temporaryRoot = await mkdtemp(
     path.join(os.tmpdir(), "metadata-workflow-locations-"),
   );
@@ -60,9 +60,9 @@ test("reports configured private roots and an available public output", async ()
       await realpath(libraryRoot),
     );
     assert.equal(byId.get("library")?.writeEnabled, true);
-    assert.equal(byId.get("publish")?.absolutePath, publishRoot);
-    assert.equal(byId.get("publish")?.exists, false);
-    assert.equal(byId.get("publish")?.writeEnabled, true);
+    assert.equal(byId.get("public-package")?.absolutePath, publishRoot);
+    assert.equal(byId.get("public-package")?.exists, false);
+    assert.equal(byId.get("public-package")?.writeEnabled, true);
   } finally {
     if (previous.ingest === undefined) delete process.env.INGEST_ROOT;
     else process.env.INGEST_ROOT = previous.ingest;

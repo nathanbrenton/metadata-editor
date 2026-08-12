@@ -6,6 +6,10 @@ const appSource = await readFile(
   new URL("../src/App.tsx", import.meta.url),
   "utf8",
 );
+const playerSource = await readFile(
+  new URL("../src/PersistentLibraryPlayer.tsx", import.meta.url),
+  "utf8",
+);
 const styleSource = await readFile(
   new URL("../src/styles.css", import.meta.url),
   "utf8",
@@ -15,52 +19,84 @@ const serverSource = await readFile(
   "utf8",
 );
 
-test("renders sidebar and desktop transport preview controls", () => {
+test("renders sidebar preview controls through one persistent application player", () => {
   assert.match(
     appSource,
     /metadata-track-preview-button/,
   );
   assert.match(
     appSource,
-    /audio-preview-transport/,
+    /<PersistentLibraryPlayerBar/,
   );
   assert.match(
-    appSource,
-    /Audio preview volume/,
+    playerSource,
+    /ariaLabel="Persistent media player"/,
   );
   assert.match(
-    appSource,
-    /Previous playable track/,
+    playerSource,
+    /aria-label="Player volume"/,
   );
   assert.match(
-    appSource,
-    /Next playable track/,
+    playerSource,
+    /transport=\{\{/,
+  );
+  assert.match(
+    playerSource,
+    /canPrevious,/,
+  );
+  assert.match(
+    playerSource,
+    /previous: playback\.previous/,
+  );
+  assert.match(
+    playerSource,
+    /canNext,/,
+  );
+  assert.match(
+    playerSource,
+    /next: playback\.next/,
   );
 });
 
-test("continues Library preview playback to the next playable track when audio ends", () => {
+test("keeps persistent playback mounted above workspace navigation and advances within the queue", () => {
   assert.match(
     appSource,
-    /getNextPlayableTrackId/,
+    /const libraryPlayback =\s*usePersistentLibraryPlayback\(\)/,
   );
   assert.match(
-    appSource,
+    playerSource,
+    /const audio = new Audio\(\)/,
+  );
+  assert.match(
+    playerSource,
     /addEventListener\("ended", handleEnded\)/,
   );
   assert.match(
-    appSource,
-    /void loadTrack\(nextTrackId, true\)/,
+    playerSource,
+    /queueRef\.current\[currentIndex \+ 1\]/,
+  );
+  assert.match(
+    playerSource,
+    /getPlaybackQueueNeighbor\(/,
+  );
+  assert.doesNotMatch(
+    playerSource,
+    /detail\.releaseId/,
   );
 });
 
-test("keeps preview controls desktop-oriented and independently styled", () => {
+test("keeps persistent preview controls desktop-oriented and independently styled", () => {
   assert.match(
     styleSource,
-    /\.audio-preview-transport\s*\{/,
+    /\.persistent-library-player\s*\{/,
   );
   assert.match(
     styleSource,
     /grid-template-columns:/,
+  );
+  assert.match(
+    styleSource,
+    /main:has\(\.persistent-library-player\)/,
   );
   assert.match(
     styleSource,

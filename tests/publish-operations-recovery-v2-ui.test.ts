@@ -51,19 +51,19 @@ test("Publish API exposes operation history, guarded recovery, and sequential ba
   assert.match(server, /interrupted operation.*detected from a previous server instance/s);
 });
 
-test("Publish UI surfaces interrupted operations and keeps public publishing release-scoped", () => {
-  assert.match(app, /Publish operation history/);
+test("Web Package UI surfaces interrupted operations and keeps package builds release-scoped", () => {
+  assert.match(app, /Web Package history/);
   assert.match(app, /Interrupted/);
-  assert.match(app, /Publish failed/);
+  assert.match(app, /Package build failed/);
   assert.match(app, /Verify & finalize/);
   assert.match(app, /Guarded rollback/);
   assert.match(app, /Prepare selected \(/);
-  assert.match(app, /Publishing remains per release/);
-  assert.match(app, /Recover interrupted publish/);
+  assert.match(app, /Web Package preparation remains per release/);
+  assert.match(app, /Recover interrupted package build/);
 });
 
 test("Workflow Help documents journaled recovery and batch preparation boundaries", () => {
-  assert.match(help, /Publish Operations & Recovery v2/);
+  assert.match(help, /Web Package Operations & Recovery v2/);
   assert.match(help, /server-instance identity/);
   assert.match(help, /guarded rollback/);
   assert.match(help, /sequential private derivative preparation/);

@@ -10,7 +10,7 @@ const styles = await readFile(
 test("weights workflow navigation by expected interaction frequency", () => {
   assert.match(
     styles,
-    /\.workflow-navigation-region\s*\{[\s\S]*?--workflow-stage-columns:[\s\S]*?minmax\(11rem,\s*3fr\)[\s\S]*?minmax\(15rem,\s*5fr\)[\s\S]*?minmax\(20rem,\s*7fr\)[\s\S]*?minmax\(11rem,\s*3fr\)/,
+    /\.workflow-navigation-region\s*\{[\s\S]*?--workflow-stage-columns:[\s\S]*?minmax\(11rem,\s*3fr\)[\s\S]*?minmax\(15rem,\s*5fr\)[\s\S]*?minmax\(20rem,\s*7fr\)[\s\S]*?minmax\(15rem,\s*4fr\)[\s\S]*?minmax\(13rem,\s*3fr\)/,
   );
 
   assert.match(

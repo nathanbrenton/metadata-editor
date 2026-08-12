@@ -57,7 +57,7 @@ test("documents Library video inspection, guarded preparation, and public-packag
   );
   assert.match(
     helpSource,
-    /Publish preflight includes video readiness/,
+    /Web Package Ready Check includes video readiness/,
   );
   assert.match(
     helpSource,

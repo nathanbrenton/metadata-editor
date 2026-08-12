@@ -846,7 +846,7 @@ export async function buildPublishedMediaDeploymentSyncPlan(
   if (!target) {
     throw new Error(
       selection.profile.name === "production"
-        ? "Production deployment is not configured. Set PUBLISHED_MEDIA_PRODUCTION_TARGET=ssh:user@host:/var/www/hiplingo.com/published-media."
+        ? "Production deployment is not configured. Set PUBLISHED_MEDIA_PRODUCTION_TARGET=ssh:hiplingo-prod:/var/www/hiplingo.com/published-media. The SSH alias owns the remote user, key, host address, and other connection details."
         : "No deployment target is configured for the selected deployment profile.",
     );
   }

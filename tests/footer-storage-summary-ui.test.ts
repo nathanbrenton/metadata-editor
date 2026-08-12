@@ -11,13 +11,13 @@ const locationSource = await readFile(
   "utf8",
 );
 
-test("limits footer summary to Library and Published storage totals", () => {
+test("limits footer summary to Library and Web Package storage totals", () => {
   const start = appSource.indexOf("const footerSummary = useMemo");
   const end = appSource.indexOf("return (", start);
   const summary = appSource.slice(start, end);
 
   assert.match(summary, /`Library \$\{/);
-  assert.match(summary, /`Published \$\{/);
+  assert.match(summary, /`Web Package \$\{/);
   assert.doesNotMatch(summary, /candidate|ffprobe|releaseCount|trackCount/i);
   assert.match(locationSource, /sizeBytes\?: number/);
   assert.match(locationSource, /directorySizeBytes/);

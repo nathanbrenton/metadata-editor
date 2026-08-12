@@ -167,6 +167,50 @@ code {
   font-size: 0.75rem;
 }
 
+.menu-card--waveform-color {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.menu-card--waveform-color h2,
+.menu-card--waveform-color .menu-meta {
+  margin-bottom: 0;
+}
+
+.menu-waveform-preview {
+  height: 3.1rem;
+  border: 1px solid #343e47;
+  border-radius: 0.35rem;
+  background:
+    linear-gradient(to bottom, transparent 49.5%, #303943 50%, transparent 50.5%),
+    #10151a;
+}
+
+.menu-waveform-preview canvas {
+  min-height: 3.1rem;
+}
+
+.menu-waveform-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 2.5rem;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.menu-waveform-actions select {
+  width: 100%;
+  min-width: 0;
+}
+
+.menu-waveform-actions button {
+  display: inline-grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+}
+
 .admin-toggle {
   display: flex;
   align-items: flex-start;
@@ -2861,78 +2905,6 @@ button,
   justify-content: flex-end;
 }
 
-.audio-preview-transport {
-  display: grid;
-  grid-template-columns:
-    auto
-    minmax(8rem, 1fr)
-    minmax(7rem, 10rem);
-  align-items: center;
-  gap: 0.75rem;
-  min-width: 25rem;
-}
-
-.audio-preview-buttons {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.audio-preview-buttons button {
-  display: inline-grid;
-  width: 2.15rem;
-  height: 2.15rem;
-  place-items: center;
-  padding: 0;
-  font-size: 0.9rem;
-  line-height: 1;
-}
-
-.audio-preview-buttons
-.audio-preview-play-toggle {
-  width: 2.45rem;
-  height: 2.45rem;
-  border-color: #60758a;
-  background: #253547;
-  color: #eef5fb;
-}
-
-.audio-preview-now-playing {
-  display: grid;
-  min-width: 0;
-  gap: 0.12rem;
-}
-
-.audio-preview-now-playing strong,
-.audio-preview-now-playing small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.audio-preview-now-playing strong {
-  color: #dce3e9;
-  font-size: 0.76rem;
-}
-
-.audio-preview-now-playing small {
-  color: #758391;
-  font-size: 0.64rem;
-}
-
-.audio-preview-volume {
-  display: grid;
-  grid-template-columns: auto minmax(4rem, 1fr);
-  align-items: center;
-  gap: 0.4rem;
-  color: #8895a1;
-  font-size: 0.65rem;
-}
-
-.audio-preview-volume input {
-  width: 100%;
-  min-width: 0;
-}
 
 
 .draft-status strong {
@@ -3010,12 +2982,6 @@ button,
     grid-template-columns: 1fr;
     align-items: stretch;
     gap: 0.65rem;
-  }
-
-  .audio-preview-transport {
-    grid-row: 2;
-    width: 100%;
-    min-width: 0;
   }
 
   .draft-status-actions {
@@ -8467,7 +8433,7 @@ input[aria-invalid="true"] {
 }
 
 .ingest-review-track-table {
-  min-width: 62rem;
+  min-width: 76rem;
 }
 
 .ingest-review-video-table {
@@ -9662,15 +9628,6 @@ input[aria-invalid="true"] {
   }
 }
 
-@media (max-width: 42rem) {
-  .audio-preview-transport {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-
-  .audio-preview-volume {
-    grid-column: 1 / -1;
-  }
-}
 
 /* The primary navigation mirrors the desktop release lifecycle rather than exposing isolated actions in headers. */
 .workflow-navigation-scroll {
@@ -10989,7 +10946,8 @@ input[aria-invalid="true"] {
     minmax(11rem, 3fr)
     minmax(15rem, 5fr)
     minmax(20rem, 7fr)
-    minmax(11rem, 3fr);
+    minmax(15rem, 4fr)
+    minmax(13rem, 3fr);
 
   display: grid;
   gap: 0.45rem;
@@ -13782,7 +13740,7 @@ main {
   align-self: center;
 }
 
-/* Published-media fleet and deployment snapshot */
+/* Local Public Package fleet and deployment snapshot */
 .publish-deployment-overview {
   display: grid;
   gap: 0.8rem;
@@ -14422,4 +14380,638 @@ main {
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+
+/* Public Package and Production are separate first-class lifecycle stages. */
+.production-workspace > .workflow-table-panel,
+.production-workspace > .publish-operation-history,
+.production-workspace > .publish-interrupted-alert {
+  display: none;
+}
+
+.public-package-workspace .publish-host-boundary {
+  display: none;
+}
+
+/* Phase 1B: user-facing Web Package / Live hierarchy. */
+.production-workspace > .workflow-table-panel {
+  display: block;
+}
+
+.publish-fleet-summary-grid-compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.publish-package-details,
+.publish-live-connection-details {
+  border-top: 1px solid #2e3941;
+  padding-top: 0.45rem;
+}
+
+.publish-package-details > summary,
+.publish-live-connection-details > summary {
+  cursor: pointer;
+  color: #aab5bd;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.publish-package-details[open],
+.publish-live-connection-details[open] {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.publish-package-details-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.production-workspace .publish-readiness-table .publish-release-row {
+  cursor: default;
+}
+
+.production-workspace .publish-readiness-table .publish-release-row:hover {
+  background: inherit;
+}
+
+.production-workspace .publish-readiness-table th:first-child {
+  width: 62%;
+}
+
+.production-workspace .publish-readiness-table td {
+  vertical-align: middle;
+}
+
+.public-package-workspace .publish-ready-check-cell,
+.public-package-workspace .publish-readiness-table td:last-child,
+.production-workspace .publish-readiness-table td {
+  min-width: 9.5rem;
+}
+
+@media (max-width: 980px) {
+  .publish-fleet-summary-grid-compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Persistent Library playback lives at the application shell rather than
+ * inside one metadata workspace, so changing workspaces does not tear down
+ * the active audio element. The shared package owns the Now Playing markup;
+ * metadata-editor owns this fixed desktop-shell placement and host skin. */
+main:has(.persistent-library-player) {
+  padding-bottom: 7rem;
+}
+
+.persistent-library-player {
+  position: fixed;
+  z-index: 65;
+  right: auto;
+  bottom: 0;
+  left: 50%;
+  display: grid;
+  width: min(92rem, 100%);
+  min-height: 5rem;
+  grid-template-areas:
+    "artwork identity time waveform transport volume";
+  grid-template-columns:
+    3.25rem
+    minmax(12rem, 1fr)
+    max-content
+    minmax(18rem, 2fr)
+    auto
+    minmax(8rem, 0.55fr);
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.55rem 1rem;
+  border-top: 1px solid #3d4652;
+  background: rgb(20 23 26 / 97%);
+  box-shadow: 0 -0.55rem 1.15rem rgb(0 0 0 / 34%);
+  transform: translateX(-50%);
+  backdrop-filter: blur(0.75rem);
+}
+
+.persistent-library-player__artwork {
+  grid-area: artwork;
+  display: grid;
+  width: 3.25rem;
+  height: 3.25rem;
+  overflow: hidden;
+  place-items: center;
+  border: 1px solid #3a4249;
+  border-radius: 0.45rem;
+  color: #82909b;
+  background: #171b20;
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.persistent-library-player__artwork img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.persistent-library-player__copy {
+  grid-area: identity;
+  display: grid;
+  min-width: 0;
+  gap: 0.08rem;
+}
+
+.persistent-library-player__title,
+.persistent-library-player__context,
+.persistent-library-player__source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.persistent-library-player__title {
+  color: #e8edf1;
+  font-size: 0.82rem;
+}
+
+.persistent-library-player__context {
+  color: #8f9ba5;
+  font-size: 0.68rem;
+}
+
+.persistent-library-player__source {
+  color: #687681;
+  font-size: 0.62rem;
+}
+
+.persistent-library-player__time {
+  grid-area: time;
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  color: #7f8c97;
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.persistent-library-player__time span:nth-child(2) {
+  color: #4f5b65;
+}
+
+.persistent-library-player__waveform-region {
+  grid-area: waveform;
+  width: 100%;
+  height: 2.65rem;
+  min-width: 0;
+}
+
+.persistent-library-player__waveform {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  border: 1px solid #303a43;
+  border-radius: 0.3rem;
+  background:
+    linear-gradient(to bottom, transparent 49.5%, #313a43 50%, transparent 50.5%),
+    #0f1418;
+}
+
+.persistent-library-player__waveform-region > input {
+  width: 100%;
+  min-width: 0;
+}
+
+.persistent-library-player__transport {
+  grid-area: transport;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.persistent-library-player__transport button {
+  display: inline-grid;
+  width: 2.35rem;
+  height: 2.35rem;
+  place-items: center;
+  padding: 0;
+  border-radius: 50%;
+  color: #c7d1d8;
+  background: transparent;
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+.persistent-library-player__transport
+.persistent-library-player__play {
+  width: 2.7rem;
+  height: 2.7rem;
+  border-color: #60758a;
+  background: #253547;
+  color: #f0f6fb;
+}
+
+.persistent-library-player__volume {
+  grid-area: volume;
+  display: grid;
+  grid-template-columns: auto minmax(4rem, 1fr);
+  align-items: center;
+  gap: 0.4rem;
+  color: #7f8c97;
+  font-size: 0.64rem;
+}
+
+.persistent-library-player__volume input {
+  width: 100%;
+  min-width: 0;
+}
+
+.persistent-library-player__error {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #efacac;
+  font-size: 0.68rem;
+}
+
+@media (max-width: 58rem) {
+  main:has(.persistent-library-player) {
+    padding-bottom: 8.5rem;
+  }
+
+  .persistent-library-player {
+    grid-template-areas:
+      "artwork identity transport"
+      "time waveform waveform";
+    grid-template-columns: 3.25rem minmax(0, 1fr) auto;
+  }
+
+  .persistent-library-player__volume {
+    display: none;
+  }
+}
+
+/* Library Waveform view: a single-release listening surface backed by the
+ * same persistent application-shell player used by the other workspaces. */
+.library-waveform-view {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.library-waveform-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid #39434d;
+  border-radius: 0.35rem;
+  padding: 0.55rem 0.65rem;
+  background: #171c21;
+}
+
+.library-waveform-release-picker {
+  display: grid;
+  min-width: min(38rem, 74vw);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 0.35rem;
+}
+
+.library-waveform-toolbar label {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+  color: #8f9aa4;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.library-waveform-toolbar select {
+  width: 100%;
+  min-width: 0;
+  padding: 0.42rem 1.8rem 0.42rem 0.55rem;
+  font-size: 0.78rem;
+}
+
+.library-waveform-release-nav {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.library-waveform-stage {
+  display: grid;
+  grid-template-columns: minmax(17rem, 0.72fr) minmax(30rem, 1.7fr);
+  min-height: 34rem;
+  overflow: hidden;
+  border: 1px solid #39434d;
+  border-radius: 0.45rem;
+  background: #12161a;
+}
+
+.library-waveform-release-panel {
+  display: grid;
+  align-content: start;
+  gap: 0.8rem;
+  padding: 0.9rem;
+  border-right: 1px solid #333c45;
+  background: #151a1f;
+}
+
+.library-waveform-artwork {
+  display: grid;
+  width: 100%;
+  aspect-ratio: 1;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #3d4751;
+  border-radius: 0.45rem;
+  color: #7d8994;
+  background: #0f1317;
+}
+
+.library-waveform-artwork img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-waveform-release-copy {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.library-waveform-release-copy h2,
+.library-waveform-release-copy p,
+.library-waveform-release-copy small {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.library-waveform-release-copy h2 {
+  color: #e2e8ed;
+  font-size: 1.15rem;
+}
+
+.library-waveform-release-copy p {
+  color: #a9b4bd;
+  font-size: 0.82rem;
+}
+
+.library-waveform-release-copy small {
+  color: #77838d;
+  font-size: 0.7rem;
+}
+
+.library-waveform-player-panel {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+}
+
+.library-waveform-track-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0.9rem;
+  border-bottom: 1px solid #333c45;
+  background: #191e23;
+}
+
+.library-waveform-track-header > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.08rem;
+}
+
+.library-waveform-track-header span {
+  color: #77838d;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.library-waveform-track-header h3 {
+  margin: 0;
+  overflow: hidden;
+  color: #edf2f6;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-waveform-track-header small {
+  color: #82909b;
+  font-size: 0.66rem;
+}
+
+.library-waveform-play-button {
+  min-width: 5rem;
+}
+
+.library-waveform-display {
+  display: grid;
+  min-height: 12rem;
+  place-items: stretch;
+  padding: 0.8rem 0.9rem;
+  border-bottom: 1px solid #303841;
+  background: #0d1115;
+}
+
+.library-waveform-display > p {
+  align-self: center;
+  margin: 0;
+  color: #7f8b95;
+  font-size: 0.76rem;
+  text-align: center;
+}
+
+.media-waveform-canvas {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.media-waveform-canvas.interactive {
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.media-waveform-canvas:focus-visible {
+  outline: 2px solid #70869a;
+  outline-offset: 2px;
+}
+
+.media-waveform-canvas canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.media-waveform-canvas__playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--media-waveform-progress) * 100%);
+  width: 1px;
+  background: #eff5fa;
+  box-shadow: 0 0 0.35rem rgb(255 255 255 / 30%);
+  pointer-events: none;
+}
+
+.library-waveform-canvas {
+  min-height: 10.4rem;
+  border: 1px solid #2f3942;
+  border-radius: 0.35rem;
+  background:
+    linear-gradient(to bottom, transparent 49.7%, #313a43 50%, transparent 50.3%),
+    #10151a;
+}
+
+.library-waveform-canvas canvas {
+  min-height: 10.4rem;
+}
+
+.library-waveform-technical-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  padding: 0.38rem 0.9rem;
+  border-bottom: 1px solid #303841;
+  color: #727e88;
+  background: #14191e;
+  font-size: 0.64rem;
+}
+
+.library-waveform-detail-status {
+  margin: 0;
+  padding: 0.45rem 0.9rem;
+  border-bottom: 1px solid #303841;
+  color: #7f8b95;
+  font-size: 0.7rem;
+}
+
+.library-waveform-detail-status.error {
+  color: #dca3a3;
+}
+
+.library-waveform-track-list {
+  min-height: 0;
+  max-height: 17rem;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.library-waveform-track-list li {
+  border-bottom: 1px solid #282f36;
+}
+
+.library-waveform-track-list li:last-child {
+  border-bottom: 0;
+}
+
+.library-waveform-track-list button {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: 2.3rem minmax(0, 1fr) 5.5rem;
+  align-items: center;
+  gap: 0.6rem;
+  border: 0;
+  border-radius: 0;
+  padding: 0.52rem 0.8rem;
+  background: #14191e;
+  text-align: left;
+}
+
+.library-waveform-track-list button:hover:not(:disabled),
+.library-waveform-track-list button:focus-visible,
+.library-waveform-track-list button.selected {
+  background: #202830;
+}
+
+.library-waveform-track-list button:disabled {
+  opacity: 0.55;
+}
+
+.library-waveform-track-number {
+  color: #70808c;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.library-waveform-track-title {
+  overflow: hidden;
+  color: #dce3e8;
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-waveform-track-state {
+  color: #7f8c97;
+  font-size: 0.64rem;
+  text-align: right;
+}
+
+@media (max-width: 58rem) {
+  .library-waveform-stage {
+    grid-template-columns: minmax(12rem, 0.65fr) minmax(22rem, 1.35fr);
+  }
+}
+
+@media (max-width: 46rem) {
+  .library-waveform-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .library-waveform-release-picker {
+    min-width: 0;
+  }
+
+  .library-waveform-toolbar label {
+    min-width: 0;
+  }
+
+  .library-waveform-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .library-waveform-release-panel {
+    grid-template-columns: 8rem minmax(0, 1fr);
+    align-items: center;
+    border-right: 0;
+    border-bottom: 1px solid #333c45;
+  }
+}
+
+/* Shared transport SVGs are supplied by @hiplingo/media-player; metadata-editor
+ * owns only host sizing/color so the same icon source can serve both apps. */
+.persistent-library-player__transport-icon {
+  display: inline-grid;
+  width: 1.1rem;
+  height: 1.1rem;
+  place-items: center;
+}
+
+.persistent-library-player__transport-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }

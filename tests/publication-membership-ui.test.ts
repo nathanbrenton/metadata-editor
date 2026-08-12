@@ -34,7 +34,7 @@ test("Publish exposes guarded release-scoped unpublish instead of deployment-lev
 test("fleet surfaces public catalog members missing from the active Library without auto-deleting them", () => {
   assert.match(fleetSource, /publicationState: "published-only"/);
   assert.match(fleetSource, /libraryPresent: false/);
-  assert.match(appSource, /Published-only/);
+  assert.match(appSource, /published-only/i);
   assert.match(appSource, /will never remove them automatically/i);
 });
 

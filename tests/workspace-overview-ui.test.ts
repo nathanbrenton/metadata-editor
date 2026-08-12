@@ -30,7 +30,7 @@ test("Staging uses metadata readiness icons and compact guarded update guidance"
   assert.match(appSource, />\s*Open in Library\s*<\/button>/);
 });
 
-test("Library offers persisted Rows Cards and Tiles views without a redundant metadata button", () => {
+test("Library offers persisted Rows Cards Tiles and Waveform views without a redundant metadata button", () => {
   assert.match(appSource, /LIBRARY_RELEASE_VIEW_STORAGE_KEY/);
   assert.match(appSource, /metadata-editor\.library-release-view/);
   assert.match(appSource, /LIBRARY_RELEASE_SORT_STORAGE_KEY/);
@@ -39,6 +39,7 @@ test("Library offers persisted Rows Cards and Tiles views without a redundant me
   assert.match(appSource, /\["rows", "Rows", "Dense column view"\]/);
   assert.match(appSource, /\["cards", "Cards", "Expanded release cards"\]/);
   assert.match(appSource, /\["tiles", "Tiles", "Artwork-first browsing"\]/);
+  assert.match(appSource, /\["waveform", "Waveform", "Single-release artwork and waveform player"\]/);
   assert.match(appSource, /Metadata complete/);
   assert.match(appSource, /Library ready/);
   assert.doesNotMatch(appSource, />\s*View metadata\s*<\/button>/);
@@ -46,7 +47,7 @@ test("Library offers persisted Rows Cards and Tiles views without a redundant me
   assert.match(styleSource, /\.library-release-list--tiles/);
 });
 
-test("Publish replaces the permanent read-only notice with an amber status indicator", () => {
+test("Web Package keeps Ready Check read-only and compact", () => {
   const start = appSource.indexOf("function PublishWorkspace");
   const end = appSource.indexOf("function IngestView", start);
 
@@ -56,11 +57,11 @@ test("Publish replaces the permanent read-only notice with an amber status indic
   const publishSource = appSource.slice(start, end);
 
   assert.match(publishSource, /badge warning publish-read-only-status/);
-  assert.match(publishSource, />\s*Read-only preflight\s*<\/span>/);
-  assert.match(publishSource, /Choose a release row to open its preflight/);
+  assert.match(publishSource, />\s*Ready Check · read-only\s*<\/span>/);
+  assert.match(publishSource, /Ready Check is read-only/);
   assert.doesNotMatch(
     publishSource,
     /<div className="workflow-workspace-notice planned">\s*<strong>Preflight planning is read-only<\/strong>/,
   );
-  assert.match(helpSource, /amber Read-only preflight status/);
+  assert.match(helpSource, /amber Ready Check · read-only status/);
 });

@@ -17,16 +17,16 @@ test("shows configured media roots as workflow-tab hover details", async () => {
   assert.doesNotMatch(source, /workflow-location-strip/);
 });
 
-test("explains the private-to-public publish storage boundary", async () => {
+test("explains the private Library to Web Package storage boundary", async () => {
   const source = await readFile(
     new URL("../src/App.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(source, /Private canonical source/);
-  assert.match(source, /Sanitized public output/);
-  assert.match(source, />\s*media-library\s*</);
-  assert.match(source, />\s*published-media\s*</);
+  assert.match(source, /Library/);
+  assert.match(source, /Web-ready output/);
+  assert.match(source, /"media-library"/);
+  assert.match(source, /"published-media"/);
   assert.doesNotMatch(source, /Validated snapshot output/i);
 });
 

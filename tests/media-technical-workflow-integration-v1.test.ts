@@ -26,17 +26,17 @@ test("loads technical media health once per Library scan and shares it across wo
   assert.match(appSource, /technicalByRelease=\{mediaTechnicalByRelease\}/);
 });
 
-test("surfaces compact advisory technical health in Library and Publish", () => {
+test("surfaces compact advisory technical health in Library and Web Package", () => {
   assert.match(appSource, /function TechnicalHealthBadge/);
   assert.match(appSource, /function TechnicalAuditSummaryBadge/);
   assert.match(appSource, /Technical · \{label\}/);
   assert.match(
     appSource,
-    /summary=\{technicalByRelease\.get\(release\.id\)\}/,
+    /summary=\{technicalByRelease\.get\(selectedPlan\.releaseId\)\}/,
   );
   assert.match(
     appSource,
-    /Advisory technical health only; this does not change Publish gating/,
+    /Advisory technical health only; this does not change Web Package readiness/,
   );
 });
 

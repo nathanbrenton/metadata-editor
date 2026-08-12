@@ -845,6 +845,70 @@ async function sendLibraryAudioPreview(
   );
 }
 
+async function sendLibraryWaveform(
+  response: ServerResponse,
+  releaseId: string,
+  trackId: string,
+): Promise<void> {
+  const mediaRoot = await resolveMediaRoot();
+  const release = await scanReleaseById(
+    mediaRoot,
+    releaseId,
+  );
+
+  if (!release) {
+    throw new Error(
+      `Release not found: ${releaseId}`,
+    );
+  }
+
+  const track = release.tracks.find(
+    (candidate) => candidate.id === trackId,
+  );
+
+  if (!track) {
+    throw new Error(
+      `Track not found: ${trackId}`,
+    );
+  }
+
+  const candidatePath = assertPathWithinRoot(
+    mediaRoot,
+    path.join(
+      mediaRoot,
+      track.relativePath,
+      "waveform-peaks.json",
+    ),
+  );
+  const canonicalPath = await realpath(candidatePath);
+  assertPathWithinRoot(mediaRoot, canonicalPath);
+
+  const fileStatus = await stat(canonicalPath);
+  if (!fileStatus.isFile()) {
+    throw new Error(
+      "Waveform target is not a regular file.",
+    );
+  }
+
+  const content = await readFile(canonicalPath, "utf8");
+  JSON.parse(content);
+
+  response.statusCode = 200;
+  response.setHeader(
+    "Content-Type",
+    "application/json; charset=utf-8",
+  );
+  response.setHeader(
+    "Cache-Control",
+    "private, no-store",
+  );
+  response.setHeader(
+    "X-Content-Type-Options",
+    "nosniff",
+  );
+  response.end(content);
+}
+
 async function sendLibraryVideoPreview(
   request: IncomingMessage,
   response: ServerResponse,
@@ -1608,6 +1672,40 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Audio preview not found",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/library/waveform"
+    ) {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+      const trackId =
+        requestUrl.searchParams.get("track");
+
+      if (!releaseId || !trackId) {
+        sendJson(response, 400, {
+          error:
+            "Missing release or track query parameter",
+        });
+        return;
+      }
+
+      try {
+        await sendLibraryWaveform(
+          response,
+          releaseId,
+          trackId,
+        );
+      } catch {
+        sendJson(response, 404, {
+          error:
+            "Waveform data is not prepared for this Library track.",
         });
       }
 

@@ -52,3 +52,12 @@ test("Workflow Help documents global logo home plus contextual back navigation",
   );
   assert.match(helpContentSource, /contextual Back to editor control/);
 });
+
+test("release detail has an explicit Back to Library arrow in addition to the global logo", () => {
+  assert.match(
+    appSource,
+    /className="metadata-detail-back-button"[\s\S]*aria-label="Back to Library"[\s\S]*<span aria-hidden="true">←<\/span>/,
+  );
+  assert.match(appSource, /const returnToLibrary = \(\) =>/);
+  assert.match(helpContentSource, /explicit left-arrow Back to Library control/);
+});

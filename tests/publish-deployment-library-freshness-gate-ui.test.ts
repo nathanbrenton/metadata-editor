@@ -28,19 +28,19 @@ test(
   () => {
     assert.match(
       appSource,
-      /Snapshot valid · Library updates pending/,
+      /Web Package ready/,
     );
     assert.match(
       appSource,
-      /Library changes pending/,
+      /Library updates/,
     );
     assert.match(
       appSource,
-      /Run Update public package/,
+      /Update Web Package/,
     );
     assert.match(
       appSource,
-      /Not-published Library releases remain intentionally outside the deployment snapshot/,
+      /publicationState !== "not-published"/,
     );
   },
 );

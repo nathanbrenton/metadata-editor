@@ -15,9 +15,9 @@ const styleSource = readFileSync(
   "utf8",
 );
 
-test("defines the four primary workflow tabs in lifecycle order", () => {
+test("defines the five primary workflow tabs in lifecycle order", () => {
   const orderedIds = Array.from(
-    navigationSource.matchAll(/id: "(ingest|staging|library|publish)"/g),
+    navigationSource.matchAll(/id: "(ingest|staging|library|public-package|production)"/g),
     (match) => match[1],
   );
 
@@ -25,12 +25,12 @@ test("defines the four primary workflow tabs in lifecycle order", () => {
     "ingest",
     "staging",
     "library",
-    "publish",
+    "public-package",
+    "production",
   ]);
-  assert.match(navigationSource, /step: 1/);
-  assert.match(navigationSource, /step: 2/);
-  assert.match(navigationSource, /step: 3/);
-  assert.match(navigationSource, /step: 4/);
+  for (const step of [1, 2, 3, 4, 5]) {
+    assert.match(navigationSource, new RegExp(`step: ${step}`));
+  }
 });
 
 test("uses workflow tabs instead of a standalone header ingest action", () => {
@@ -41,8 +41,9 @@ test("uses workflow tabs instead of a standalone header ingest action", () => {
   );
   assert.match(navigationSource, /Find and inspect source assets/);
   assert.match(navigationSource, /Build or update a release workspace/);
-  assert.match(navigationSource, /Author metadata and prepare media/);
-  assert.match(navigationSource, /Preflight and deploy releases/);
+  assert.match(navigationSource, /Private canonical source of truth/);
+  assert.match(navigationSource, /Prepare releases for the Hiplingo web app/);
+  assert.match(navigationSource, /See what Hiplingo visitors can access/);
 });
 
 test("keeps metadata reference contextual and outside the primary workflow", () => {
@@ -62,14 +63,14 @@ test("keeps metadata reference contextual and outside the primary workflow", () 
   );
 });
 
-test("renders desktop-first staging and publish workspaces", () => {
+test("renders desktop-first Staging, Web Package, and Live workspaces", () => {
   assert.match(appSource, /function StagingWorkspace/);
   assert.match(appSource, /function PublishWorkspace/);
   assert.match(appSource, /Existing release workspaces/);
   assert.match(appSource, /<h3>Releases<\/h3>/);
   assert.match(
     styleSource,
-    /\.application-tabs\.workflow-navigation\s*\{[\s\S]*grid-template-columns:\s*repeat\(4,/,
+    /--workflow-stage-columns:[\s\S]*minmax\(15rem,\s*4fr\)[\s\S]*minmax\(13rem,\s*3fr\)/,
   );
   assert.match(
     styleSource,
@@ -81,7 +82,7 @@ test("renders desktop-first staging and publish workspaces", () => {
 test("keeps the footer summary limited to media storage totals", () => {
   assert.match(appSource, /const footerSummary = useMemo/);
   assert.match(appSource, /`Library \$\{/);
-  assert.match(appSource, /`Published \$\{/);
+  assert.match(appSource, /`Web Package \$\{/);
   assert.match(appSource, /sizeBytes/);
   assert.match(appSource, /Metadata Tag Info/);
   assert.match(appSource, /className="footer-summary"/);

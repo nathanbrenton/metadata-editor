@@ -607,7 +607,7 @@ export function formatPublishPlan(
   plan: PublishPlan,
 ): string {
   const lines = [
-    `Publish preflight: ${plan.status.toUpperCase()}`,
+    `Public Package preflight: ${plan.status.toUpperCase()}`,
     `Release: ${plan.releaseId}`,
     `Private source: ${plan.sourceRoot}`,
     `Public output: ${plan.destinationRoot}`,

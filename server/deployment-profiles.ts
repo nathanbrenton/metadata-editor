@@ -121,7 +121,7 @@ function buildProfile(
         : "unconfigured",
       ...(target ? { configuredTarget: target } : {}),
       description:
-        "Persistent Hiplingo public-media boundary. Configure an SSH target ending at /var/www/hiplingo.com/published-media when the Debian host is ready.",
+        "Persistent Hiplingo public-media boundary. Configure the hiplingo-prod SSH alias target ending at /var/www/hiplingo.com/published-media; credentials and raw SSH configuration remain outside metadata-editor.",
     };
   }
 

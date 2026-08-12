@@ -29,9 +29,9 @@ const readmeSource = await readFile(
 );
 
 test(
-  "Publish exposes local sandbox and production deployment environments without requiring production",
+  "Live keeps deployment profiles behind connection details without requiring production",
   () => {
-    assert.match(appSource, /Deployment environment/);
+    assert.match(appSource, /Connection & deployment details/);
     assert.match(appSource, /Published media deployment profiles/);
     assert.match(profileSource, /label: "Local sandbox"/);
     assert.match(profileSource, /label: "Production"/);
@@ -41,7 +41,7 @@ test(
     );
     assert.match(
       appSource,
-      /PUBLISHED_MEDIA_PRODUCTION_TARGET=ssh:user@host:\/var\/www\/hiplingo\.com\/published-media/,
+      /PUBLISHED_MEDIA_PRODUCTION_TARGET=ssh:hiplingo-prod:\/var\/www\/hiplingo\.com\/published-media/,
     );
   },
 );

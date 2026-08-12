@@ -56,16 +56,16 @@ test("Staging candidate is compact context and five setup tabs stay on one row",
   );
 });
 
-test("Publish boundary renders terse names and retains full roots as tooltips", () => {
-  assert.match(appSource, />\s*media-library\s*<\/code>/);
-  assert.match(appSource, />\s*published-media\s*<\/code>/);
+test("Web Package and Live boundary renders terse names and retains full roots as tooltips", () => {
+  assert.match(appSource, /mode === "production" \? "published-media" : "media-library"/);
+  assert.match(appSource, /mode === "production" \? "Live" : "Web Package"/);
   assert.match(
     appSource,
     /location\.id === "library"[\s\S]*\?\.displayPath[\s\S]*Configured Library root/,
   );
   assert.match(
     appSource,
-    /location\.id === "publish"[\s\S]*\?\.displayPath[\s\S]*Configured published-media root/,
+    /location\.id === "public-package"[\s\S]*\?\.displayPath[\s\S]*Configured published-media root/,
   );
   assert.doesNotMatch(
     appSource,

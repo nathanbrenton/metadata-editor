@@ -18,14 +18,14 @@ const locationsSource = await readFile(
   "utf8",
 );
 
-test("enables one reviewed Publish or Update public-package action", () => {
+test("enables one reviewed Web Package prepare or update action", () => {
   assert.match(
     appSource,
     /function canBuildPublishPlan/,
   );
   assert.match(
     appSource,
-    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update public package[\s\S]*?Publish public package/,
+    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update Web Package[\s\S]*?Prepare for Web/,
   );
   assert.match(
     appSource,
@@ -60,6 +60,6 @@ test("exposes the guarded public-package endpoint and write-enabled location", (
   );
   assert.match(
     locationsSource,
-    /label: "Public output"[\s\S]*?writeEnabled: true/,
+    /label: "Web Package"[\s\S]*?writeEnabled: true/,
   );
 });

@@ -35,23 +35,23 @@ const packageJson = JSON.parse(
 };
 
 test(
-  "Publish workspace exposes whole-fleet deployment verification and manifest refresh controls",
+  "Web Package workspace keeps fleet verification and package-index controls",
   () => {
     assert.match(
       appSource,
-      /Published-media fleet/,
+      /Web Package status/,
     );
     assert.match(
       appSource,
-      /Deployment snapshot/,
+      /publish-deployment-overview/,
     );
     assert.match(
       appSource,
-      /Verify snapshot/,
+      /Refresh status/,
     );
     assert.match(
       appSource,
-      /Create deployment manifest/,
+      /Create package index/,
     );
     assert.match(
       appSource,

@@ -1172,7 +1172,7 @@ export async function publishReleasePackage(
     options.expectedPublishPlanFingerprint
   ) {
     throw new Error(
-      "Publish preflight is stale. Refresh preflight before building the public package.",
+      "Public Package preflight is stale. Refresh preflight before building the local public package.",
     );
   }
 

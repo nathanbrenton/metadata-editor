@@ -36,7 +36,7 @@ test("Library release detail exposes technical health inside the release health 
   );
 });
 
-test("Publish preflight reuses the same per-release technical inspector without changing gating", () => {
+test("Web Package Ready Check reuses the same per-release technical inspector without changing gating", () => {
   assert.match(
     appSource,
     /<TechnicalReleaseInspector[\s\S]*summary=\{technicalByRelease\.get\(selectedPlan\.releaseId\)\}[\s\S]*compact/,

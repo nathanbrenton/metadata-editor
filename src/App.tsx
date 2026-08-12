@@ -19,12 +19,28 @@ import {
 
 import {
   buildAudioPreviewUrl,
-  getAdjacentPlayableTrackId,
-  getNextPlayableTrackId,
   getAudioPreviewSourceLabel,
   getPlayableTrackIds,
   trackHasAudioPreview,
 } from "./audio-preview.js";
+
+import {
+  PersistentLibraryPlayerBar,
+  usePersistentLibraryPlayback,
+  type PersistentLibraryPlaybackController,
+  type PersistentPlaybackTrack,
+} from "./PersistentLibraryPlayer.js";
+
+import {
+  WAVEFORM_COLOR_OPTIONS,
+  type WaveformColorMode,
+} from "./media-waveform.js";
+import { WaveformColorMenuCard } from "./WaveformColorMenuCard.js";
+import { buildLibraryWaveformUrl } from "./library-waveform.js";
+
+import {
+  LibraryWaveformView,
+} from "./LibraryWaveformView.js";
 
 import {
   buildIngestAudioPreviewUrl,
@@ -1591,6 +1607,23 @@ export function App() {
     });
   const [applicationView, setApplicationView] =
     useState<ApplicationView>("library");
+  const libraryPlayback =
+    usePersistentLibraryPlayback();
+  const [waveformColorMode, setWaveformColorMode] =
+    useState<WaveformColorMode>(() => {
+      try {
+        const stored = window.localStorage.getItem(
+          "metadata-editor.waveform-color-v1",
+        );
+        return WAVEFORM_COLOR_OPTIONS.some(
+          (option) => option.value === stored,
+        )
+          ? stored as WaveformColorMode
+          : "3band";
+      } catch {
+        return "3band";
+      }
+    });
   const [
     workflowHelpReturnTarget,
     setWorkflowHelpReturnTarget,
@@ -1657,6 +1690,17 @@ export function App() {
     useState(false);
   const applicationMenuRef =
     useRef<HTMLElement>(null);
+  const chooseWaveformColorMode = (mode: WaveformColorMode) => {
+    setWaveformColorMode(mode);
+    try {
+      window.localStorage.setItem(
+        "metadata-editor.waveform-color-v1",
+        mode,
+      );
+    } catch {
+      // Waveform color persistence is optional UI convenience.
+    }
+  };
   // Admin mode is opt-in and never survives a page load or restored page.
   const [showAdminTools, setShowAdminTools] =
     useState(false);
@@ -2179,7 +2223,7 @@ export function App() {
       (location) => location.id === "library",
     )?.sizeBytes;
     const publishedSize = workflowLocations.find(
-      (location) => location.id === "publish",
+      (location) => location.id === "public-package",
     )?.sizeBytes;
 
     return [
@@ -2188,7 +2232,7 @@ export function App() {
           ? "size unavailable"
           : formatByteSize(librarySize)
       }`,
-      `Published ${
+      `Web Package ${
         publishedSize === undefined
           ? "size unavailable"
           : formatByteSize(publishedSize)
@@ -2237,6 +2281,9 @@ export function App() {
           }}
           onOpenWorkflowHelp={openWorkflowHelp}
           onNavigateWorkflow={navigateWorkflowView}
+          playback={libraryPlayback}
+          waveformColorMode={waveformColorMode}
+          onWaveformColorModeChange={chooseWaveformColorMode}
         />
       ) : (
         <>
@@ -2269,7 +2316,8 @@ export function App() {
 
             <div className="page-header-actions">
               {(applicationView === "library" ||
-                applicationView === "publish") &&
+                applicationView === "public-package" ||
+                applicationView === "production") &&
                 scan && (
                   <p className="scan-time">
                     Library scan:{" "}
@@ -2342,7 +2390,7 @@ export function App() {
               )}
 
               {(applicationView === "library" ||
-                applicationView === "publish") && (
+                applicationView === "public-package") && (
                 <button
                   type="button"
                   className="page-header-refresh-button"
@@ -2390,6 +2438,12 @@ export function App() {
                 </p>
               </section>
 
+              <WaveformColorMenuCard
+                playback={libraryPlayback}
+                colorMode={waveformColorMode}
+                onColorModeChange={chooseWaveformColorMode}
+              />
+
               <section className="menu-card">
                 <h2>Admin</h2>
                 <label className="admin-toggle">
@@ -2422,7 +2476,8 @@ export function App() {
               applicationView === "ingest" ||
               applicationView === "staging" ||
               applicationView === "library" ||
-              applicationView === "publish"
+              applicationView === "public-package" ||
+              applicationView === "production"
                 ? applicationView
                 : null
             }
@@ -2472,6 +2527,7 @@ export function App() {
                 setIngestInspection(null);
                 setIngestIdentityOverride(null);
               }}
+              playback={libraryPlayback}
               onOpenStaging={(identityOverride) => {
                 setIngestIdentityOverride(identityOverride);
                 setIngestInspection((current) =>
@@ -2520,9 +2576,12 @@ export function App() {
                 );
               }}
               onNotify={notify}
+              playback={libraryPlayback}
             />
-          ) : applicationView === "publish" ? (
+          ) : applicationView === "public-package" ||
+              applicationView === "production" ? (
             <PublishWorkspace
+              mode={applicationView === "production" ? "production" : "public-package"}
               releases={scan?.releases ?? []}
               workflowLocations={workflowLocations}
               loading={loading}
@@ -2562,6 +2621,8 @@ export function App() {
                     onNotify={notify}
                     technicalAudit={mediaTechnicalAudit}
                     technicalByRelease={mediaTechnicalByRelease}
+                    playback={libraryPlayback}
+                    waveformColorMode={waveformColorMode}
                   />
 
                 </>
@@ -2582,6 +2643,11 @@ export function App() {
           )}
         </>
       )}
+      <PersistentLibraryPlayerBar
+        playback={libraryPlayback}
+        colorMode={waveformColorMode}
+      />
+
       <footer className="app-footer">
         <p
           className="footer-summary"
@@ -4639,7 +4705,7 @@ function technicalContractTitle(
   contract: MediaTechnicalContract,
 ): string {
   return [
-    "Technical Media Contract v1 is advisory and does not change Publish gating.",
+    "Technical Media Contract v1 is advisory and does not change Web Package readiness.",
     `Audio: ${contract.audio.preferredLossless} preferred lossless · ${contract.audio.compatibleLossless} compatible lossless · ${contract.audio.sourcePreservedLossy} source-preserved lossy · ${contract.audio.review} review.`,
     `Artwork: ${contract.artwork.preferred} preferred · ${contract.artwork.compatible} compatible · ${contract.artwork.review} review.`,
     `Video: ${contract.video.total} inventory-only masters; no codec/profile quality threshold.`,
@@ -4692,7 +4758,7 @@ function TechnicalHealthBadge({
     <span
       className={`badge ${technicalHealthTone(summary.health)} technical-health-badge`}
       title={[
-        "Advisory technical health only; this does not change Publish gating.",
+        "Advisory technical health only; this does not change Web Package readiness.",
         issueTitle,
       ]
         .filter(Boolean)
@@ -4819,7 +4885,7 @@ function TechnicalReleaseInspector({
           className="technical-release-policy"
           title={technicalContractTitle(contract)}
         >
-          Contract v{contract.version} · advisory · preserve source masters · no Publish gating
+          Contract v{contract.version} · advisory · preserve source masters · no Web Package gating
         </p>
       )}
 
@@ -4967,6 +5033,7 @@ function StagingWorkspace({
   onOpenRelease,
   onReleaseCreated,
   onNotify,
+  playback,
 }: {
   inspection: IngestCandidateInspection | null;
   identitySeed: IngestDraftIdentitySeed | null;
@@ -4982,6 +5049,7 @@ function StagingWorkspace({
     message: string,
     tone?: ToastMessage["tone"],
   ) => void;
+  playback: PersistentLibraryPlaybackController;
 }) {
   const [sortMode, setSortMode] =
     useState<LibraryReleaseSortMode>("date-desc");
@@ -5008,6 +5076,7 @@ function StagingWorkspace({
           onCancel={onBackToInspection}
           onReleaseCreated={onReleaseCreated}
           onNotify={onNotify}
+          playback={playback}
         />
       </Suspense>
     );
@@ -5240,7 +5309,7 @@ function assessPublishReadiness(
     metadataLabel: readinessBadgeLabel(metadata),
     metadataTone: readinessTone(metadata),
     masterLabel: `${readyMasters}/${trackCount}`,
-    streamLabel: "Checked in preflight",
+    streamLabel: "Checked in Ready Check",
     artworkLabel: `${artworkCount}`,
   };
 
@@ -5302,10 +5371,10 @@ function assessPublishReadiness(
 
   return {
     ...base,
-    preflightLabel: "Ready to preflight",
+    preflightLabel: "Ready Check",
     preflightTone: "preview",
     note:
-      "Canonical sources are present. HLS web streams, waveforms, and exact destinations are checked by preflight.",
+      "Canonical sources are present. HLS web streams, waveforms, and exact destinations are checked by Ready Check.",
   };
 }
 
@@ -5491,7 +5560,7 @@ function publishPreflightStatus(
   }
 
   if (publicPackageIsUpToDate(plan)) {
-    return { label: "Published · current", tone: "success" };
+    return { label: "Up to date", tone: "success" };
   }
 
   return { label: "Ready", tone: "preview" };
@@ -5629,10 +5698,10 @@ function publishPreflightHeadline(
   }
 
   if (publicPackageIsUpToDate(plan)) {
-    return "Public package is up to date";
+    return "Web Package is up to date";
   }
 
-  return "Preflight passed";
+  return "Ready Check passed";
 }
 
 function publishPreflightGuidance(
@@ -5655,7 +5724,7 @@ function publishPreflightGuidance(
     plan.derivatives.blockedCount > 0 ||
     hasNonDerivativePublishBlockers(plan)
   ) {
-    return "Preflight found blocking issues. Resolve them before a public package can be built.";
+    return "Ready Check found blocking issues. Resolve them before the Web Package can be prepared.";
   }
 
   if (
@@ -5673,7 +5742,7 @@ function publishPreflightGuidance(
     return "The current canonical metadata and public media inputs match the published snapshot. No public-package update is required.";
   }
 
-  return "The release passed preflight and is ready for the host-ready audio-player stream package.";
+  return "Ready Check passed. This release can be prepared for the Hiplingo web app.";
 }
 
 function publishNextStepLabel(
@@ -5703,12 +5772,12 @@ function publishNextStepLabel(
   }
 
   if (publicPackageIsUpToDate(plan)) {
-    return "Public package is up to date";
+    return "Web Package is up to date";
   }
 
   return publicReleaseAlreadyExists(plan)
-    ? "Update public package"
-    : "Publish public package";
+    ? "Update Web Package"
+    : "Prepare for Web";
 }
 
 function latestPublishOperationForRelease(
@@ -5742,7 +5811,7 @@ function publishOperationBadge(
       label:
         operation.mode === "unpublish"
           ? "Unpublish failed"
-          : "Publish failed",
+          : "Package build failed",
       tone: "missing",
     };
   }
@@ -5752,7 +5821,7 @@ function publishOperationBadge(
       label:
         operation.mode === "unpublish"
           ? "Unpublishing"
-          : "Publishing",
+          : "Building package",
       tone: "preview",
     };
   }
@@ -5781,6 +5850,7 @@ function unresolvedPublishOperationForRelease(
 }
 
 function PublishWorkspace({
+  mode,
   releases,
   workflowLocations,
   loading,
@@ -5790,6 +5860,7 @@ function PublishWorkspace({
   technicalAudit,
   technicalByRelease,
 }: {
+  mode: "public-package" | "production";
   releases: ReleaseScanResult[];
   workflowLocations: WorkflowLocationDisplay[];
   loading: boolean;
@@ -5917,7 +5988,7 @@ function PublishWorkspace({
         throw new Error(
           "error" in payload && payload.error
             ? payload.error
-            : "Unable to refresh the deployment manifest.",
+            : "Unable to refresh the package index.",
         );
       }
 
@@ -5930,7 +6001,7 @@ function PublishWorkspace({
       setPublishFleetError(
         manifestError instanceof Error
           ? manifestError.message
-          : "Unable to refresh the deployment manifest.",
+          : "Unable to refresh the package index.",
       );
     } finally {
       setDeploymentManifestLoading(false);
@@ -6046,7 +6117,7 @@ function PublishWorkspace({
       !allowPendingLibraryDeployment
     ) {
       setDeploymentSyncError(
-        `${pendingLibraryChanges} published ${pendingLibraryChanges === 1 ? "release has" : "releases have"} pending Library changes. Update the public package first, or explicitly allow deployment of the older public snapshot.`,
+        `${pendingLibraryChanges} published ${pendingLibraryChanges === 1 ? "release has" : "releases have"} pending Library changes. Update the Web Package first, or explicitly allow deployment of the older web snapshot.`,
       );
       return;
     }
@@ -6218,8 +6289,17 @@ function PublishWorkspace({
   }, [loadPublishFleet, releases]);
 
   useEffect(() => {
-    void loadDeploymentTargetStatus();
-  }, [loadDeploymentTargetStatus]);
+    if (mode === "production") {
+      void loadDeploymentTargetStatus("production");
+    }
+  }, [loadDeploymentTargetStatus, mode]);
+
+  useEffect(() => {
+    if (mode === "production") {
+      setSelectedPlan(null);
+      setPlanError(null);
+    }
+  }, [mode]);
 
   const loadPublishPlan = useCallback(async (
     releaseId: string,
@@ -6239,7 +6319,7 @@ function PublishWorkspace({
         throw new Error(
           "error" in payload && payload.error
             ? payload.error
-            : "Unable to build the publish preflight plan.",
+            : "Unable to run the Web Package ready check.",
         );
       }
 
@@ -6248,7 +6328,7 @@ function PublishWorkspace({
       setPlanError(
         planRequestError instanceof Error
           ? planRequestError.message
-          : "Unable to build the publish preflight plan.",
+          : "Unable to run the Web Package ready check.",
       );
     } finally {
       setPlanLoadingReleaseId(null);
@@ -6717,7 +6797,7 @@ function PublishWorkspace({
         `Public path: ${planPayload.destinationReleaseRelativePath}\n\n` +
         "This removes only the sanitized public package and catalog membership. " +
         "The canonical Library release and masters are not deleted.\n\n" +
-        "Afterward, refresh the deployment manifest and deploy the resulting removal to sandbox/production.",
+        "Afterward, refresh the package index and review the resulting Live removal.",
       );
 
       if (!reviewed) {
@@ -6772,7 +6852,7 @@ function PublishWorkspace({
       ]);
 
       onNotify(
-        `Unpublished ${label} · ${payload.removedFileCount} public files removed. Refresh the deployment manifest before deployment.`,
+        `Unpublished ${label} · ${payload.removedFileCount} public files removed. Refresh the package index before reviewing Live changes.`,
         "success",
       );
     } catch (unpublishError) {
@@ -6802,67 +6882,165 @@ function PublishWorkspace({
   const deploymentBadge = deploymentAudit?.deployable
     ? hasPendingLibraryChanges
       ? {
-          label: "Snapshot valid · Library updates pending",
+          label: `${pendingLibraryChangesCount} Library ${pendingLibraryChangesCount === 1 ? "update" : "updates"} ready`,
           tone: "warning",
         }
-      : { label: "Deployment ready", tone: "success" }
+      : { label: "Web Package ready", tone: "success" }
     : deploymentAudit?.status === "blocked"
-      ? { label: "Deployment blocked", tone: "missing" }
+      ? { label: "Needs attention", tone: "missing" }
       : deploymentAudit?.status === "empty"
-        ? { label: "No public snapshot", tone: "preview" }
+        ? { label: "No web releases", tone: "preview" }
         : deploymentAudit
-          ? { label: "Manifest refresh needed", tone: "warning" }
-          : { label: "Deployment not checked", tone: "preview" };
+          ? { label: "Package index needs refresh", tone: "warning" }
+          : { label: "Status not refreshed", tone: "preview" };
+
+  const publishFleetByReleaseId = new Map<string, PublishFleetRelease>(
+    publishFleet?.releases.map((release) => [release.releaseId, release]) ?? [],
+  );
+
+  const workspaceReleases = mode === "production"
+    ? sortedReleases.filter((release) => {
+        const fleetRelease = publishFleetByReleaseId.get(release.id);
+        return fleetRelease && fleetRelease.publicationState !== "not-published";
+      })
+    : sortedReleases;
+
+  const liveReleaseStatus = (releaseId: string): { label: string; tone: string } => {
+    if (!deploymentTargetStatus?.configured) {
+      return { label: "Live not connected", tone: "preview" };
+    }
+
+    if (!deploymentSyncPlan) {
+      return { label: "Live not checked", tone: "preview" };
+    }
+
+    if (deploymentSyncPlan.status === "current") {
+      return { label: "Up to date", tone: "success" };
+    }
+
+    const releasePrefix = `releases/${releaseId}/`;
+    const releaseChanges = deploymentSyncPlan.changes.filter((change) =>
+      change.path === `releases/${releaseId}` || change.path.startsWith(releasePrefix)
+    );
+
+    if (releaseChanges.some((change) => change.action === "update")) {
+      return { label: "Update ready", tone: "warning" };
+    }
+
+    if (releaseChanges.some((change) => change.action === "add")) {
+      return { label: "Not live yet", tone: "preview" };
+    }
+
+    if (releaseChanges.some((change) => change.action === "remove")) {
+      return { label: "Removal ready", tone: "warning" };
+    }
+
+    return { label: "Up to date", tone: "success" };
+  };
+
+  const webPackageReleaseStatus = (releaseId: string): { label: string; tone: string } => {
+    const fleetRelease = publishFleetByReleaseId.get(releaseId);
+
+    if (!fleetRelease) {
+      return { label: "Not checked", tone: "preview" };
+    }
+
+    if (fleetRelease.planStatus === "blocked") {
+      return { label: "Needs attention", tone: "missing" };
+    }
+
+    if (fleetRelease.needsPreparation) {
+      return { label: "Needs preparation", tone: "warning" };
+    }
+
+    if (fleetRelease.publicationState === "up-to-date") {
+      return { label: "Prepared", tone: "success" };
+    }
+
+    if (fleetRelease.publicationState === "update-available") {
+      return { label: "Update ready", tone: "warning" };
+    }
+
+    return { label: "Not prepared", tone: "preview" };
+  };
 
   return (
-    <section className="workflow-workspace publish-workspace">
+    <section className={`workflow-workspace publish-workspace ${
+      mode === "production"
+        ? "production-workspace"
+        : "public-package-workspace"
+    }`}>
       <header className="workflow-workspace-header publish-workspace-header">
         <div className="publish-workspace-header-copy">
-          <p className="eyebrow">Step 4 · Publish</p>
-          <h2>Preflight and package releases</h2>
+          <p className="eyebrow">
+            {mode === "production"
+              ? "Step 5 · Live"
+              : "Step 4 · Web Package"}
+          </p>
+          <h2>
+            {mode === "production"
+              ? "Compare Web Package with Live"
+              : "Prepare releases for the web"}
+          </h2>
           <p>
-            Review canonical readiness, prepare reproducible web media when
-            needed, then publish or update the sanitized player-facing media snapshot.
+            {mode === "production"
+              ? "Live shows what Hiplingo visitors can currently access. Compare it with the Web Package before publishing any changes."
+              : "Web Package contains the sanitized releases prepared for the Hiplingo web app. Preparing or updating a release here does not make it live."}
           </p>
         </div>
         <div className="workflow-workspace-actions publish-workspace-actions">
           <div className="publish-workspace-action-row">
-            <TechnicalAuditSummaryBadge audit={technicalAudit} />
-            <span
-              className="badge warning publish-read-only-status"
-              role="status"
-              title="Preflight planning is read-only. Choose a release row to open its preflight; planning itself writes nothing."
-            >
-              Read-only preflight
-            </span>
+            {mode === "public-package" ? (
+              <>
+                <TechnicalAuditSummaryBadge audit={technicalAudit} />
+                <span
+                  className="badge warning publish-read-only-status"
+                  role="status"
+                  title="Ready Check is read-only. Choose a release to see what is ready and what still needs preparation."
+                >
+                  Ready Check · read-only
+                </span>
+              </>
+            ) : (
+              <span className="badge preview publish-read-only-status" role="status">
+                Comparison is read-only
+              </span>
+            )}
           </div>
           <div
             className="publish-header-storage-boundary"
-            aria-label="Publish storage boundary"
+            aria-label="Web Package storage boundary"
           >
             <div className="private">
-              <span>Private canonical source</span>
+              <span>{mode === "production" ? "Web Package" : "Library"}</span>
               <code
                 title={
                   workflowLocations.find(
-                    (location) => location.id === "library",
-                  )?.displayPath ?? "Configured Library root"
+                    (location) =>
+                      location.id === (mode === "production" ? "public-package" : "library"),
+                  )?.displayPath ??
+                    (mode === "production"
+                      ? "Configured published-media root"
+                      : "Configured Library root")
                 }
               >
-                media-library
+                {mode === "production" ? "published-media" : "media-library"}
               </code>
             </div>
             <span className="publish-location-arrow" aria-hidden="true">→</span>
             <div className="planned">
-              <span>Sanitized public output</span>
+              <span>{mode === "production" ? "Live on Hiplingo" : "Web-ready output"}</span>
               <code
                 title={
-                  workflowLocations.find(
-                    (location) => location.id === "publish",
-                  )?.displayPath ?? "Configured published-media root"
+                  mode === "production"
+                    ? deploymentTargetStatus?.target?.display ??
+                      "/var/www/hiplingo.com/published-media"
+                    : workflowLocations.find(
+                        (location) => location.id === "public-package",
+                      )?.displayPath ?? "Configured published-media root"
                 }
               >
-                published-media
+                {mode === "production" ? "Live" : "Web Package"}
               </code>
             </div>
           </div>
@@ -6916,10 +7094,14 @@ function PublishWorkspace({
       >
         <header className="publish-deployment-overview-header">
           <div>
-            <span className="publish-deployment-kicker">Published-media fleet</span>
-            <h3>Deployment snapshot</h3>
+            <span className="publish-deployment-kicker">
+              {mode === "production" ? "Web Package → Live" : "Web Package"}
+            </span>
+            <h3>{mode === "production" ? "Web Package → Live" : "Web Package status"}</h3>
             <p>
-              Verify the complete sanitized catalog before it is staged for the public server.
+              {mode === "production"
+                ? "Refresh the Web Package status, then compare it read-only with what is live on Hiplingo."
+                : "See which releases are prepared for the web and which still need attention."}
             </p>
           </div>
           <div className="publish-deployment-actions">
@@ -6935,121 +7117,140 @@ function PublishWorkspace({
               onClick={() => void loadPublishFleet()}
             >
               {publishFleetLoading
-                ? "Verifying…"
-                : "Verify snapshot"}
+                ? "Refreshing…"
+                : "Refresh status"}
             </button>
-            <button
-              type="button"
-              className="primary"
-              disabled={
-                deploymentManifestLoading ||
-                publishFleetLoading ||
-                publishLoading ||
-                prepareLoading ||
-                batchPrepareLoading ||
-                !deploymentAudit ||
-                deploymentAudit.summary.blockedCount > 0
-              }
-              onClick={() => void refreshDeploymentManifest()}
-              title="Hash the verified public catalog and every manifest-controlled public resource into deployment-manifest.json. This writes only inside published-media and does not deploy to a server."
-            >
-              {deploymentManifestLoading
-                ? "Refreshing manifest…"
-                : deploymentAudit?.deploymentManifest.current
-                  ? "Refresh deployment manifest"
-                  : "Create deployment manifest"}
-            </button>
+
           </div>
         </header>
 
         {publishFleet ? (
           <>
-            <div className="publish-fleet-summary-grid">
-              <div>
-                <span>Library releases</span>
-                <strong>{publishFleet.summary.libraryReleaseCount}</strong>
-              </div>
-              <div>
-                <span>Public catalog</span>
-                <strong>{publishFleet.summary.publicCatalogCount}</strong>
-              </div>
-              <div>
-                <span>Published-only</span>
-                <strong>{publishFleet.summary.publishedOnlyCount}</strong>
-              </div>
-              <div>
-                <span>Published · current</span>
-                <strong>{publishFleet.summary.currentCount}</strong>
-              </div>
-              <div>
-                <span>Update available</span>
-                <strong>{publishFleet.summary.updateAvailableCount}</strong>
-              </div>
-              <div>
-                <span>Not published</span>
-                <strong>{publishFleet.summary.notPublishedCount}</strong>
-              </div>
-              <div>
-                <span>Needs preparation</span>
-                <strong>{publishFleet.summary.needsPreparationCount}</strong>
-              </div>
-              <div>
-                <span>Blocked releases</span>
-                <strong>{publishFleet.summary.blockedCount}</strong>
-              </div>
+            <div className="publish-fleet-summary-grid publish-fleet-summary-grid-compact">
+              {mode === "production" ? (
+                <>
+                  <div>
+                    <span>Web Package</span>
+                    <strong>{publishFleet.summary.publicCatalogCount} releases</strong>
+                  </div>
+                  <div>
+                    <span>Live</span>
+                    <strong>
+                      {!deploymentTargetStatus?.configured
+                        ? "Not connected"
+                        : deploymentSyncPlan?.status === "current"
+                          ? "Up to date"
+                          : deploymentSyncPlan?.status === "changes"
+                            ? `${deploymentSyncPlan.summary.changeCount} changes ready`
+                            : "Check required"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>New / updated</span>
+                    <strong>
+                      {deploymentSyncPlan?.status === "changes"
+                        ? `${deploymentSyncPlan.summary.addCount} / ${deploymentSyncPlan.summary.updateCount}`
+                        : "—"}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Removals</span>
+                    <strong>
+                      {deploymentSyncPlan?.status === "changes"
+                        ? deploymentSyncPlan.summary.removeCount
+                        : "—"}
+                    </strong>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <span>Prepared for web</span>
+                    <strong>{publishFleet.summary.publicCatalogCount}</strong>
+                  </div>
+                  <div>
+                    <span>Up to date</span>
+                    <strong>{publishFleet.summary.currentCount}</strong>
+                  </div>
+                  <div>
+                    <span>Updates ready</span>
+                    <strong>{publishFleet.summary.updateAvailableCount}</strong>
+                  </div>
+                  <div>
+                    <span>Needs preparation</span>
+                    <strong>{publishFleet.summary.needsPreparationCount}</strong>
+                  </div>
+                </>
+              )}
             </div>
 
-            <div className="publish-deployment-integrity-line">
-              <strong>
-                {deploymentAudit?.summary.readyReleaseCount ?? 0}/
-                {deploymentAudit?.summary.releaseDirectoryCount ?? 0} published release packages verified
-              </strong>
-              <span>
-                {deploymentAudit
-                  ? `${deploymentAudit.summary.fileCount} manifest-controlled files · ${formatByteSize(deploymentAudit.summary.totalBytes)}`
-                  : "No deployment audit loaded"}
-              </span>
-              <span>
-                Deployment manifest: {deploymentAudit?.deploymentManifest.current
-                  ? "current"
-                  : deploymentAudit?.deploymentManifest.exists
-                    ? "stale"
-                    : "missing"}
-              </span>
-            </div>
+            {mode === "public-package" && (
+              <details className="publish-package-details">
+                <summary>Package details</summary>
+                <div className="publish-package-details-actions">
+                  <button
+                    type="button"
+                    disabled={
+                      deploymentManifestLoading ||
+                      publishFleetLoading ||
+                      publishLoading ||
+                      prepareLoading ||
+                      batchPrepareLoading ||
+                      !deploymentAudit ||
+                      deploymentAudit.summary.blockedCount > 0
+                    }
+                    onClick={() => void refreshDeploymentManifest()}
+                    title="Refresh the internal package index used for safe Live comparison. This changes only published-media and never deploys."
+                  >
+                    {deploymentManifestLoading
+                      ? "Refreshing package index…"
+                      : deploymentAudit?.deploymentManifest.current
+                        ? "Refresh package index"
+                        : "Create package index"}
+                  </button>
+                </div>
+                <div className="publish-deployment-integrity-line">
+                  <strong>
+                    {deploymentAudit?.summary.readyReleaseCount ?? 0}/
+                    {deploymentAudit?.summary.releaseDirectoryCount ?? 0} web release packages verified
+                  </strong>
+                  <span>
+                    {deploymentAudit
+                      ? `${deploymentAudit.summary.fileCount} files · ${formatByteSize(deploymentAudit.summary.totalBytes)}`
+                      : "Package details have not been refreshed"}
+                  </span>
+                  <span>
+                    Package index: {deploymentAudit?.deploymentManifest.current
+                      ? "current"
+                      : deploymentAudit?.deploymentManifest.exists
+                        ? "needs refresh"
+                        : "not created"}
+                  </span>
+                </div>
 
-            <div
-              className={`publish-library-freshness-gate ${hasPendingLibraryChanges ? "warning" : "current"}`}
-              role={hasPendingLibraryChanges ? "alert" : "status"}
-            >
-              <div>
-                <span>Public snapshot integrity</span>
-                <strong>
-                  {deploymentAudit?.deployable ? "Ready" : "Needs review"}
-                </strong>
-              </div>
-              <div>
-                <span>Library changes pending</span>
-                <strong>{pendingLibraryChangesCount}</strong>
-              </div>
-              <div>
-                <span>Deployment manifest</span>
-                <strong>
-                  {deploymentAudit?.deploymentManifest.current
-                    ? "Current"
-                    : deploymentAudit?.deploymentManifest.exists
-                      ? "Stale"
-                      : "Missing"}
-                </strong>
-              </div>
-              <p>
-                {hasPendingLibraryChanges
-                  ? `${pendingLibraryChangesCount} published ${pendingLibraryChangesCount === 1 ? "release has" : "releases have"} Library changes that are not in the public snapshot yet. Run Update public package for ${pendingLibraryChangesCount === 1 ? "that release" : "those releases"} before deploying the newest Library state.`
-                  : "No published releases have pending Library changes. Not-published Library releases remain intentionally outside the deployment snapshot."}
-              </p>
-            </div>
+                <div
+                  className={`publish-library-freshness-gate ${hasPendingLibraryChanges ? "warning" : "current"}`}
+                  role={hasPendingLibraryChanges ? "alert" : "status"}
+                >
+                  <div>
+                    <span>Web Package</span>
+                    <strong>{deploymentAudit?.deployable ? "Ready" : "Needs review"}</strong>
+                  </div>
+                  <div>
+                    <span>Library updates</span>
+                    <strong>{pendingLibraryChangesCount}</strong>
+                  </div>
+                  <p>
+                    {hasPendingLibraryChanges
+                      ? `${pendingLibraryChangesCount} prepared ${pendingLibraryChangesCount === 1 ? "release has" : "releases have"} newer Library changes. Update the Web Package before publishing those changes Live.`
+                      : "Prepared releases match their current Library inputs."}
+                  </p>
+                </div>
+              </details>
+            )}
 
-            {publishFleet.summary.publishedOnlyCount > 0 && (
+            {mode === "public-package" &&
+              publishFleet.summary.publishedOnlyCount > 0 && (
               <aside
                 className="publish-public-only-membership"
                 aria-label="Published releases missing from the Library"
@@ -7104,11 +7305,12 @@ function PublishWorkspace({
               </aside>
             )}
 
+            {mode === "production" && (
             <div className="publish-host-boundary">
               <div className="publish-host-boundary-heading">
                 <div>
-                  <span className="publish-deployment-kicker">Host boundary · Deployment environment</span>
-                  <strong>{deploymentTargetStatus?.profile.label ?? "Deployment target"}</strong>
+                  <span className="publish-deployment-kicker">Live connection</span>
+                  <strong>{deploymentTargetStatus?.profile.label ?? "Live target"}</strong>
                 </div>
                 <div className="publish-host-boundary-actions">
                   <span
@@ -7125,10 +7327,10 @@ function PublishWorkspace({
                     {!deploymentTargetStatus?.configured
                       ? "Not configured"
                       : deploymentSyncPlan?.status === "current"
-                        ? "Deployment current"
+                        ? "Live is up to date"
                         : deploymentSyncPlan?.status === "changes"
-                          ? "Remote differs"
-                          : "Host not checked"}
+                          ? "Changes ready"
+                          : "Live not checked"}
                   </span>
                   <button
                     type="button"
@@ -7142,11 +7344,16 @@ function PublishWorkspace({
                     title="Run a checksum-based rsync dry-run against the configured local or SSH target. This comparison is read-only."
                   >
                     {deploymentSyncPlanLoading
-                      ? "Checking host…"
-                      : "Check host"}
+                      ? "Checking Live…"
+                      : mode === "production"
+                        ? "Check Live"
+                        : "Check Live"}
                   </button>
                 </div>
               </div>
+
+              <details className="publish-live-connection-details">
+                <summary>Connection & deployment details</summary>
 
               {deploymentTargetStatus && (
                 <div
@@ -7207,8 +7414,8 @@ function PublishWorkspace({
                     <div className="publish-host-sync-summary">
                       <strong>
                         {deploymentSyncPlan.status === "current"
-                          ? "The deployed target matches this verified snapshot."
-                          : `${deploymentSyncPlan.summary.changeCount} host changes planned`}
+                          ? "Live matches the current Web Package."
+                          : `${deploymentSyncPlan.summary.changeCount} changes ready`}
                       </strong>
                       {deploymentSyncPlan.status === "changes" && (
                         <span>
@@ -7283,7 +7490,7 @@ function PublishWorkspace({
                   {deploymentSyncPlan?.status === "changes" && (
                     <details className="publish-host-sync-plan">
                       <summary>
-                        Reviewed host sync plan · {deploymentSyncPlan.summary.changeCount} changes
+                        Review changes · {deploymentSyncPlan.summary.changeCount}
                       </summary>
                       <div className="publish-host-sync-command">
                         <span>Guarded deploy command</span>
@@ -7333,8 +7540,8 @@ function PublishWorkspace({
                 <div className="publish-host-boundary-unconfigured">
                   {deploymentTargetStatus?.profile.name === "production" ? (
                     <>
-                      <span>The production host is intentionally optional. Local Library, Prepare, Publish, and deployment-sandbox work do not require SSH.</span>
-                      <code>PUBLISHED_MEDIA_PRODUCTION_TARGET=ssh:user@host:/var/www/hiplingo.com/published-media</code>
+                      <span>Live is not connected yet. Connection uses only the existing SSH alias boundary; credentials, keys, server IPs, and raw SSH configuration stay outside metadata-editor.</span>
+                      <code>PUBLISHED_MEDIA_PRODUCTION_TARGET=ssh:hiplingo-prod:/var/www/hiplingo.com/published-media</code>
                     </>
                   ) : (
                     <>
@@ -7363,12 +7570,14 @@ function PublishWorkspace({
                   <p>Frontend releases and published media are independent deployment lifecycles. Frontend rollback must not roll back or erase published media.</p>
                 </details>
               )}
+              </details>
             </div>
+            )}
 
             {deploymentAudit && deploymentAudit.issues.length > 0 && (
               <details className="publish-deployment-issues">
                 <summary>
-                  Deployment checks · {deploymentAudit.summary.blockedCount} blockers · {deploymentAudit.summary.warningCount} warnings
+                  Package checks · {deploymentAudit.summary.blockedCount} blockers · {deploymentAudit.summary.warningCount} warnings
                 </summary>
                 <ol>
                   {deploymentAudit.issues.map((issue, index) => (
@@ -7387,8 +7596,8 @@ function PublishWorkspace({
         ) : (
           <p className="publish-deployment-loading">
             {publishFleetLoading
-              ? "Verifying the published-media fleet…"
-              : "Deployment snapshot has not been verified yet."}
+              ? "Refreshing Web Package status…"
+              : "Web Package status has not been refreshed yet."}
           </p>
         )}
       </section>
@@ -7414,7 +7623,7 @@ function PublishWorkspace({
                 <option value="library">Library order</option>
               </select>
             </label>
-            {selectedBatchReleaseIds.size > 0 && (
+            {mode === "public-package" && selectedBatchReleaseIds.size > 0 && (
               <button
                 type="button"
                 className="publish-batch-prepare-button"
@@ -7424,118 +7633,125 @@ function PublishWorkspace({
                   publishLoading
                 }
                 onClick={() => void prepareSelectedReleases()}
-                title="Prepare missing or stale private MP3, HLS, waveform, and browser-artwork derivatives for the selected releases in a sequential queue. Publishing remains per release."
+                title="Prepare missing or stale private MP3, HLS, waveform, and browser-artwork derivatives for the selected releases in a sequential queue. Web Package preparation remains per release."
               >
                 {batchPrepareLoading
                   ? "Preparing selected…"
                   : `Prepare selected (${selectedBatchReleaseIds.size})`}
               </button>
             )}
-            <strong>{releases.length} releases</strong>
+            <strong>{workspaceReleases.length} releases</strong>
           </div>
         </header>
 
         <div className="workflow-table-scroll">
           <table className="workflow-workspace-table publish-readiness-table">
             <thead>
-              <tr>
-                <th scope="col" className="publish-batch-select-column">
-                  <span className="visually-hidden">Batch prepare</span>
-                </th>
-                <th scope="col">Release</th>
-                <th scope="col">Sources</th>
-                <th scope="col">Public media</th>
-                <th scope="col">Status</th>
-              </tr>
+              {mode === "production" ? (
+                <tr>
+                  <th scope="col">Release</th>
+                  <th scope="col">Web Package</th>
+                  <th scope="col">Live</th>
+                </tr>
+              ) : (
+                <tr>
+                  <th scope="col" className="publish-batch-select-column">
+                    <span className="visually-hidden">Batch prepare</span>
+                  </th>
+                  <th scope="col">Release</th>
+                  <th scope="col">Ready</th>
+                  <th scope="col">Web Package</th>
+                </tr>
+              )}
             </thead>
             <tbody>
-              {releases.length === 0 ? (
+              {workspaceReleases.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="workflow-empty-cell">
-                    No releases are available for readiness review.
+                  <td
+                    colSpan={mode === "production" ? 3 : 4}
+                    className="workflow-empty-cell"
+                  >
+                    {mode === "production"
+                      ? "No Web Package releases are available to compare with Live."
+                      : "No Library releases are available to prepare for the web."}
                   </td>
                 </tr>
               ) : (
-                sortedReleases.map((release) => {
-                  const assessment =
-                    assessPublishReadiness(release);
-                  const loadingPlan =
-                    planLoadingReleaseId === release.id;
-                  const selected =
-                    selectedPlan?.releaseId === release.id;
+                workspaceReleases.map((release) => {
+                  const assessment = assessPublishReadiness(release);
+                  const loadingPlan = planLoadingReleaseId === release.id;
+                  const selected = selectedPlan?.releaseId === release.id;
                   const releaseArtwork =
-                    selectReleaseFrontArtwork(
-                      release.artworkMasters,
-                    ) ??
-                    selectPreferredReleaseArtwork(
-                      release.artworkMasters,
-                    );
-                  const latestOperation =
-                    latestPublishOperationForRelease(
-                      publishOperations,
-                      release.id,
-                    );
-                  const operationBadge =
-                    publishOperationBadge(latestOperation);
-                  const batchSelected =
-                    selectedBatchReleaseIds.has(release.id);
+                    selectReleaseFrontArtwork(release.artworkMasters) ??
+                    selectPreferredReleaseArtwork(release.artworkMasters);
+                  const latestOperation = latestPublishOperationForRelease(
+                    publishOperations,
+                    release.id,
+                  );
+                  const operationBadge = publishOperationBadge(latestOperation);
+                  const batchSelected = selectedBatchReleaseIds.has(release.id);
+                  const webPackageStatus = webPackageReleaseStatus(release.id);
+                  const liveStatus = liveReleaseStatus(release.id);
 
                   return (
                     <tr
                       key={release.id}
                       className={[
                         "publish-release-row",
-                        selected ? "selected" : "",
-                        loadingPlan ? "is-loading" : "",
+                        selected && mode === "public-package" ? "selected" : "",
+                        loadingPlan && mode === "public-package" ? "is-loading" : "",
                       ].filter(Boolean).join(" ")}
-                      tabIndex={loadingPlan ? -1 : 0}
-                      aria-busy={loadingPlan || undefined}
-                      aria-label={`${loadingPlan ? "Loading preflight for" : "Open preflight for"} ${
-                        release.releaseTitle ??
-                        formatReleaseTitle(release.id)
-                      }`}
+                      tabIndex={mode === "public-package" && !loadingPlan ? 0 : undefined}
+                      aria-busy={mode === "public-package" && loadingPlan || undefined}
+                      aria-label={
+                        mode === "public-package"
+                          ? `${loadingPlan ? "Loading Ready Check for" : "Open Ready Check for"} ${
+                              release.releaseTitle ?? formatReleaseTitle(release.id)
+                            }`
+                          : `${release.releaseTitle ?? formatReleaseTitle(release.id)} · ${liveStatus.label}`
+                      }
                       onClick={() => {
-                        if (!loadingPlan) {
+                        if (mode === "public-package" && !loadingPlan) {
                           void loadPublishPlan(release.id);
                         }
                       }}
                       onKeyDown={(event) => {
                         if (
+                          mode !== "public-package" ||
                           loadingPlan ||
                           event.target !== event.currentTarget
                         ) {
                           return;
                         }
 
-                        if (
-                          event.key === "Enter" ||
-                          event.key === " "
-                        ) {
+                        if (event.key === "Enter" || event.key === " ") {
                           event.preventDefault();
                           void loadPublishPlan(release.id);
                         }
                       }}
                     >
-                      <td className="publish-batch-select-cell">
-                        <input
-                          type="checkbox"
-                          checked={batchSelected}
-                          aria-label={`Select ${release.releaseTitle ?? formatReleaseTitle(release.id)} for batch preparation`}
-                          onClick={(event) => event.stopPropagation()}
-                          onChange={(event) => {
-                            const checked = event.target.checked;
-                            setSelectedBatchReleaseIds((current) => {
-                              const next = new Set(current);
-                              if (checked) {
-                                next.add(release.id);
-                              } else {
-                                next.delete(release.id);
-                              }
-                              return next;
-                            });
-                          }}
-                        />
-                      </td>
+                      {mode === "public-package" && (
+                        <td className="publish-batch-select-cell">
+                          <input
+                            type="checkbox"
+                            checked={batchSelected}
+                            aria-label={`Select ${release.releaseTitle ?? formatReleaseTitle(release.id)} for batch preparation`}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={(event) => {
+                              const checked = event.target.checked;
+                              setSelectedBatchReleaseIds((current) => {
+                                const next = new Set(current);
+                                if (checked) {
+                                  next.add(release.id);
+                                } else {
+                                  next.delete(release.id);
+                                }
+                                return next;
+                              });
+                            }}
+                          />
+                        </td>
+                      )}
                       <th scope="row">
                         <div className="publish-release-cell">
                           <span
@@ -7544,9 +7760,7 @@ function PublishWorkspace({
                           >
                             {releaseArtwork ? (
                               <img
-                                src={artworkPreviewUrl(
-                                  releaseArtwork.relativePath,
-                                )}
+                                src={artworkPreviewUrl(releaseArtwork.relativePath)}
                                 alt=""
                                 loading="lazy"
                               />
@@ -7556,86 +7770,58 @@ function PublishWorkspace({
                               </span>
                             )}
                           </span>
-
                           <span className="publish-release-identity">
                             <strong>
-                              {release.releaseTitle ??
-                                formatReleaseTitle(release.id)}
+                              {release.releaseTitle ?? formatReleaseTitle(release.id)}
                             </strong>
                             {release.primaryArtistName && (
                               <span>{release.primaryArtistName}</span>
                             )}
-                            <code>{release.relativePath}</code>
                           </span>
                         </div>
                       </th>
-                      <td>
-                        <div className="publish-readiness-stack">
-                          <div>
-                            <span>Metadata</span>
-                            <span className={`badge ${assessment.metadataTone}`}>
-                              {assessment.metadataLabel}
+
+                      {mode === "public-package" ? (
+                        <>
+                          <td className="publish-status-cell publish-ready-check-cell">
+                            {operationBadge ? (
+                              <span className={`badge ${operationBadge.tone}`}>
+                                {operationBadge.label}
+                              </span>
+                            ) : (
+                              <span className={`badge ${assessment.preflightTone}`}>
+                                {assessment.preflightLabel}
+                              </span>
+                            )}
+                            {loadingPlan && (
+                              <small className="publish-row-loading" role="status">
+                                Checking…
+                              </small>
+                            )}
+                          </td>
+                          <td className="publish-status-cell">
+                            <span className={`badge ${webPackageStatus.tone}`}>
+                              {webPackageStatus.label}
                             </span>
-                          </div>
-                          <div>
-                            <span>File spec</span>
-                            <MediaFileSpecBadge release={release} />
-                          </div>
-                          <div>
-                            <span>Technical</span>
-                            <TechnicalHealthBadge
-                              summary={technicalByRelease.get(release.id)}
-                              loading={technicalAudit.loading}
-                              error={technicalAudit.error}
-                              prefix={false}
-                            />
-                          </div>
-                          <div>
-                            <span>Masters</span>
-                            <strong>{assessment.masterLabel}</strong>
-                          </div>
-                          <div>
-                            <span>Artwork</span>
-                            <strong>{assessment.artworkLabel}</strong>
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        <div className="publish-readiness-stack">
-                          <div>
-                            <span>Web stream</span>
-                            <small>{assessment.streamLabel}</small>
-                          </div>
-                          <div>
-                            <span>Waveforms</span>
-                            <small>Checked in preflight</small>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="publish-status-cell">
-                        {operationBadge ? (
-                          <span className={`badge ${operationBadge.tone}`}>
-                            {operationBadge.label}
-                          </span>
-                        ) : (
-                          <span className={`badge ${assessment.preflightTone}`}>
-                            {assessment.preflightLabel}
-                          </span>
-                        )}
-                        <span>
-                          {latestOperation && operationBadge
-                            ? `${latestOperation.phase.replaceAll("-", " ")} · ${latestOperation.recoveryReason ?? assessment.note}`
-                            : assessment.note}
-                        </span>
-                        {loadingPlan && (
-                          <small
-                            className="publish-row-loading"
-                            role="status"
-                          >
-                            Planning…
-                          </small>
-                        )}
-                      </td>
+                            <small>
+                              {assessment.streamLabel} · waveform checked in Ready Check
+                            </small>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="publish-status-cell">
+                            <span className={`badge ${webPackageStatus.tone}`}>
+                              {webPackageStatus.label}
+                            </span>
+                          </td>
+                          <td className="publish-status-cell live-status-cell">
+                            <span className={`badge ${liveStatus.tone}`}>
+                              {liveStatus.label}
+                            </span>
+                          </td>
+                        </>
+                      )}
                     </tr>
                   );
                 })
@@ -7649,7 +7835,7 @@ function PublishWorkspace({
         className="publish-operation-history"
       >
         <summary>
-          <span>Publish operation history</span>
+          <span>Web Package history</span>
           <span>
             {publishOperationsLoading
               ? "Loading…"
@@ -7686,8 +7872,8 @@ function PublishWorkspace({
                       {operation.mode === "unpublish"
                         ? "Unpublish"
                         : operation.mode === "update"
-                          ? "Update"
-                          : "Publish"}
+                          ? "Rebuild"
+                          : "Build"}
                     </td>
                     <td>
                       <span className={`badge ${
@@ -7750,15 +7936,15 @@ function PublishWorkspace({
             <p>
               {publishOperationsLoading
                 ? "Loading publish operations…"
-                : "No publish operations have been recorded yet."}
+                : "No Web Package operations have been recorded yet."}
             </p>
           )}
         </div>
       </details>
 
-      {selectedPlan && (
+      {selectedPlan && mode === "public-package" && (
         <MetadataFieldModal
-          title={`Publish preflight · ${
+          title={`Web Package Ready Check · ${
             releases.find(
               (release) =>
                 release.id === selectedPlan.releaseId,
@@ -7777,7 +7963,7 @@ function PublishWorkspace({
         >
           <section
             className="publish-plan-panel publish-plan-modal"
-            aria-label="Publish preflight result"
+            aria-label="Web Package Ready Check result"
           >
           <header>
             <div>
@@ -7809,7 +7995,7 @@ function PublishWorkspace({
             })()}
           </header>
 
-          <section className="publish-preflight-primary" aria-label="Publish next step">
+          <section className="publish-preflight-primary" aria-label="Web Package next step">
             <div className="publish-preflight-result-copy">
               <span className="eyebrow">Result</span>
               <strong>{publishPreflightHeadline(selectedPlan)}</strong>
@@ -7868,11 +8054,11 @@ function PublishWorkspace({
               )}
               {publicPackageIsUpToDate(selectedPlan) ? (
                 <div className="publish-package-current" role="status">
-                  <span className="badge success">✓ Published · current</span>
-                  <strong>Published package matches the current Library inputs</strong>
+                  <span className="badge success">✓ Web Package · current</span>
+                  <strong>Web Package matches the current Library inputs</strong>
                   <small>
                     {selectedPlan.publication.publishedAt
-                      ? `Published ${new Date(selectedPlan.publication.publishedAt).toLocaleString()}. `
+                      ? `Web Package ${new Date(selectedPlan.publication.publishedAt).toLocaleString()}. `
                       : ""}
                     Current canonical metadata and public media inputs match the published snapshot.
                   </small>
@@ -7920,23 +8106,23 @@ function PublishWorkspace({
                               publishOperations,
                               selectedPlan.releaseId,
                             )
-                          ? "Recover or review the interrupted publish operation in Operation history before publishing again."
+                          ? "Recover or review the interrupted package operation in Operation history before building again."
                           : canBuildPublishPlan(selectedPlan)
-                            ? "Publish a complete sanitized public release snapshot, validate it, and atomically promote it into published-media."
-                            : "Resolve the blocking preflight issues first."
+                            ? "Build a complete sanitized public release snapshot, validate it, and atomically promote it into published-media."
+                            : "Resolve the blocking Ready Check issues first."
                     }
                   >
                     {prepareLoading
                       ? "Preparing…"
                       : publishLoading
-                        ? "Publishing…"
+                        ? "Building…"
                         : unresolvedPublishOperationForRelease(
                               publishOperations,
                               selectedPlan.releaseId,
                             ) &&
                             !canPreparePublishPlan(selectedPlan) &&
                             !canPrepareVideoPublishPlan(selectedPlan)
-                          ? "Recover interrupted publish"
+                          ? "Recover interrupted package build"
                           : publishNextStepLabel(selectedPlan)}
                   </button>
                   <small>
@@ -7948,10 +8134,10 @@ function PublishWorkspace({
                             publishOperations,
                             selectedPlan.releaseId,
                           )
-                        ? "Publishing is paused until the interrupted operation is verified and finalized or safely rolled back from Operation history."
+                        ? "Web Package updates are paused until the interrupted operation is verified and finalized or safely rolled back from Web Package history."
                         : canBuildPublishPlan(selectedPlan)
                           ? "Publishes the complete public snapshot from current Library metadata, browser artwork, waveform peaks, and HLS assets. Existing public releases are replaced as a unit so obsolete files cannot survive an update."
-                          : "Resolve the blocking issues shown in preflight before preparing derivatives or publishing."}
+                          : "Resolve the blocking issues shown in Ready Check before preparing derivatives or publishing."}
                   </small>
                 </>
               )}
@@ -8076,7 +8262,7 @@ function PublishWorkspace({
               <dt>Public package</dt>
               <dd>
                 {selectedPlan.publication.state === "up-to-date"
-                  ? "Published · current"
+                  ? "Up to date"
                   : selectedPlan.publication.state === "update-available"
                     ? "Published · update available"
                     : "Not published"}
@@ -8233,6 +8419,7 @@ function IngestView({
   onInspect,
   onBackToCandidates,
   onOpenStaging,
+  playback,
 }: {
   scan: IngestScanResult | null;
   releases: ReleaseScanResult[];
@@ -8246,6 +8433,7 @@ function IngestView({
   onOpenStaging: (
     identityOverride: IngestStagingIdentitySeed,
   ) => void;
+  playback: PersistentLibraryPlaybackController;
 }) {
   if (inspection) {
     return (
@@ -8255,6 +8443,7 @@ function IngestView({
         identitySeed={identitySeed}
         onBack={onBackToCandidates}
         onOpenStaging={onOpenStaging}
+        playback={playback}
       />
     );
   }
@@ -8828,37 +9017,13 @@ function sortIngestSourceFiles(
   });
 }
 
-function getNextIngestAudioFile(
-  files: IngestFileInspection[],
-  currentRelativePath: string | null,
-): IngestFileInspection | null {
-  if (!currentRelativePath) {
-    return null;
-  }
-
-  const currentIndex = files.findIndex(
-    (file) =>
-      file.relativePath === currentRelativePath,
-  );
-
-  if (currentIndex < 0) {
-    return null;
-  }
-
-  return (
-    files
-      .slice(currentIndex + 1)
-      .find((file) => file.mediaKind === "audio") ??
-    null
-  );
-}
-
 function IngestCandidateInspectionView({
   inspection,
   releases,
   identitySeed,
   onBack,
   onOpenStaging,
+  playback,
 }: {
   inspection: IngestCandidateInspection;
   releases: ReleaseScanResult[];
@@ -8867,6 +9032,7 @@ function IngestCandidateInspectionView({
   onOpenStaging: (
     identityOverride: IngestStagingIdentitySeed,
   ) => void;
+  playback: PersistentLibraryPlaybackController;
 }) {
   const { candidate } = inspection;
   const identityPlan = useMemo(
@@ -9028,144 +9194,53 @@ function IngestCandidateInspectionView({
   const [expandedFiles, setExpandedFiles] = useState<
     string[]
   >([]);
-  const sourceAudioPreviewRef =
-    useRef<HTMLAudioElement | null>(null);
-  const [sourceAudioPreviewPath, setSourceAudioPreviewPath] =
-    useState<string | null>(null);
-  const [sourceAudioPreviewPlaying, setSourceAudioPreviewPlaying] =
-    useState(false);
-  const [sourceAudioPreviewLoading, setSourceAudioPreviewLoading] =
-    useState(false);
-  const [sourceAudioPreviewError, setSourceAudioPreviewError] =
-    useState<string | null>(null);
-
-  const startSourceAudioPreview = useCallback(
-    (
-      audio: HTMLAudioElement,
-      file: IngestFileInspection,
-    ) => {
-      setSourceAudioPreviewError(null);
-      audio.src = buildIngestAudioPreviewUrl(
-        file.relativePath,
-        file.modifiedAt,
-      );
-      audio.dataset.ingestSourcePath =
-        file.relativePath;
-      audio.load();
-      setSourceAudioPreviewPath(file.relativePath);
-      setSourceAudioPreviewLoading(true);
-
-      void audio.play().catch(
-        (previewError: unknown) => {
-          setSourceAudioPreviewPlaying(false);
-          setSourceAudioPreviewLoading(false);
-          setSourceAudioPreviewError(
-            previewError instanceof Error
-              ? previewError.message
-              : "Audio preview could not start.",
-          );
-        },
-      );
-    },
-    [],
+  const ingestPlaybackQueue = useMemo<PersistentPlaybackTrack[]>(
+    () =>
+      sortedSourceFiles.flatMap((file) =>
+        file.mediaKind === "audio"
+          ? [{
+              key: `ingest:${candidate.id}:${file.relativePath}`,
+              sourceUrl: buildIngestAudioPreviewUrl(
+                file.relativePath,
+                file.modifiedAt,
+              ),
+              title: file.filename,
+              subtitle: candidate.displayTitle,
+              sourceLabel: [
+                "Ingest source",
+                file.technical.codec ?? file.technical.container,
+              ].filter(Boolean).join(" · "),
+            }]
+          : [],
+      ),
+    [candidate.displayTitle, candidate.id, sortedSourceFiles],
   );
-
-  useEffect(() => {
-    const audio = new Audio();
-    audio.preload = "metadata";
-
-    const handlePlay = () => {
-      setSourceAudioPreviewPlaying(true);
-      setSourceAudioPreviewLoading(false);
-    };
-    const handlePause = () => {
-      setSourceAudioPreviewPlaying(false);
-      setSourceAudioPreviewLoading(false);
-    };
-    const handleEnded = () => {
-      const nextFile = getNextIngestAudioFile(
-        sortedSourceFiles,
-        audio.dataset.ingestSourcePath ?? null,
-      );
-
-      if (!nextFile) {
-        handlePause();
-        return;
-      }
-
-      startSourceAudioPreview(audio, nextFile);
-    };
-    const handleWaiting = () => {
-      setSourceAudioPreviewLoading(true);
-    };
-    const handleCanPlay = () => {
-      setSourceAudioPreviewLoading(false);
-    };
-    const handleError = () => {
-      setSourceAudioPreviewPlaying(false);
-      setSourceAudioPreviewLoading(false);
-      setSourceAudioPreviewError(
-        "The selected ingest source could not be decoded or transcoded for preview.",
-      );
-    };
-
-    audio.addEventListener("play", handlePlay);
-    audio.addEventListener("pause", handlePause);
-    audio.addEventListener("ended", handleEnded);
-    audio.addEventListener("waiting", handleWaiting);
-    audio.addEventListener("canplay", handleCanPlay);
-    audio.addEventListener("error", handleError);
-    sourceAudioPreviewRef.current = audio;
-
-    return () => {
-      audio.pause();
-      audio.removeAttribute("src");
-      delete audio.dataset.ingestSourcePath;
-      audio.load();
-      audio.removeEventListener("play", handlePlay);
-      audio.removeEventListener("pause", handlePause);
-      audio.removeEventListener("ended", handleEnded);
-      audio.removeEventListener("waiting", handleWaiting);
-      audio.removeEventListener("canplay", handleCanPlay);
-      audio.removeEventListener("error", handleError);
-      sourceAudioPreviewRef.current = null;
-    };
-  }, [sortedSourceFiles, startSourceAudioPreview]);
+  const sourceAudioPreviewPath =
+    playback.currentTrack?.key.startsWith(
+      `ingest:${candidate.id}:`,
+    )
+      ? playback.currentTrack.key.slice(
+          `ingest:${candidate.id}:`.length,
+        )
+      : null;
+  const sourceAudioPreviewPlaying =
+    sourceAudioPreviewPath !== null && playback.isPlaying;
+  const sourceAudioPreviewLoading =
+    sourceAudioPreviewPath !== null && playback.isLoading;
+  const sourceAudioPreviewError =
+    sourceAudioPreviewPath !== null ? playback.error : null;
 
   const toggleSourceAudioPreview = (
     file: IngestFileInspection,
   ) => {
-    const audio = sourceAudioPreviewRef.current;
-
-    if (!audio || file.mediaKind !== "audio") {
+    if (file.mediaKind !== "audio") {
       return;
     }
 
-    setSourceAudioPreviewError(null);
-
-    if (
-      sourceAudioPreviewPath === file.relativePath &&
-      !audio.paused
-    ) {
-      audio.pause();
-      return;
-    }
-
-    if (sourceAudioPreviewPath !== file.relativePath) {
-      audio.pause();
-      startSourceAudioPreview(audio, file);
-      return;
-    }
-
-    void audio.play().catch((previewError: unknown) => {
-      setSourceAudioPreviewPlaying(false);
-      setSourceAudioPreviewLoading(false);
-      setSourceAudioPreviewError(
-        previewError instanceof Error
-          ? previewError.message
-          : "Audio preview could not start.",
-      );
-    });
+    playback.toggleTrack(
+      `ingest:${candidate.id}:${file.relativePath}`,
+      ingestPlaybackQueue,
+    );
   };
 
   const toggleFile = (relativePath: string) => {
@@ -9949,7 +10024,8 @@ function formatIngestTechnicalValue(
 type LibraryReleaseViewMode =
   | "rows"
   | "cards"
-  | "tiles";
+  | "tiles"
+  | "waveform";
 
 type LibraryReleaseSortMode =
   | "library"
@@ -9980,7 +10056,8 @@ function readLibraryReleaseViewMode(): LibraryReleaseViewMode {
 
     return stored === "rows" ||
       stored === "cards" ||
-      stored === "tiles"
+      stored === "tiles" ||
+      stored === "waveform"
       ? stored
       : "cards";
   } catch {
@@ -10106,6 +10183,14 @@ function LibraryReleaseViewIcon({
     );
   }
 
+  if (mode === "waveform") {
+    return (
+      <svg viewBox="0 0 18 18" aria-hidden="true">
+        <path d="M1.5 9h2l1.4-4.5 2.1 9 2-7 2 5 1.8-8 1.7 5.5H16.5" />
+      </svg>
+    );
+  }
+
   return (
     <svg viewBox="0 0 18 18" aria-hidden="true">
       <rect x="1.5" y="1.5" width="6" height="6" rx="0.8" />
@@ -10124,6 +10209,8 @@ function LibraryReleaseBrowser({
   onNotify,
   technicalAudit,
   technicalByRelease,
+  playback,
+  waveformColorMode,
 }: {
   releases: ReleaseScanResult[];
   onLibraryChanged: () => Promise<void>;
@@ -10138,6 +10225,8 @@ function LibraryReleaseBrowser({
     string,
     MediaTechnicalReleaseSummary
   >;
+  playback: PersistentLibraryPlaybackController;
+  waveformColorMode: WaveformColorMode;
 }) {
   const [viewMode, setViewMode] =
     useState<LibraryReleaseViewMode>(
@@ -10260,6 +10349,7 @@ function LibraryReleaseBrowser({
                 ["rows", "Rows", "Dense column view"],
                 ["cards", "Cards", "Expanded release cards"],
                 ["tiles", "Tiles", "Artwork-first browsing"],
+                ["waveform", "Waveform", "Single-release artwork and waveform player"],
               ] as const
             ).map(([mode, label, description]) => (
               <button
@@ -10277,34 +10367,43 @@ function LibraryReleaseBrowser({
         </div>
       </header>
 
-      <section
-        className={`release-list library-release-list library-release-list--${viewMode}`}
-        aria-label={`Library releases in ${viewMode} view`}
-        style={
-          viewMode === "tiles"
-            ? {
-                gridTemplateColumns:
-                  `repeat(auto-fill, minmax(${tileSizeRem}rem, 1fr))`,
+      {viewMode === "waveform" ? (
+        <LibraryWaveformView
+          releases={sortedReleases}
+          playback={playback}
+          colorMode={waveformColorMode}
+          onOpenMetadata={onOpenMetadata}
+        />
+      ) : (
+        <section
+          className={`release-list library-release-list library-release-list--${viewMode}`}
+          aria-label={`Library releases in ${viewMode} view`}
+          style={
+            viewMode === "tiles"
+              ? {
+                  gridTemplateColumns:
+                    `repeat(auto-fill, minmax(${tileSizeRem}rem, 1fr))`,
+                }
+              : undefined
+          }
+        >
+          {sortedReleases.map((release) => (
+            <ReleaseCard
+              key={release.relativePath}
+              release={release}
+              onLibraryChanged={onLibraryChanged}
+              onOpenMetadata={() =>
+                onOpenMetadata(release.id)
               }
-            : undefined
-        }
-      >
-        {sortedReleases.map((release) => (
-          <ReleaseCard
-            key={release.relativePath}
-            release={release}
-            onLibraryChanged={onLibraryChanged}
-            onOpenMetadata={() =>
-              onOpenMetadata(release.id)
-            }
-            showAdminTools={showAdminTools}
-            onNotify={onNotify}
-            technicalSummary={technicalByRelease.get(release.id)}
-            technicalLoading={technicalAudit.loading}
-            technicalError={technicalAudit.error}
-          />
-        ))}
-      </section>
+              showAdminTools={showAdminTools}
+              onNotify={onNotify}
+              technicalSummary={technicalByRelease.get(release.id)}
+              technicalLoading={technicalAudit.loading}
+              technicalError={technicalAudit.error}
+            />
+          ))}
+        </section>
+      )}
     </section>
   );
 }
@@ -16849,6 +16948,9 @@ function ReleaseMetadataDetailView({
   onRefresh,
   onOpenWorkflowHelp,
   onNavigateWorkflow,
+  playback,
+  waveformColorMode,
+  onWaveformColorModeChange,
 }: {
   detail: ReleaseMetadataDetail;
   release: ReleaseScanResult | null;
@@ -16871,6 +16973,9 @@ function ReleaseMetadataDetailView({
   onNavigateWorkflow: (
     view: WorkflowApplicationView,
   ) => void;
+  playback: PersistentLibraryPlaybackController;
+  waveformColorMode: WaveformColorMode;
+  onWaveformColorModeChange: (mode: WaveformColorMode) => void;
 }) {
   const [setupMode, setSetupMode] =
     useState(false);
@@ -17063,29 +17168,6 @@ function ReleaseMetadataDetailView({
       window.localStorage,
     ),
   );
-  const audioPreviewRef =
-    useRef<HTMLAudioElement | null>(null);
-  const audioPreviewTrackIdRef =
-    useRef<string | null>(null);
-  const playableTrackIdsRef =
-    useRef<readonly string[]>([]);
-  const loadAudioPreviewTrackRef = useRef<
-    ((
-      trackId: string,
-      playImmediately: boolean,
-    ) => Promise<void>) | null
-  >(null);
-  const [audioPreviewTrackId, setAudioPreviewTrackId] =
-    useState<string | null>(null);
-  const [audioPreviewPlaying, setAudioPreviewPlaying] =
-    useState(false);
-  const [audioPreviewLoading, setAudioPreviewLoading] =
-    useState(false);
-  const [audioPreviewError, setAudioPreviewError] =
-    useState<string | null>(null);
-  const [audioPreviewVolume, setAudioPreviewVolume] =
-    useState(0.8);
-
   useEffect(() => {
     setTrackDirectoryRenameReview(null);
     setTrackDirectoryRenameConfirmationInput("");
@@ -17095,89 +17177,19 @@ function ReleaseMetadataDetailView({
     setReleaseRenameError(null);
   }, [detail.releaseId]);
 
-  useEffect(() => {
-    setAudioPreviewTrackId(null);
-    audioPreviewTrackIdRef.current = null;
-    setAudioPreviewPlaying(false);
-    setAudioPreviewLoading(false);
-    setAudioPreviewError(null);
-
-    const audio = new Audio();
-    audio.preload = "metadata";
-    audio.volume = audioPreviewVolume;
-
-    const handlePlay = () => {
-      setAudioPreviewPlaying(true);
-      setAudioPreviewLoading(false);
-    };
-    const handlePause = () => {
-      setAudioPreviewPlaying(false);
-      setAudioPreviewLoading(false);
-    };
-    const handleWaiting = () => {
-      setAudioPreviewLoading(true);
-    };
-    const handleCanPlay = () => {
-      setAudioPreviewLoading(false);
-    };
-    const handleError = () => {
-      setAudioPreviewPlaying(false);
-      setAudioPreviewLoading(false);
-      setAudioPreviewError(
-        "The selected source could not be decoded or transcoded for preview. Confirm FFmpeg is available, or generate audio-playback.mp3.",
-      );
-    };
-    const handleEnded = () => {
-      setAudioPreviewPlaying(false);
-      setAudioPreviewLoading(false);
-
-      const nextTrackId = getNextPlayableTrackId(
-        playableTrackIdsRef.current,
-        audioPreviewTrackIdRef.current,
-      );
-
-      if (!nextTrackId) {
-        return;
-      }
-
-      const loadTrack =
-        loadAudioPreviewTrackRef.current;
-
-      if (loadTrack) {
-        void loadTrack(nextTrackId, true);
-      }
-    };
-
-    audio.addEventListener("play", handlePlay);
-    audio.addEventListener("pause", handlePause);
-    audio.addEventListener("ended", handleEnded);
-    audio.addEventListener("waiting", handleWaiting);
-    audio.addEventListener("canplay", handleCanPlay);
-    audio.addEventListener("error", handleError);
-    audioPreviewRef.current = audio;
-
-    return () => {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
-      audio.removeEventListener("play", handlePlay);
-      audio.removeEventListener("pause", handlePause);
-      audio.removeEventListener("ended", handleEnded);
-      audio.removeEventListener("waiting", handleWaiting);
-      audio.removeEventListener("canplay", handleCanPlay);
-      audio.removeEventListener("error", handleError);
-      audioPreviewRef.current = null;
-    };
-  }, [detail.releaseId]);
-
-  useEffect(() => {
-    const audio = audioPreviewRef.current;
-
-    if (audio) {
-      audio.volume = audioPreviewVolume;
-    }
-  }, [audioPreviewVolume]);
-
+  const playbackIsForThisRelease =
+    playback.currentTrack?.releaseId ===
+    detail.releaseId;
+  const audioPreviewTrackId =
+    playbackIsForThisRelease
+      ? playback.currentTrack?.trackId ?? null
+      : null;
+  const audioPreviewPlaying =
+    playbackIsForThisRelease &&
+    playback.isPlaying;
+  const audioPreviewLoading =
+    playbackIsForThisRelease &&
+    playback.isLoading;
   useEffect(() => {
     const sidebar = metadataSidebarRef.current;
 
@@ -18216,30 +18228,23 @@ function ReleaseMetadataDetailView({
           item.previousTrackId ===
           activeDocumentGroup,
       );
-      const previewRename = receipt.renamed.find(
-        (item) =>
-          item.previousTrackId ===
-          audioPreviewTrackId,
-      );
-
       if (activeRename) {
         setActiveDocumentGroup(
           activeRename.trackId,
         );
       }
 
-      if (previewRename) {
-        const audio = audioPreviewRef.current;
-        audio?.pause();
-        if (audio) {
-          audio.removeAttribute("src");
-          audio.load();
-        }
-        setAudioPreviewTrackId(
-          previewRename.trackId,
+      const activePlaybackTrack = playback.currentTrack;
+      if (
+        receipt.renamed.length > 0 &&
+        activePlaybackTrack?.releaseId ===
+          detail.releaseId &&
+        activePlaybackTrack.trackId
+      ) {
+        playback.clearIfTrack(
+          detail.releaseId,
+          activePlaybackTrack.trackId,
         );
-        setAudioPreviewPlaying(false);
-        setAudioPreviewLoading(false);
       }
 
       return receipt;
@@ -19774,121 +19779,78 @@ function ReleaseMetadataDetailView({
   const playableTrackIds = getPlayableTrackIds(
     orderedScannedTracks,
   );
-  playableTrackIdsRef.current = playableTrackIds;
-  audioPreviewTrackIdRef.current =
-    audioPreviewTrackId;
-  const activeTrackIsPlayable =
-    activeDocumentGroup !== "release" &&
-    playableTrackIds.includes(
-      activeDocumentGroup,
-    );
-  const preferredAudioPreviewTrackId =
-    activeTrackIsPlayable
-      ? activeDocumentGroup
-      : audioPreviewTrackId &&
-          playableTrackIds.includes(
-            audioPreviewTrackId,
-          )
-        ? audioPreviewTrackId
-        : playableTrackIds[0] ?? null;
+  const buildReleasePlaybackQueue =
+    (): PersistentPlaybackTrack[] => {
+      const releaseTitle =
+        resolveReleaseDisplayTitle(
+          release?.releaseTitle,
+          formatReleaseTitle(detail.releaseId),
+        );
+      const releaseArtist =
+        release?.primaryArtistName?.trim() ?? "";
+      const releaseArtwork =
+        selectReleaseFrontArtwork(
+          release?.artworkMasters ?? [],
+        );
 
-  const loadAudioPreviewTrack = async (
-    trackId: string,
-    playImmediately: boolean,
-  ) => {
-    const audio = audioPreviewRef.current;
-    const track = release?.tracks.find(
-      (candidate) => candidate.id === trackId,
-    );
+      return playableTrackIds.flatMap((trackId) => {
+        const scannedTrack = release?.tracks.find(
+          (track) => track.id === trackId,
+        );
 
-    if (
-      !audio ||
-      !track ||
-      !trackHasAudioPreview(track)
-    ) {
-      setAudioPreviewError(
-        "This track does not have one unambiguous audio preview source.",
-      );
-      return;
-    }
+        if (!scannedTrack) {
+          return [];
+        }
 
-    setActiveDocumentGroup(trackId);
-    setAudioPreviewError(null);
+        const trackDocuments = detail.documents.filter(
+          (document) => document.trackId === trackId,
+        );
+        const title = readTrackDisplayTitle(
+          trackId,
+          trackDocuments,
+          formatReleaseTitle(trackId),
+        );
+        const trackArtwork =
+          selectPreferredReleaseArtwork(
+            scannedTrack.artworkMasters ?? [],
+          );
+        const effectiveArtwork =
+          trackArtwork ?? releaseArtwork;
 
-    if (audioPreviewTrackId !== trackId) {
-      audio.pause();
-      audio.src = buildAudioPreviewUrl(
-        detail.releaseId,
-        trackId,
-      );
-      audio.load();
-      setAudioPreviewTrackId(trackId);
-      audioPreviewTrackIdRef.current = trackId;
-      setAudioPreviewLoading(true);
-    }
-
-    if (!playImmediately) {
-      audio.pause();
-      return;
-    }
-
-    try {
-      await audio.play();
-    } catch (error) {
-      setAudioPreviewPlaying(false);
-      setAudioPreviewLoading(false);
-      setAudioPreviewError(
-        error instanceof Error
-          ? error.message
-          : "Audio preview could not start.",
-      );
-    }
-  };
-
-  loadAudioPreviewTrackRef.current =
-    loadAudioPreviewTrack;
+        return [{
+          key: `${detail.releaseId}::${trackId}`,
+          sourceUrl: buildAudioPreviewUrl(
+            detail.releaseId,
+            trackId,
+          ),
+          waveformUrl: buildLibraryWaveformUrl(
+            detail.releaseId,
+            trackId,
+          ),
+          releaseId: detail.releaseId,
+          trackId,
+          title,
+          subtitle: releaseArtist
+            ? `${releaseArtist} · ${releaseTitle}`
+            : releaseTitle,
+          sourceLabel:
+            getAudioPreviewSourceLabel(scannedTrack),
+          artworkUrl: effectiveArtwork
+            ? artworkPreviewUrl(
+                effectiveArtwork.relativePath,
+              )
+            : null,
+        }];
+      });
+    };
 
   const toggleAudioPreviewTrack = (
     trackId: string,
   ) => {
-    const audio = audioPreviewRef.current;
-
-    if (
-      audioPreviewTrackId === trackId &&
-      audio &&
-      !audio.paused
-    ) {
-      audio.pause();
-      return;
-    }
-
-    void loadAudioPreviewTrack(
-      trackId,
-      true,
-    );
-  };
-
-  const moveAudioPreview = (
-    direction: -1 | 1,
-  ) => {
-    const audio = audioPreviewRef.current;
-    const targetTrackId =
-      getAdjacentPlayableTrackId(
-        playableTrackIds,
-        audioPreviewTrackId ??
-          (activeTrackIsPlayable
-            ? activeDocumentGroup
-            : null),
-        direction,
-      );
-
-    if (!targetTrackId) {
-      return;
-    }
-
-    void loadAudioPreviewTrack(
-      targetTrackId,
-      Boolean(audio && !audio.paused),
+    const queue = buildReleasePlaybackQueue();
+    playback.toggleTrack(
+      `${detail.releaseId}::${trackId}`,
+      queue,
     );
   };
 
@@ -20274,40 +20236,6 @@ function ReleaseMetadataDetailView({
           titleMetadata.displayTitle,
       };
     });
-
-  const audioPreviewControlTrackId =
-    preferredAudioPreviewTrackId;
-  const audioPreviewControlTrack =
-    audioPreviewControlTrackId
-      ? release?.tracks.find(
-          (track) =>
-            track.id ===
-            audioPreviewControlTrackId,
-        ) ?? null
-      : null;
-  const audioPreviewControlTitle =
-    audioPreviewControlTrackId
-      ? readTrackDisplayTitle(
-          audioPreviewControlTrackId,
-          detail.documents.filter(
-            (document) =>
-              document.trackId ===
-              audioPreviewControlTrackId,
-          ),
-          inferredTracks.find(
-            (track) =>
-              track.id ===
-              audioPreviewControlTrackId,
-          )?.displayTitle ??
-            formatReleaseTitle(
-              audioPreviewControlTrackId,
-            ),
-        )
-      : "No playable track";
-  const audioPreviewSourceLabel =
-    getAudioPreviewSourceLabel(
-      audioPreviewControlTrack,
-    );
 
   const performerCopyTrackOptions =
     trackIds.map((trackId, index) => {
@@ -20750,6 +20678,19 @@ function ReleaseMetadataDetailView({
     },
   ];
 
+  const returnToLibrary = () => {
+    if (
+      dirtyCount > 0 &&
+      !window.confirm(
+        "Discard all unsaved metadata changes and return to the library?",
+      )
+    ) {
+      return;
+    }
+
+    onBack();
+  };
+
   const navigateFromRelease = (
     view: WorkflowApplicationView,
   ) => {
@@ -20775,21 +20716,20 @@ function ReleaseMetadataDetailView({
         <div className="metadata-detail-identity">
           <button
             type="button"
+            className="metadata-detail-back-button"
+            aria-label="Back to Library"
+            title="Back to Library"
+            onClick={returnToLibrary}
+          >
+            <span aria-hidden="true">←</span>
+          </button>
+
+          <button
+            type="button"
             className="page-header-brand metadata-detail-home-button"
             aria-label="Hiplingo · Back to Library"
             title="Back to Library"
-            onClick={() => {
-              if (
-                dirtyCount > 0 &&
-                !window.confirm(
-                  "Discard all unsaved metadata changes and return to the library?",
-                )
-              ) {
-                return;
-              }
-
-              onBack();
-            }}
+            onClick={returnToLibrary}
           >
             <img
               className="hiplingo-logo"
@@ -20982,6 +20922,12 @@ function ReleaseMetadataDetailView({
               </button>
             </section>
 
+            <WaveformColorMenuCard
+              playback={playback}
+              colorMode={waveformColorMode}
+              onColorModeChange={onWaveformColorModeChange}
+            />
+
             <section className="menu-card">
               <h2>Admin</h2>
               <label className="admin-toggle">
@@ -21019,7 +20965,7 @@ function ReleaseMetadataDetailView({
               <h2>Release health</h2>
               <p>
                 Read-only checks from the same current release plan used by
-                Publish preflight. Health describes actionable state; source
+                Web Package Ready Check. Health describes actionable state; source
                 provenance remains separate.
               </p>
             </div>
@@ -21027,10 +20973,10 @@ function ReleaseMetadataDetailView({
             <button
               type="button"
               onClick={() =>
-                navigateFromRelease("publish")
+                navigateFromRelease("public-package")
               }
             >
-              Open Publish preflight
+              Open Web Package Ready Check
             </button>
           </header>
 
@@ -21246,111 +21192,6 @@ function ReleaseMetadataDetailView({
           </span>
         </div>
 
-        <div
-          className="audio-preview-transport"
-          role="group"
-          aria-label="Audio preview controls"
-        >
-          <div className="audio-preview-buttons">
-            <button
-              type="button"
-              className="audio-preview-skip"
-              aria-label="Previous playable track"
-              title="Previous playable track"
-              disabled={
-                playableTrackIds.length < 2
-              }
-              onClick={() =>
-                moveAudioPreview(-1)
-              }
-            >
-              <span aria-hidden="true">⏮</span>
-            </button>
-
-            <button
-              type="button"
-              className="audio-preview-play-toggle"
-              aria-label={
-                audioPreviewPlaying &&
-                audioPreviewTrackId ===
-                  audioPreviewControlTrackId
-                  ? "Pause audio preview"
-                  : "Play audio preview"
-              }
-              title={
-                audioPreviewPlaying &&
-                audioPreviewTrackId ===
-                  audioPreviewControlTrackId
-                  ? "Pause audio preview"
-                  : "Play audio preview"
-              }
-              disabled={
-                !audioPreviewControlTrackId
-              }
-              onClick={() => {
-                if (audioPreviewControlTrackId) {
-                  toggleAudioPreviewTrack(
-                    audioPreviewControlTrackId,
-                  );
-                }
-              }}
-            >
-              <span aria-hidden="true">
-                {audioPreviewLoading &&
-                audioPreviewTrackId ===
-                  audioPreviewControlTrackId
-                  ? "…"
-                  : audioPreviewPlaying &&
-                      audioPreviewTrackId ===
-                        audioPreviewControlTrackId
-                    ? "❚❚"
-                    : "▶"}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="audio-preview-skip"
-              aria-label="Next playable track"
-              title="Next playable track"
-              disabled={
-                playableTrackIds.length < 2
-              }
-              onClick={() =>
-                moveAudioPreview(1)
-              }
-            >
-              <span aria-hidden="true">⏭</span>
-            </button>
-          </div>
-
-          <div className="audio-preview-now-playing">
-            <strong>
-              {audioPreviewControlTitle}
-            </strong>
-            <small>
-              {audioPreviewSourceLabel}
-            </small>
-          </div>
-
-          <label className="audio-preview-volume">
-            <span>Volume</span>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.05"
-              value={audioPreviewVolume}
-              aria-label="Audio preview volume"
-              onChange={(event) =>
-                setAudioPreviewVolume(
-                  Number(event.target.value),
-                )
-              }
-            />
-          </label>
-        </div>
-
         <div className="draft-status-actions">
           {isMetadataEmpty ? (
             <button
@@ -21399,11 +21240,6 @@ function ReleaseMetadataDetailView({
         </div>
       </section>
 
-      {audioPreviewError && (
-        <p className="message error">
-          Audio preview: {audioPreviewError}
-        </p>
-      )}
 
       {saveError && (
         <p className="message error">

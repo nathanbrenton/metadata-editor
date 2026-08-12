@@ -30,7 +30,7 @@ const projectRoot = path.resolve(
 export const defaultPublishRoot = "../published-media";
 
 export type WorkflowLocation = {
-  id: "ingest" | "staging" | "library" | "publish";
+  id: "ingest" | "staging" | "library" | "public-package";
   label: string;
   purpose: string;
   configuredPath: string;
@@ -202,9 +202,9 @@ export async function readWorkflowLocations(): Promise<WorkflowLocations> {
         sizeBytes: librarySizeBytes,
       },
       {
-        id: "publish",
-        label: "Public output",
-        purpose: "Generated sanitized player-facing snapshots",
+        id: "public-package",
+        label: "Web Package",
+        purpose: "Sanitized web-ready output prepared from the private Library",
         configuredPath: publishConfigured,
         absolutePath: publish.absolutePath,
         displayPath: displayPathFor(publish.absolutePath),

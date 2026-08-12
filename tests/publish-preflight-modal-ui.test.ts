@@ -15,7 +15,7 @@ const helpSource = readFileSync(
   "utf8",
 );
 
-test("opens Publish preflight from the whole release row without an action column", () => {
+test("opens Web Package Ready Check from the whole release row without an action column", () => {
   const workspaceStart = appSource.indexOf(
     "function PublishWorkspace",
   );
@@ -36,7 +36,7 @@ test("opens Publish preflight from the whole release row without an action colum
     '<table className="workflow-workspace-table publish-readiness-table">',
   );
   const overviewEnd = publishWorkspaceSource.indexOf(
-    "{selectedPlan && (",
+    '{selectedPlan && mode === "public-package" && (',
     overviewStart,
   );
 
@@ -71,12 +71,12 @@ test("opens Publish preflight from the whole release row without an action colum
   );
   assert.doesNotMatch(
     readinessOverviewSource,
-    /Continue to preflight/,
+    /Continue to Ready Check/,
   );
 });
 
-test("renders Publish preflight in the reusable wide modal", () => {
-  assert.match(appSource, /title=\{`Publish preflight ·/);
+test("renders Web Package Ready Check in the reusable wide modal", () => {
+  assert.match(appSource, /title=\{`Web Package Ready Check ·/);
   assert.match(appSource, /variant="wide"/);
   assert.match(
     appSource,
@@ -94,7 +94,7 @@ test("modal supports Escape close, upper-right close, backdrop close, and focus 
 });
 
 test("Workflow and Help documents the modal Publish interaction", () => {
-  assert.match(helpSource, /whole row opens preflight/);
+  assert.match(helpSource, /whole row opens Ready Check/);
   assert.match(helpSource, /wide modal/);
   assert.match(helpSource, /closes with Escape/);
   assert.match(helpSource, /returns keyboard focus/);

@@ -19,7 +19,7 @@ test("shows persistent up-to-date publish state instead of a repeat write action
   );
   assert.match(
     appSource,
-    /Public package is up to date/,
+    /Web Package is up to date/,
   );
   assert.match(
     appSource,
@@ -43,6 +43,6 @@ test("uses the shared success toast for publish and preparation writes", () => {
 
 test("documents publish freshness and transient success feedback", () => {
   assert.match(helpSource, /stable content fingerprint/i);
-  assert.match(helpSource, /Public package is up to date/i);
+  assert.match(helpSource, /Web Package is up to date/i);
   assert.match(helpSource, /transient success toast/i);
 });

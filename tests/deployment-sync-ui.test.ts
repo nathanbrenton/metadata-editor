@@ -29,12 +29,12 @@ const helpSource = await readFile(
 );
 
 test(
-  "Publish exposes an explicit host boundary and read-only host comparison",
+  "Live exposes a simplified read-only comparison with deployment details available on demand",
   () => {
-    assert.match(appSource, /Host boundary/);
-    assert.match(appSource, /"Check host"/);
-    assert.match(appSource, /Remote differs/);
-    assert.match(appSource, /Deployment current/);
+    assert.match(appSource, /Live connection/);
+    assert.match(appSource, /"Check Live"/);
+    assert.match(appSource, /changes ready/);
+    assert.match(appSource, /Live is up to date/);
     assert.match(
       appSource,
       /\/api\/publish\/deployment-sync-plan/,

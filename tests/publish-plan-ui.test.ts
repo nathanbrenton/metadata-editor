@@ -11,13 +11,13 @@ const serverSource = await readFile(
   "utf8",
 );
 
-test("Publish exposes guided preflight, preparation, and guarded package writes", () => {
-  assert.match(appSource, /Choose a release row to open its preflight/);
+test("Web Package exposes guided Ready Check, preparation, and guarded package writes", () => {
+  assert.match(appSource, /Ready Check is read-only/);
   assert.match(appSource, /publish-release-row/);
-  assert.match(appSource, /Publish preflight ·/);
+  assert.match(appSource, /Web Package Ready Check ·/);
   assert.match(appSource, /Technical package plan/);
-  assert.match(appSource, /Publish public package/);
-  assert.match(appSource, /Update public package/);
+  assert.match(appSource, /Prepare for Web/);
+  assert.match(appSource, /Update Web Package/);
   assert.match(serverSource, /\/api\/publish\/plan/);
   assert.match(serverSource, /\/api\/publish\/prepare/);
   assert.match(serverSource, /\/api\/publish\/build/);
@@ -28,7 +28,7 @@ test("Publish exposes guided preflight, preparation, and guarded package writes"
 test("uses Publish for first publication and Update for later publication", () => {
   assert.match(
     appSource,
-    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update public package[\s\S]*?Publish public package/,
+    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update Web Package[\s\S]*?Prepare for Web/,
   );
   assert.doesNotMatch(
     appSource,
@@ -36,23 +36,18 @@ test("uses Publish for first publication and Update for later publication", () =
   );
 });
 
-test("Publish readiness table groups source and public-media readiness", () => {
+test("Web Package readiness table combines readiness and package state", () => {
   assert.match(appSource, /<th scope="col">Release<\/th>/);
-  assert.match(appSource, /<th scope="col">Sources<\/th>/);
-  assert.match(appSource, /<th scope="col">Public media<\/th>/);
-  assert.match(appSource, /<th scope="col">Status<\/th>/);
-  assert.match(appSource, /<span>Metadata<\/span>/);
-  assert.match(appSource, /<span>Masters<\/span>/);
-  assert.match(appSource, /<span>Artwork<\/span>/);
-  assert.match(appSource, /<span>Web stream<\/span>/);
-  assert.match(appSource, /<span>Waveforms<\/span>/);
-  assert.match(appSource, /Checked in preflight/);
+  assert.match(appSource, /<th scope="col">Ready<\/th>/);
+  assert.match(appSource, /<th scope="col">Web Package<\/th>/);
+  assert.match(appSource, /webPackageReleaseStatus/);
+  assert.match(appSource, /waveform checked in Ready Check/);
   assert.doesNotMatch(appSource, /<th scope="col">Current guidance<\/th>/);
   assert.doesNotMatch(appSource, /<th scope="col">Publication<\/th>/);
   assert.doesNotMatch(appSource, />Dry-run only<\/span>/);
 });
 
-test("Publish readiness overview uses each release row as the preflight action", () => {
+test("Web Package readiness overview uses each release row as the Ready Check action", () => {
   const workspaceStart = appSource.indexOf(
     "function PublishWorkspace",
   );
@@ -73,7 +68,7 @@ test("Publish readiness overview uses each release row as the preflight action",
     '<table className="workflow-workspace-table publish-readiness-table">',
   );
   const overviewEnd = publishWorkspaceSource.indexOf(
-    "{selectedPlan && (",
+    '{selectedPlan && mode === "public-package" && (',
     overviewStart,
   );
 
@@ -108,7 +103,7 @@ test("Publish readiness overview uses each release row as the preflight action",
   );
   assert.doesNotMatch(
     readinessOverviewSource,
-    /Continue to preflight/,
+    /Continue to Ready Check/,
   );
   assert.doesNotMatch(
     readinessOverviewSource,
@@ -132,7 +127,7 @@ test("Publish readiness rows include release artwork thumbnails", () => {
   assert.match(publishWorkspaceSource, /No art/);
 });
 
-test("Publish preflight keeps technical detail collapsed behind one next-step result", () => {
+test("Web Package Ready Check keeps technical detail collapsed behind one next-step result", () => {
   const start = appSource.indexOf("function publishPreflightHeadline");
   const end = appSource.indexOf("function IngestView", start);
 
@@ -146,8 +141,8 @@ test("Publish preflight keeps technical detail collapsed behind one next-step re
   assert.match(publishWorkspaceSource, /publishNextStepLabel/);
   assert.match(publishWorkspaceSource, /Resolve blockers/);
   assert.match(publishWorkspaceSource, /Prepare release/);
-  assert.match(publishWorkspaceSource, /Publish public package/);
-  assert.match(publishWorkspaceSource, /Update public package/);
+  assert.match(publishWorkspaceSource, /Prepare for Web/);
+  assert.match(publishWorkspaceSource, /Update Web Package/);
   assert.match(publishWorkspaceSource, /HLS/);
   assert.match(publishWorkspaceSource, /selectedPlan\.webStreams/);
   assert.match(publishWorkspaceSource, /selectedPlan\.waveforms/);
@@ -176,7 +171,7 @@ test("Publish preflight keeps technical detail collapsed behind one next-step re
   assert.match(publishWorkspaceSource, /\/api\/publish\/prepare/);
   assert.match(publishWorkspaceSource, /\/api\/publish\/build/);
   assert.match(publishWorkspaceSource, /Preparing…/);
-  assert.match(publishWorkspaceSource, /Publishing…/);
+  assert.match(publishWorkspaceSource, /Building…/);
   assert.match(
     publishWorkspaceSource,
     /planFingerprint:\s*plan\.planFingerprint/,

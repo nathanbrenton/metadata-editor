@@ -45,7 +45,7 @@ test("Publish embeds its blue-private amber-public boundary inside the Step 4 he
 
   assert.match(
     publish,
-    /Step 4 · Publish[\s\S]*?publish-header-storage-boundary/,
+    /Step 4 · Web Package[\s\S]*?publish-header-storage-boundary/,
   );
   assert.match(publish, /className="private"/);
   assert.match(publish, /className="planned"/);

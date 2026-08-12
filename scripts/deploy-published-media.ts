@@ -45,7 +45,7 @@ if (
   !allowPendingLibraryChanges
 ) {
   throw new Error(
-    `${fleet.summary.updateAvailableCount} published ${fleet.summary.updateAvailableCount === 1 ? "release has" : "releases have"} pending Library changes. Run Update public package before deployment, or rerun with --allow-pending-library-changes to intentionally deploy the older public snapshot.`,
+    `${fleet.summary.updateAvailableCount} published ${fleet.summary.updateAvailableCount === 1 ? "release has" : "releases have"} pending Library changes. Run Rebuild Local Public Package before deployment, or rerun with --allow-pending-library-changes to intentionally deploy the older public snapshot.`,
   );
 }
 const receipt = await executePublishedMediaDeployment(

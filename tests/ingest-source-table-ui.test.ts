@@ -87,19 +87,22 @@ test("keeps hidden source-table properties available in Details", () => {
   assert.match(detailSource, /Object\.entries\(\s*file\.technical/);
 });
 
-test("continues ingest source preview to the next available audio file", () => {
-  assert.match(appSource, /function getNextIngestAudioFile/);
+test("routes sorted ingest source preview through the persistent playback queue", () => {
   assert.match(
     appSource,
-    /files[\s\S]*slice\(currentIndex \+ 1\)[\s\S]*file\.mediaKind === "audio"/,
+    /const ingestPlaybackQueue = useMemo<PersistentPlaybackTrack\[\]>/,
   );
   assert.match(
     appSource,
-    /audio\.addEventListener\("ended", handleEnded\)/,
+    /sortedSourceFiles\.flatMap[\s\S]*file\.mediaKind === "audio"[\s\S]*buildIngestAudioPreviewUrl/,
   );
   assert.match(
     appSource,
-    /handleEnded[\s\S]*getNextIngestAudioFile\([\s\S]*sortedSourceFiles[\s\S]*startSourceAudioPreview\(audio, nextFile\)/,
+    /playback\.toggleTrack\([\s\S]*ingestPlaybackQueue/,
+  );
+  assert.doesNotMatch(
+    appSource,
+    /sourceAudioPreviewRef|startSourceAudioPreview/,
   );
 });
 

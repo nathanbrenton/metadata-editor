@@ -2,10 +2,16 @@ export type WorkflowApplicationView =
   | "ingest"
   | "staging"
   | "library"
-  | "publish";
+  | "public-package"
+  | "production";
+
+export type WorkflowStorageLocationId = Exclude<
+  WorkflowApplicationView,
+  "production"
+>;
 
 export type WorkflowLocationDisplay = {
-  id: WorkflowApplicationView;
+  id: WorkflowStorageLocationId;
   label: string;
   purpose: string;
   displayPath: string;
@@ -35,13 +41,19 @@ export const workflowNavigationItems: ReadonlyArray<{
     id: "library",
     step: 3,
     label: "Library",
-    description: "Author metadata and prepare media",
+    description: "Private canonical source of truth",
   },
   {
-    id: "publish",
+    id: "public-package",
     step: 4,
-    label: "Publish",
-    description: "Preflight and deploy releases",
+    label: "Web Package",
+    description: "Prepare releases for the Hiplingo web app",
+  },
+  {
+    id: "production",
+    step: 5,
+    label: "Live",
+    description: "See what Hiplingo visitors can access",
   },
 ];
 
@@ -67,7 +79,9 @@ export function WorkflowNavigation({
         >
           {workflowNavigationItems.map((item) => {
             const active = activeView === item.id;
-            const location = locationById.get(item.id);
+            const location = item.id === "production"
+              ? undefined
+              : locationById.get(item.id);
 
             return (
               <button
@@ -79,7 +93,9 @@ export function WorkflowNavigation({
                 title={
                   location
                     ? `${location.label}: ${location.displayPath}\n${location.purpose}`
-                    : undefined
+                    : item.id === "production"
+                      ? "Remote public state for Hiplingo"
+                      : undefined
                 }
                 onClick={() => onNavigate(item.id)}
               >
@@ -95,8 +111,6 @@ export function WorkflowNavigation({
           })}
         </nav>
       </div>
-
-
     </div>
   );
 }
