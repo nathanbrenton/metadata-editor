@@ -377,15 +377,14 @@ export function LibraryWaveformView({
 
       return [{
         key: `${selectedRelease.id}::${track.id}`,
-        sourceUrl: buildAudioPreviewUrl(selectedRelease.id, track.id),
+        source: buildAudioPreviewUrl(selectedRelease.id, track.id),
         waveformUrl: buildLibraryWaveformUrl(selectedRelease.id, track.id),
         releaseId: selectedRelease.id,
         trackId: track.id,
         title: readTrackDisplayTitle(detail, track.id),
-        subtitle: releaseArtist
-          ? `${releaseArtist} · ${releaseTitle}`
-          : releaseTitle,
-        sourceLabel: getAudioPreviewSourceLabel(track),
+        artist: releaseArtist || null,
+        releaseTitle,
+        detail: getAudioPreviewSourceLabel(track),
         artworkUrl: effectiveArtwork
           ? artworkPreviewUrl(effectiveArtwork.relativePath)
           : null,
@@ -623,7 +622,7 @@ export function LibraryWaveformView({
               <span>Selected track</span>
               <h3>{selectedTitle}</h3>
               {selectedQueueTrack ? (
-                <small>{selectedQueueTrack.sourceLabel}</small>
+                <small>{selectedQueueTrack.detail}</small>
               ) : (
                 <small>Audio preview unavailable</small>
               )}

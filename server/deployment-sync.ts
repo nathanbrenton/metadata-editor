@@ -599,7 +599,15 @@ function rsyncBaseArgs(
   ];
 }
 
-function parseRsyncChangeLine(
+function isNewRsyncItem(itemized: string): boolean {
+  const attributes = itemized.slice(2);
+  return (
+    attributes.length > 0 &&
+    [...attributes].every((attribute) => attribute === "+")
+  );
+}
+
+export function parseRsyncChangeLine(
   line: string,
 ): PublishedMediaDeploymentSyncChange | null {
   const separator = line.indexOf("|");
@@ -626,7 +634,7 @@ function parseRsyncChangeLine(
     "unknown";
   if (itemized.startsWith("*deleting")) {
     action = "remove";
-  } else if (itemized.includes("+++++++++")) {
+  } else if (isNewRsyncItem(itemized)) {
     action = "add";
   } else if (itemized[0] === ">" || itemized[0] === "<") {
     action = "update";

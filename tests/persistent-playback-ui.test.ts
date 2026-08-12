@@ -61,19 +61,21 @@ test("owns guarded media playback at the application shell", () => {
 test("accepts guarded host preview URLs without coupling the player to Library or public HLS", () => {
   assert.match(
     playerSource,
-    /audio\.src = track\.sourceUrl/,
+    /audio\.src = track\.source/,
   );
   assert.match(
     appSource,
-    /sourceUrl: buildAudioPreviewUrl\(/,
+    /source: buildAudioPreviewUrl\(/,
   );
   assert.match(
     appSource,
-    /sourceUrl: buildIngestAudioPreviewUrl\(/,
+    /source: buildIngestAudioPreviewUrl\(/,
   );
   assert.doesNotMatch(playerSource, /buildAudioPreviewUrl|buildIngestAudioPreviewUrl/);
   assert.doesNotMatch(playerSource, /hls\.js|Hls\b/);
   assert.doesNotMatch(playerSource, /published-media/);
+  assert.match(playerSource, /type PersistentPlaybackTrack = PlayableMediaItem<string>/);
+  assert.match(playerSource, /getPlayableMediaContext\(track\)/);
 });
 
 test("documents playback continuity across metadata-editor workspaces", () => {
@@ -99,7 +101,8 @@ test("Space transport behavior is shared while metadata-editor keeps its own pla
 
 
 test("persistent footer accepts host-provided waveform URLs and renders the shared waveform surface", () => {
-  assert.match(playerSource, /waveformUrl\?: string \| null/);
+  assert.match(playerSource, /type PersistentPlaybackTrack = PlayableMediaItem<string>/);
+  assert.match(playerSource, /currentTrack\?\.waveformUrl\?\.trim\(\)/);
   assert.match(playerSource, /fetch\(waveformUrl/);
   assert.match(playerSource, /parseMediaWaveformData/);
   assert.match(playerSource, /<CompactNowPlayingBar/);

@@ -45,7 +45,7 @@ test(
 );
 
 test(
-  "production remains explicitly unconfigured until its SSH boundary is supplied",
+  "production defaults to the dedicated hiplingo-prod SSH alias boundary",
   () => {
     const selection =
       resolvePublishedMediaDeploymentProfileSelection(
@@ -54,16 +54,20 @@ test(
       );
 
     assert.equal(selection.profile.name, "production");
-    assert.equal(selection.profile.configured, false);
+    assert.equal(selection.profile.configured, true);
+    assert.equal(
+      selection.profile.targetSource,
+      "default-production-alias",
+    );
     assert.equal(
       selection.environment.PUBLISHED_MEDIA_DEPLOY_TARGET,
-      undefined,
+      "ssh:hiplingo-prod:/var/www/hiplingo.com/published-media",
     );
   },
 );
 
 test(
-  "production profile uses its dedicated target without replacing the local sandbox profile",
+  "production environment override replaces the default alias without replacing the local sandbox profile",
   () => {
     const target =
       "ssh:deploy@example.test:/var/www/hiplingo.com/published-media";
@@ -77,6 +81,7 @@ test(
       );
 
     assert.equal(selection.profile.configured, true);
+    assert.equal(selection.profile.targetSource, "profile-environment");
     assert.equal(
       selection.environment.PUBLISHED_MEDIA_DEPLOY_TARGET,
       target,

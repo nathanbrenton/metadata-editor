@@ -29,7 +29,7 @@ const readmeSource = await readFile(
 );
 
 test(
-  "Live keeps deployment profiles behind connection details without requiring production",
+  "Live keeps deployment profiles behind connection details with the production alias boundary ready",
   () => {
     assert.match(appSource, /Connection & deployment details/);
     assert.match(appSource, /Published media deployment profiles/);
@@ -41,7 +41,12 @@ test(
     );
     assert.match(
       appSource,
-      /PUBLISHED_MEDIA_PRODUCTION_TARGET=ssh:hiplingo-prod:\/var\/www\/hiplingo\.com\/published-media/,
+      /hiplingo-prod:\/var\/www\/hiplingo\.com\/published-media/,
+    );
+    assert.match(profileSource, /default-production-alias/);
+    assert.match(
+      profileSource,
+      /ssh:hiplingo-prod:\/var\/www\/hiplingo\.com\/published-media/,
     );
   },
 );

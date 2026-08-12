@@ -1335,13 +1335,13 @@ export function IngestReleaseBuilder({
   const stagingPlaybackQueue: PersistentPlaybackTrack[] =
     trackSourceFiles.map((file) => ({
       key: `ingest:${currentInspection.candidate.id}:${file.relativePath}`,
-      sourceUrl: buildIngestAudioPreviewUrl(
+      source: buildIngestAudioPreviewUrl(
         file.relativePath,
         file.modifiedAt,
       ),
       title: file.filename,
-      subtitle: currentInspection.candidate.displayTitle,
-      sourceLabel: [
+      releaseTitle: currentInspection.candidate.displayTitle,
+      detail: [
         "Ingest source",
         file.technical.codec ?? file.technical.container,
       ].filter(Boolean).join(" · "),

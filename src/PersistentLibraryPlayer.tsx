@@ -11,6 +11,8 @@ import {
   dedupePlaybackQueue,
   getPlaybackQueueCapabilities,
   getPlaybackQueueNeighbor,
+  getPlayableMediaContext,
+  type PlayableMediaItem,
   useSpacebarPlaybackShortcut,
 } from "@hiplingo/media-player";
 import {
@@ -19,16 +21,9 @@ import {
   type WaveformColorMode,
 } from "./media-waveform.js";
 
-export type PersistentPlaybackTrack = {
-  key: string;
-  sourceUrl: string;
+export type PersistentPlaybackTrack = PlayableMediaItem<string> & {
   releaseId?: string;
   trackId?: string;
-  title: string;
-  subtitle: string;
-  sourceLabel: string;
-  artworkUrl?: string | null;
-  waveformUrl?: string | null;
 };
 
 export type PersistentPlaybackRequest = {
@@ -119,7 +114,7 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
 
       if (loadedTrackKeyRef.current !== track.key) {
         audio.pause();
-        audio.src = track.sourceUrl;
+        audio.src = track.source;
         audio.load();
         loadedTrackKeyRef.current = track.key;
         setCurrentTime(0);
@@ -485,8 +480,8 @@ export function PersistentLibraryPlayerBar({
       artworkUrl={track.artworkUrl}
       artworkFallback={<span>HL</span>}
       title={track.title}
-      context={track.subtitle}
-      detail={track.sourceLabel}
+      context={getPlayableMediaContext(track)}
+      detail={track.detail}
       transport={{
         currentTime: playback.currentTime,
         duration,

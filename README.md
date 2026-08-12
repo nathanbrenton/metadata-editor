@@ -54,7 +54,7 @@ Scalar edits are currently browser-local only. Persisting edits to existing TOML
 Repository boundaries:
 
 - `metadata-editor/` is its own Git repository.
-- `audio-player/` is a separate Git repository and is evolving into the Hiplingo public web application. Its `packages/media-player/` subpackage contains reusable player primitives consumed by both Hiplingo and metadata-editor, including waveform rendering/colors, transport SVGs, player time formatting, the Spacebar shortcut contract, a queue-neutral transport-controller shape, and stable queue navigation helpers; each host still owns its own audio engine, queue state, and data adapter.
+- `audio-player/` is a separate Git repository and is evolving into the Hiplingo public web application. Its `packages/media-player/` subpackage contains reusable player primitives consumed by both Hiplingo and metadata-editor, including waveform rendering/colors, transport SVGs, player time formatting, the Spacebar shortcut contract, a queue-neutral transport-controller shape, stable queue navigation helpers, and the normalized playable-media item contract used for title/artist/release identity, artwork, waveform, and host-owned source descriptors; each host still owns its own audio engine, queue state, and data adapter.
 - `ingest-drop/`, `media-library/`, and `published-media/` remain outside both application repositories.
 - Private canonical roots and public deployment output must not be committed with either application source repository.
 - Do not initialize Git at `~/Desktop/record-label/`.
@@ -384,7 +384,7 @@ npm run stage:published-media -- --output ~/Desktop/metadata-editor-deploy --con
 
 `verify:published-media` is read-only and exits non-zero for integrity blockers, an empty public tree, or a missing/stale deployment manifest. `manifest:published-media` writes only the deployment manifest after the complete public tree verifies. `stage:published-media` requires an explicit confirmation token, refuses to overwrite an existing target, requires a current deployment manifest, and copies only the verified sanitized snapshot into a new local directory. It does not SSH, rsync, configure nginx, or write to the public server.
 
-Deployment Sync & Host Boundary v1 adds a guarded boundary between the verified local snapshot and a deployment destination. Deployment Profiles & Local Sandbox v1 makes that boundary usable before a public server exists. Local Sandbox Lifecycle v1 lets the Production workspace execute the already-reviewed local-sandbox plan and restore its immediately previous verified snapshot from the browser; these write endpoints are hard-restricted to the `local-sandbox` profile with a `local:` filesystem target. Production and SSH deployment/rollback remain CLI-only and unavailable until explicitly configured. The default profile is `local-sandbox`, which mirrors the future Hiplingo public-media location at `~/Desktop/websites/_deploy/hiplingo.com/published-media`. The `production` profile remains intentionally unconfigured until `PUBLISHED_MEDIA_PRODUCTION_TARGET` is set to an SSH target such as `ssh:hiplingo-prod:/var/www/hiplingo.com/published-media`. `PUBLISHED_MEDIA_DEPLOY_TARGET` remains available as a one-off `custom` override. `PUBLISHED_MEDIA_DEPLOY_PROFILE` can select the default named profile for a server process or shell. SSH targets may optionally set `PUBLISHED_MEDIA_DEPLOY_SSH_PORT`. Deployment operation receipts live outside `published-media` and are isolated by profile under the sibling `<published-media>.deployments/<profile>/` directory unless `PUBLISHED_MEDIA_DEPLOY_STATE_ROOT` is explicitly configured.
+Deployment Sync & Host Boundary v1 adds a guarded boundary between the verified local snapshot and a deployment destination. Deployment Profiles & Local Sandbox v1 makes that boundary usable before a public server exists. Local Sandbox Lifecycle v1 lets the Production workspace execute the already-reviewed local-sandbox plan and restore its immediately previous verified snapshot from the browser; these write endpoints are hard-restricted to the `local-sandbox` profile with a `local:` filesystem target. Production and SSH deployment/rollback remain CLI-only. The default profile is `local-sandbox`, which mirrors the Hiplingo public-media location at `~/Desktop/websites/_deploy/hiplingo.com/published-media`. The `production` profile now defaults to `ssh:hiplingo-prod:/var/www/hiplingo.com/published-media`; the local SSH alias owns the remote user, host address, key, and connection details, so metadata-editor stores no server credentials. `PUBLISHED_MEDIA_PRODUCTION_TARGET` can intentionally override that alias target, and `PUBLISHED_MEDIA_DEPLOY_TARGET` remains available as a one-off `custom` override. `PUBLISHED_MEDIA_DEPLOY_PROFILE` can select the default named profile for a server process or shell. SSH targets may optionally set `PUBLISHED_MEDIA_DEPLOY_SSH_PORT`. Deployment operation receipts live outside `published-media` and are isolated by profile under the sibling `<published-media>.deployments/<profile>/` directory unless `PUBLISHED_MEDIA_DEPLOY_STATE_ROOT` is explicitly configured.
 
 The established Hiplingo host boundary keeps frontend and media lifecycles independent:
 
@@ -413,8 +413,10 @@ npm run plan:published-media-deploy -- --profile local-sandbox
 npm run deploy:published-media -- --profile local-sandbox --plan-fingerprint <reviewed-fingerprint> --confirm DEPLOY_PUBLISHED_MEDIA
 npm run rollback:published-media -- --profile local-sandbox --confirm ROLLBACK_PUBLISHED_MEDIA
 
-# Later, when the Debian/nginx server is built:
-export PUBLISHED_MEDIA_PRODUCTION_TARGET='ssh:hiplingo-prod:/var/www/hiplingo.com/published-media'
+# Production uses the already-provisioned hiplingo-prod SSH alias by default:
+# Optional override only; the production profile already defaults to:
+# ssh:hiplingo-prod:/var/www/hiplingo.com/published-media
+export PUBLISHED_MEDIA_PRODUCTION_TARGET='ssh:alternate-alias:/var/www/hiplingo.com/published-media'
 # export PUBLISHED_MEDIA_DEPLOY_SSH_PORT=22
 
 npm run plan:published-media-deploy -- --profile production

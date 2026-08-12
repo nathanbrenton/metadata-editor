@@ -14,6 +14,7 @@ export type PublishedMediaDeploymentProfile = {
   configured: boolean;
   targetSource:
     | "default-local-sandbox"
+    | "default-production-alias"
     | "profile-environment"
     | "explicit-override"
     | "unconfigured";
@@ -38,6 +39,8 @@ export type PublishedMediaDeploymentProfileSelection = {
 const localSandboxName = "local-sandbox";
 const productionName = "production";
 const customName = "custom";
+const defaultProductionTarget =
+  "ssh:hiplingo-prod:/var/www/hiplingo.com/published-media";
 
 function normalizeProfileName(
   value: string | undefined,
@@ -79,10 +82,10 @@ function localSandboxTarget(
 
 function productionTarget(
   environment: NodeJS.ProcessEnv,
-): string | null {
+): string {
   const configured =
     environment.PUBLISHED_MEDIA_PRODUCTION_TARGET?.trim();
-  return configured || null;
+  return configured || defaultProductionTarget;
 }
 
 function buildProfile(
@@ -115,13 +118,14 @@ function buildProfile(
       label: "Production",
       environment: "production",
       active,
-      configured: target !== null,
-      targetSource: target
-        ? "profile-environment"
-        : "unconfigured",
-      ...(target ? { configuredTarget: target } : {}),
+      configured: true,
+      targetSource:
+        environment.PUBLISHED_MEDIA_PRODUCTION_TARGET?.trim()
+          ? "profile-environment"
+          : "default-production-alias",
+      configuredTarget: target,
       description:
-        "Persistent Hiplingo public-media boundary. Configure the hiplingo-prod SSH alias target ending at /var/www/hiplingo.com/published-media; credentials and raw SSH configuration remain outside metadata-editor.",
+        "Persistent Hiplingo public-media boundary through the local hiplingo-prod SSH alias. The alias owns the remote user, key, host address, and connection details; metadata-editor stores only the public-media destination path.",
     };
   }
 

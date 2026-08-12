@@ -20,7 +20,7 @@ test("Web Package and Live reuse the guarded publication workspace with differen
   assert.match(appSource, /Preparing or updating a release here does not make it live/i);
   assert.match(appSource, /Compare it with the Web Package before publishing any changes/i);
   assert.match(appSource, /loadDeploymentTargetStatus\("production"\)/);
-  assert.match(appSource, /PUBLISHED_MEDIA_PRODUCTION_TARGET=ssh:hiplingo-prod:/);
+  assert.match(appSource, /hiplingo-prod:\/var\/www\/hiplingo\.com\/published-media/);
 });
 
 test("Workflow & Help names all three storage/publication boundaries", () => {

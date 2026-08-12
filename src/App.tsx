@@ -7330,7 +7330,7 @@ function PublishWorkspace({
                         ? "Live is up to date"
                         : deploymentSyncPlan?.status === "changes"
                           ? "Changes ready"
-                          : "Live not checked"}
+                          : "Ready to check"}
                   </span>
                   <button
                     type="button"
@@ -7396,7 +7396,7 @@ function PublishWorkspace({
                     <code>~/Desktop/websites/_deploy/hiplingo.com/published-media</code>
                   )}
                   {deploymentTargetStatus.profile.name === "production" && (
-                    <code>/var/www/hiplingo.com/published-media</code>
+                    <code>hiplingo-prod:/var/www/hiplingo.com/published-media</code>
                   )}
                 </div>
               )}
@@ -7540,8 +7540,8 @@ function PublishWorkspace({
                 <div className="publish-host-boundary-unconfigured">
                   {deploymentTargetStatus?.profile.name === "production" ? (
                     <>
-                      <span>Live is not connected yet. Connection uses only the existing SSH alias boundary; credentials, keys, server IPs, and raw SSH configuration stay outside metadata-editor.</span>
-                      <code>PUBLISHED_MEDIA_PRODUCTION_TARGET=ssh:hiplingo-prod:/var/www/hiplingo.com/published-media</code>
+                      <span>The built-in Production boundary uses only the local hiplingo-prod SSH alias. If this appears unconfigured, restart metadata-editor after updating to the current production profile.</span>
+                      <code>hiplingo-prod:/var/www/hiplingo.com/published-media</code>
                     </>
                   ) : (
                     <>
@@ -9200,13 +9200,13 @@ function IngestCandidateInspectionView({
         file.mediaKind === "audio"
           ? [{
               key: `ingest:${candidate.id}:${file.relativePath}`,
-              sourceUrl: buildIngestAudioPreviewUrl(
+              source: buildIngestAudioPreviewUrl(
                 file.relativePath,
                 file.modifiedAt,
               ),
               title: file.filename,
-              subtitle: candidate.displayTitle,
-              sourceLabel: [
+              releaseTitle: candidate.displayTitle,
+              detail: [
                 "Ingest source",
                 file.technical.codec ?? file.technical.container,
               ].filter(Boolean).join(" · "),
@@ -19819,7 +19819,7 @@ function ReleaseMetadataDetailView({
 
         return [{
           key: `${detail.releaseId}::${trackId}`,
-          sourceUrl: buildAudioPreviewUrl(
+          source: buildAudioPreviewUrl(
             detail.releaseId,
             trackId,
           ),
@@ -19830,10 +19830,9 @@ function ReleaseMetadataDetailView({
           releaseId: detail.releaseId,
           trackId,
           title,
-          subtitle: releaseArtist
-            ? `${releaseArtist} · ${releaseTitle}`
-            : releaseTitle,
-          sourceLabel:
+          artist: releaseArtist || null,
+          releaseTitle,
+          detail:
             getAudioPreviewSourceLabel(scannedTrack),
           artworkUrl: effectiveArtwork
             ? artworkPreviewUrl(
