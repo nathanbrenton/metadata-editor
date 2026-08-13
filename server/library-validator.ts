@@ -38,6 +38,9 @@ import type {
 import {
   parseTrackDirectoryId,
 } from "../shared/track-directory-naming.js";
+import {
+  isPrimaryArtworkMasterForOwner,
+} from "../shared/artwork-role-path.js";
 
 export type LibraryValidationSeverity =
   | "warning"
@@ -945,6 +948,13 @@ async function validateAssets(
   documents: ReleaseDocuments,
 ): Promise<LibraryValidationIssue[]> {
   const issues: LibraryValidationIssue[] = [];
+  const primaryReleaseArtworkMasters =
+    release.artworkMasters.filter((artwork) =>
+      isPrimaryArtworkMasterForOwner(
+        release.relativePath,
+        artwork,
+      ),
+    );
 
   if (release.artworkMasters.length === 0) {
     issues.push(
@@ -955,13 +965,13 @@ async function validateAssets(
         "No release artwork-master file was detected. Library editing can continue, but public presentation artwork is incomplete.",
       ),
     );
-  } else if (release.artworkMasters.length > 1) {
+  } else if (primaryReleaseArtworkMasters.length > 1) {
     issues.push(
       issue(
         "multiple-release-artwork-masters",
         "warning",
         release.relativePath,
-        `Multiple release artwork masters were detected: ${release.artworkMasters.map((asset) => asset.filename).join(", ")}.`,
+        `Multiple primary release artwork masters were detected: ${primaryReleaseArtworkMasters.map((asset) => asset.relativePath).join(", ")}.`,
       ),
     );
   }
@@ -1025,13 +1035,21 @@ async function validateAssets(
       );
     }
 
-    if (track.artworkMasters.length > 1) {
+    const primaryTrackArtworkMasters =
+      track.artworkMasters.filter((artwork) =>
+        isPrimaryArtworkMasterForOwner(
+          track.relativePath,
+          artwork,
+        ),
+      );
+
+    if (primaryTrackArtworkMasters.length > 1) {
       issues.push(
         issue(
           "multiple-track-artwork-masters",
           "warning",
           track.relativePath,
-          `Multiple track artwork masters were detected: ${track.artworkMasters.map((asset) => asset.filename).join(", ")}.`,
+          `Multiple primary track artwork masters were detected: ${primaryTrackArtworkMasters.map((asset) => asset.relativePath).join(", ")}.`,
         ),
       );
     }

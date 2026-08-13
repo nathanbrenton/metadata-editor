@@ -70,6 +70,16 @@ import { extractEmbeddedArtwork } from "./embedded-artwork.js";
 import {
   buildGeneratedTomlPreview,
 } from "./toml-preview.js";
+import {
+  inspectWaveformDocument,
+} from "./media-processing/plan.js";
+import {
+  buildMediaProcessingProfile,
+} from "./media-processing/profile.js";
+import {
+  writeStagingWaveform,
+  type StagingWaveformWriter,
+} from "./media-processing/staging-waveform.js";
 import type {
   GeneratedMetadataDocument,
   LibraryMetadataPreview,
@@ -129,6 +139,20 @@ type PreparedRemoval = {
   reason: string;
 };
 
+type PreparedWaveform = {
+  trackId: string;
+  masterDestinationRelativePath: string;
+  masterDestinationWithinRelease: string;
+  destinationRelativePath: string;
+  destinationWithinRelease: string;
+  writeAction: "create" | "replace" | "preserve";
+  reason: string;
+};
+
+export type ExecuteIngestReleaseBuildOptions = {
+  waveformWriter?: StagingWaveformWriter;
+};
+
 type PreparedIngestBuild = {
   preview: IngestBuildPreview;
   operation: IngestBuildOperation;
@@ -137,6 +161,7 @@ type PreparedIngestBuild = {
   documents: PreparedDocument[];
   copies: PreparedCopy[];
   removals: PreparedRemoval[];
+  waveforms: PreparedWaveform[];
   preservedFiles: string[];
   receiptContent: string;
 };
@@ -2770,6 +2795,147 @@ function videoMetadataDocument(
   };
 }
 
+async function prepareStagingWaveforms(
+  releasePath: string,
+  releaseRelativePath: string,
+  operation: IngestBuildOperation,
+  tracks: PreparedIngestTrack[],
+): Promise<PreparedWaveform[]> {
+  const profile =
+    buildMediaProcessingProfile();
+
+  return Promise.all(
+    tracks.map(async (track) => {
+      const destinationRelativePath =
+        `${track.relativePath}/${profile.waveform.filename}`;
+      const destinationWithinRelease =
+        withinReleasePath(
+          releaseRelativePath,
+          destinationRelativePath,
+        );
+      const masterDestinationRelativePath =
+        `${track.relativePath}/${track.audioDestination}`;
+      const masterDestinationWithinRelease =
+        withinReleasePath(
+          releaseRelativePath,
+          masterDestinationRelativePath,
+        );
+
+      if (
+        operation === "create" ||
+        !track.existingTrack
+      ) {
+        return {
+          trackId: track.id,
+          masterDestinationRelativePath,
+          masterDestinationWithinRelease,
+          destinationRelativePath,
+          destinationWithinRelease,
+          writeAction: "create" as const,
+          reason:
+            "The Staging build will generate Library waveform peaks from the canonical audio master.",
+        };
+      }
+
+      const existingWaveformPath =
+        assertPathWithinRoot(
+          releasePath,
+          path.join(
+            releasePath,
+            ...destinationWithinRelease.split("/"),
+          ),
+        );
+
+      if (!(await pathExists(existingWaveformPath))) {
+        return {
+          trackId: track.id,
+          masterDestinationRelativePath,
+          masterDestinationWithinRelease,
+          destinationRelativePath,
+          destinationWithinRelease,
+          writeAction: "create" as const,
+          reason:
+            "This existing Library track is missing waveform peaks; the Staging build will generate them.",
+        };
+      }
+
+      const waveformStats =
+        await lstat(existingWaveformPath);
+
+      if (
+        waveformStats.isSymbolicLink() ||
+        !waveformStats.isFile()
+      ) {
+        throw new Error(
+          `Waveform destination is not a regular Library file: ${destinationRelativePath}`,
+        );
+      }
+
+      if (track.replacement) {
+        return {
+          trackId: track.id,
+          masterDestinationRelativePath,
+          masterDestinationWithinRelease,
+          destinationRelativePath,
+          destinationWithinRelease,
+          writeAction: "replace" as const,
+          reason:
+            "The canonical audio is being replaced, so the Staging build will regenerate this waveform from the new master.",
+        };
+      }
+
+      const existingMasterPath =
+        assertPathWithinRoot(
+          releasePath,
+          path.join(
+            releasePath,
+            ...withinReleasePath(
+              releaseRelativePath,
+              track.existingTrack.destinationRelativePath,
+            ).split("/"),
+          ),
+        );
+      const masterStats =
+        await lstat(existingMasterPath);
+      let waveformCurrent =
+        waveformStats.mtimeMs >=
+        masterStats.mtimeMs;
+
+      if (waveformCurrent) {
+        try {
+          const waveformDocument = JSON.parse(
+            await readFile(
+              existingWaveformPath,
+              "utf8",
+            ),
+          ) as unknown;
+          waveformCurrent =
+            inspectWaveformDocument(
+              waveformDocument,
+              profile.waveform,
+            ).valid;
+        } catch {
+          waveformCurrent = false;
+        }
+      }
+
+      return {
+        trackId: track.id,
+        masterDestinationRelativePath,
+        masterDestinationWithinRelease,
+        destinationRelativePath,
+        destinationWithinRelease,
+        writeAction: waveformCurrent
+          ? "preserve" as const
+          : "replace" as const,
+        reason: waveformCurrent
+          ? "The existing Library waveform is current and will be preserved."
+          : "The existing Library waveform is stale or does not match the active profile; the Staging build will refresh it.",
+      };
+    }),
+  );
+}
+
 export async function prepareIngestReleaseBuild(
   ingestRoot: string,
   outputRoot: string,
@@ -3673,7 +3839,6 @@ export async function prepareIngestReleaseBuild(
 
       for (const derivative of [
         `${track.relativePath}/audio-playback.mp3`,
-        `${track.relativePath}/waveform-peaks.json`,
         `${track.relativePath}/stream`,
       ]) {
         if (
@@ -3684,7 +3849,7 @@ export async function prepareIngestReleaseBuild(
         }
         await scheduleRemovalIfPresent(
           derivative,
-          "This generated derivative depends on the previous canonical audio and must be regenerated by Prepare release.",
+          "This generated playback/stream derivative depends on the previous canonical audio and must be regenerated by media preparation.",
         );
       }
       continue;
@@ -4722,6 +4887,14 @@ export async function prepareIngestReleaseBuild(
     }
   }
 
+  const waveforms =
+    await prepareStagingWaveforms(
+      releasePath,
+      releaseRelativePath,
+      operation,
+      tracks,
+    );
+
   const destinationSet = new Set<string>();
 
   for (const destination of [
@@ -4737,6 +4910,15 @@ export async function prepareIngestReleaseBuild(
       .map(
         (document) =>
           document.relativePath,
+      ),
+    ...waveforms
+      .filter(
+        (waveform) =>
+          waveform.writeAction === "create",
+      )
+      .map(
+        (waveform) =>
+          waveform.destinationRelativePath,
       ),
   ]) {
     if (destinationSet.has(destination)) {
@@ -4850,6 +5032,32 @@ export async function prepareIngestReleaseBuild(
             : "Source bytes will be copied and hash-verified without changing the ingest source.",
       }),
     ),
+    ...waveforms.map(
+      (waveform): IngestBuildPlanItem => ({
+        kind: "waveform",
+        destinationRelativePath:
+          waveform.destinationRelativePath,
+        mediaKind: "audio",
+        logicalRoles: [
+          "library-waveform",
+        ],
+        action:
+          waveform.writeAction === "create"
+            ? operation === "create"
+              ? "create"
+              : "add"
+            : waveform.writeAction === "replace"
+              ? "update"
+              : "preserve",
+        adjustment:
+          waveform.writeAction === "create"
+            ? "Generate Library waveform"
+            : waveform.writeAction === "replace"
+              ? "Refresh Library waveform"
+              : "Current Library waveform",
+        reason: waveform.reason,
+      }),
+    ),
     ...removals.map(
       (removal): IngestBuildPlanItem => ({
         kind: "copy",
@@ -4919,6 +5127,21 @@ export async function prepareIngestReleaseBuild(
       (video) => !video.existingVideo,
     ).length,
     copiedFileCount: copies.length,
+    waveformCreateCount:
+      waveforms.filter(
+        (waveform) =>
+          waveform.writeAction === "create",
+      ).length,
+    waveformReplaceCount:
+      waveforms.filter(
+        (waveform) =>
+          waveform.writeAction === "replace",
+      ).length,
+    waveformPreserveCount:
+      waveforms.filter(
+        (waveform) =>
+          waveform.writeAction === "preserve",
+      ).length,
     tomlCount: documents.length,
     totalCopyBytes: copies.reduce(
       (total, copy) =>
@@ -4976,12 +5199,12 @@ export async function prepareIngestReleaseBuild(
         ? [
             "Source audio is copied byte-for-byte; embedded metadata is not rewritten.",
             "Canonical audio is stored as audio-master.<original-extension> while retaining the source container extension.",
-            "No playback derivative is created during Staging. Library playback MP3s and website HLS streams are prepared separately from the canonical Library master.",
+            "Staging generates and validates Library waveform-peaks.json from each canonical audio master during the guarded build. Private playback MP3s and website HLS streams remain separate preparation jobs.",
             "Probe-verified video is copied byte-for-byte into videos/<stable-id>/video-master.<original-extension> with a companion video.toml; public video streaming derivatives are not generated yet.",
           ]
         : [
             "Existing authored metadata and stable track IDs are preserved. Existing Library tracks omitted from the current ingest candidate remain untouched automatically.",
-            "An explicit Replace canonical audio choice may supersede one verified master; generated Library playback MP3, HLS, and waveform derivatives for that track are removed so Prepare release can regenerate them from the new canonical audio.",
+            "An explicit Replace canonical audio choice may supersede one verified master; private playback MP3 and HLS derivatives are invalidated, while waveform-peaks.json is regenerated from the new canonical master inside this guarded Staging build.",
             "Track directory IDs remain stable when the displayed track order changes or canonical audio is replaced.",
             "New artwork can be added from a later ingest candidate. Replacing occupied canonical artwork requires explicit confirmation and preserves unrelated authored metadata.",
             "New canonical videos may be added to an existing release and existing verified videos are preserved when absent from the current candidate. Canonical video replacement remains a separate reviewed workflow.",
@@ -4998,6 +5221,7 @@ export async function prepareIngestReleaseBuild(
     documents,
     copies,
     removals,
+    waveforms,
     preservedFiles,
     receiptContent,
   };
@@ -5209,6 +5433,7 @@ export async function executeIngestReleaseBuild(
   outputRootLabel =
     process.env.INGEST_OUTPUT_ROOT ??
     defaultIngestOutputRoot,
+  options: ExecuteIngestReleaseBuildOptions = {},
 ): Promise<IngestBuildResult> {
   const prepared =
     await prepareIngestReleaseBuild(
@@ -5218,6 +5443,9 @@ export async function executeIngestReleaseBuild(
       draft,
       outputRootLabel,
     );
+  const waveformWriter =
+    options.waveformWriter ??
+    writeStagingWaveform;
   const expectedConfirmation =
     prepared.preview.confirmationPhrase;
 
@@ -5417,6 +5645,37 @@ export async function executeIngestReleaseBuild(
       }
     }
 
+    for (const waveform of prepared.waveforms) {
+      if (
+        waveform.writeAction !== "create" &&
+        waveform.writeAction !== "replace"
+      ) {
+        continue;
+      }
+
+      const masterPath =
+        assertPathWithinRoot(
+          stagingPath,
+          path.join(
+            stagingPath,
+            ...waveform.masterDestinationWithinRelease.split("/"),
+          ),
+        );
+      const waveformPath =
+        assertPathWithinRoot(
+          stagingPath,
+          path.join(
+            stagingPath,
+            ...waveform.destinationWithinRelease.split("/"),
+          ),
+        );
+
+      await waveformWriter(
+        masterPath,
+        waveformPath,
+      );
+    }
+
     const receipt = JSON.parse(
       prepared.receiptContent,
     ) as Record<string, unknown>;
@@ -5525,6 +5784,15 @@ export async function executeIngestReleaseBuild(
           (document) =>
             document.relativePath,
         ),
+      ...prepared.waveforms
+        .filter(
+          (waveform) =>
+            waveform.writeAction === "create",
+        )
+        .map(
+          (waveform) =>
+            waveform.destinationRelativePath,
+        ),
       ...(prepared.operation === "create"
         ? [
             `${prepared.releaseRelativePath}/ingest-receipt.json`,
@@ -5545,6 +5813,15 @@ export async function executeIngestReleaseBuild(
         .map(
           (document) =>
             document.relativePath,
+        ),
+      ...prepared.waveforms
+        .filter(
+          (waveform) =>
+            waveform.writeAction === "replace",
+        )
+        .map(
+          (waveform) =>
+            waveform.destinationRelativePath,
         ),
       ...(prepared.operation === "update"
         ? [

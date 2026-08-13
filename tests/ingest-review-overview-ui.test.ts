@@ -27,15 +27,19 @@ const helpSource = readFileSync(
 );
 
 test(
-  "makes staging Review release-oriented before technical plan detail",
+  "makes staging Build release-oriented with the plan action first",
   () => {
+    assert.match(
+      builderSource,
+      /className="ingest-build-plan-launcher"/,
+    );
     assert.match(
       builderSource,
       /className="ingest-review-release-card"/,
     );
     assert.match(
       builderSource,
-      /Release review/,
+      /Final release/,
     );
     assert.match(
       builderSource,
@@ -47,7 +51,7 @@ test(
     );
     assert.match(
       builderSource,
-      /<h4>Preflight<\/h4>/,
+      /<h4>Build readiness<\/h4>/,
     );
   },
 );
@@ -80,7 +84,7 @@ test(
 );
 
 test(
-  "keeps exact staging mechanics in collapsed Review details",
+  "keeps exact staging mechanics in collapsed Build details",
   () => {
     assert.match(
       builderSource,
@@ -106,11 +110,11 @@ test(
 );
 
 test(
-  "documents the release-first Review workflow",
+  "documents the release-first Build workflow",
   () => {
     assert.match(
       helpSource,
-      /Review the release as a release before writing files/,
+      /Build is the final Staging step before files are written/,
     );
     assert.match(
       helpSource,

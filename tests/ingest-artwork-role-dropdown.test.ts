@@ -25,7 +25,7 @@ test("offers a controlled alternate-front artwork role", () => {
   );
   assert.match(
     builderSource,
-    /<select[\s\S]*?value=\{assignment\.role\}[\s\S]*?ingestArtworkRoleOptions\.map/,
+    /<select[\s\S]*?value=\{assignment\.role\}[\s\S]*?renderRoleOptions\(assignment\)/,
   );
   assert.match(
     builderSource,

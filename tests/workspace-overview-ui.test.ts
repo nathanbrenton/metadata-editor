@@ -27,7 +27,8 @@ test("Staging uses metadata readiness icons and compact guarded update guidance"
   assert.match(appSource, /staging-metadata-readiness-icon/);
   assert.match(appSource, /Guarded update/);
   assert.match(appSource, /staging-update-mode/);
-  assert.match(appSource, />\s*Open in Library\s*<\/button>/);
+  assert.match(appSource, /className="staging-release-row staging-release-row--clickable"/);
+  assert.match(appSource, /tabIndex=\{0\}/);
 });
 
 test("Library offers persisted Rows Cards Tiles and Waveform views without a redundant metadata button", () => {

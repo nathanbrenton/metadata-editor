@@ -189,6 +189,7 @@ export type IngestBuildPlanItem = {
   kind:
     | "directory"
     | "copy"
+    | "waveform"
     | "toml"
     | "receipt";
   sourceRelativePath?: string;
@@ -215,6 +216,9 @@ export type IngestBuildPreview = {
     videoCount: number;
     addedVideoCount: number;
     copiedFileCount: number;
+    waveformCreateCount: number;
+    waveformReplaceCount: number;
+    waveformPreserveCount: number;
     tomlCount: number;
     totalCopyBytes: number;
     blockedCount: number;

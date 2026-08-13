@@ -16,6 +16,9 @@ import {
   selectPreferredArtworkCandidate,
 } from "../shared/artwork-preference.js";
 import {
+  isPrimaryArtworkMasterForOwner,
+} from "../shared/artwork-role-path.js";
+import {
   acceptedArtworkMasterExtensions,
   acceptedAudioMasterExtensions,
   acceptedVideoMasterExtensions,
@@ -626,9 +629,17 @@ function buildScannerWarnings(
       );
     }
 
-    if (release.artworkMasters.length > 1) {
+    const primaryReleaseArtworkMasters =
+      release.artworkMasters.filter((artwork) =>
+        isPrimaryArtworkMasterForOwner(
+          release.relativePath,
+          artwork,
+        ),
+      );
+
+    if (primaryReleaseArtworkMasters.length > 1) {
       const preferred = selectPreferredArtworkCandidate(
-        release.artworkMasters,
+        primaryReleaseArtworkMasters,
       );
 
       warnings.push(
@@ -722,9 +733,17 @@ function buildScannerWarnings(
         );
       }
 
-      if (track.artworkMasters.length > 1) {
+      const primaryTrackArtworkMasters =
+        track.artworkMasters.filter((artwork) =>
+          isPrimaryArtworkMasterForOwner(
+            track.relativePath,
+            artwork,
+          ),
+        );
+
+      if (primaryTrackArtworkMasters.length > 1) {
         const preferred = selectPreferredArtworkCandidate(
-          track.artworkMasters,
+          primaryTrackArtworkMasters,
         );
 
         warnings.push(

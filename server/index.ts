@@ -137,6 +137,10 @@ import {
   scanReleaseById,
 } from "./scanner.js";
 import {
+  buildStagingLibraryBuildPlan,
+  executeStagingLibraryBuild,
+} from "./staging-library-build.js";
+import {
   buildReleaseRenamePlan,
   executeReleaseRenamePlan,
 } from "./release-rename.js";
@@ -1473,6 +1477,108 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown staging-target error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/staging/library-build-plan"
+    ) {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+
+      if (!releaseId) {
+        sendJson(response, 400, {
+          error: "Missing Library release ID",
+        });
+        return;
+      }
+
+      try {
+        const mediaRoot =
+          await resolveMediaRoot();
+        sendJson(
+          response,
+          200,
+          await buildStagingLibraryBuildPlan(
+            mediaRoot,
+            releaseId,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown Staging Library Build plan error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/staging/library-build"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          Array.isArray(body)
+        ) {
+          throw new Error(
+            "Expected a Staging Library Build request object.",
+          );
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : "";
+        const planFingerprint =
+          "planFingerprint" in body &&
+          typeof body.planFingerprint === "string"
+            ? body.planFingerprint
+            : "";
+        const confirmation =
+          "confirmation" in body &&
+          typeof body.confirmation === "string"
+            ? body.confirmation
+            : "";
+
+        if (!releaseId || !planFingerprint) {
+          throw new Error(
+            "releaseId and planFingerprint are required.",
+          );
+        }
+
+        const mediaRoot =
+          await resolveMediaRoot();
+        sendJson(
+          response,
+          200,
+          await executeStagingLibraryBuild(
+            mediaRoot,
+            releaseId,
+            planFingerprint,
+            confirmation,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown Staging Library Build error",
         });
       }
 

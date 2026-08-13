@@ -29,8 +29,28 @@ test("Staging uses artwork-first rows with hover paths and compact readiness wor
   assert.match(appSource, /Library path: \$\{release\.relativePath\}/);
   assert.match(appSource, /<th scope="col">Metadata<\/th>/);
   assert.match(appSource, /<th scope="col">Update mode<\/th>/);
-  assert.match(appSource, /<th scope="col" className="action-column">Next step<\/th>/);
-  assert.match(appSource, />\s*Open in Library\s*<\/button>/);
+  const stagingTableStart = appSource.indexOf(
+    '<table className="workflow-workspace-table staging-release-table">',
+  );
+  assert.notEqual(stagingTableStart, -1);
+
+  const stagingTableEnd = appSource.indexOf(
+    "</table>",
+    stagingTableStart,
+  );
+  assert.notEqual(stagingTableEnd, -1);
+
+  const stagingTableSource = appSource.slice(
+    stagingTableStart,
+    stagingTableEnd,
+  );
+
+  assert.doesNotMatch(
+    stagingTableSource,
+    /<th scope="col" className="action-column">/,
+  );
+  assert.match(appSource, /className="staging-release-row staging-release-row--clickable"/);
+  assert.match(appSource, /onClick=\{\(\) =>[\s\S]*?setSelectedBuildReleaseId\(release\.id\)/);
 });
 
 test("Library persists sorting and uses icon view controls with columnar rows", () => {

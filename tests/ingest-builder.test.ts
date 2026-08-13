@@ -19,16 +19,47 @@ import {
   INGEST_BUILD_CONFIRMATION_PHRASE,
   INGEST_UPDATE_CONFIRMATION_PHRASE,
   createDefaultIngestBuildDraft,
+  type IngestBuildDraft,
 } from "../shared/ingest-builder.js";
 import type {
   IngestCandidateInspection,
   IngestFileInspection,
 } from "../shared/ingest-types.js";
 import {
-  executeIngestReleaseBuild,
+  executeIngestReleaseBuild as executeIngestReleaseBuildReal,
   inspectIngestStagingTarget,
   prepareIngestReleaseBuild,
 } from "../server/ingest-builder.js";
+
+async function executeIngestReleaseBuild(
+  ingestRoot: string,
+  outputRoot: string,
+  inspection: IngestCandidateInspection,
+  draft: IngestBuildDraft,
+  confirmation: string,
+  outputRootLabel?: string,
+) {
+  return executeIngestReleaseBuildReal(
+    ingestRoot,
+    outputRoot,
+    inspection,
+    draft,
+    confirmation,
+    outputRootLabel,
+    {
+      waveformWriter: async (
+        _masterPath,
+        waveformPath,
+      ) => {
+        await writeFile(
+          waveformPath,
+          '{"testWaveform":true}\n',
+          "utf8",
+        );
+      },
+    },
+  );
+}
 
 async function createFixture() {
   const root = await mkdtemp(
@@ -1148,7 +1179,11 @@ test(
     assert.equal(prepared.preview.summary.replacedTrackCount, 1);
     assert.equal(prepared.preview.summary.addedTrackCount, 0);
     assert.equal(prepared.preview.summary.blockedCount, 0);
-    assert.ok(prepared.preview.summary.removedFileCount >= 4);
+    assert.ok(prepared.preview.summary.removedFileCount >= 3);
+    assert.equal(
+      prepared.preview.summary.waveformReplaceCount,
+      1,
+    );
     assert.ok(
       prepared.preview.items.some(
         (item) =>
@@ -1186,8 +1221,12 @@ test(
     await assert.rejects(
       stat(path.join(trackRoot, "audio-playback.mp3")),
     );
-    await assert.rejects(
-      stat(path.join(trackRoot, "waveform-peaks.json")),
+    assert.equal(
+      await readFile(
+        path.join(trackRoot, "waveform-peaks.json"),
+        "utf8",
+      ),
+      '{"testWaveform":true}\n',
     );
     await assert.rejects(
       stat(path.join(trackRoot, "stream")),

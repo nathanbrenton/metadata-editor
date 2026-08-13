@@ -28,16 +28,17 @@ test("Staging exposes one explicit canonical-audio replacement choice for existi
   assert.match(sharedSource, /existingTracks: IngestStagingTrackTarget\[\]/);
 });
 
-test("canonical-audio replacement invalidates generated derivatives instead of silently overwriting them", () => {
+test("canonical-audio replacement invalidates playback streams and schedules waveform regeneration", () => {
   assert.match(serverSource, /Explicit canonical-audio replacement/);
   assert.match(serverSource, /audio-playback\.mp3/);
+  assert.match(serverSource, /prepareStagingWaveforms/);
   assert.match(serverSource, /waveform-peaks\.json/);
   assert.match(serverSource, /`\$\{track\.relativePath\}\/stream`/);
   assert.match(serverSource, /Choose Replace canonical audio/);
 });
 
-test("Workflow & Help documents disposable revision candidates and derivative regeneration", () => {
+test("Workflow & Help documents disposable revision candidates and Build-time waveform regeneration", () => {
   assert.match(helpSource, /tracks that are absent from the current ingest candidate are preserved automatically/i);
   assert.match(helpSource, /Replace canonical audio/i);
-  assert.match(helpSource, /Prepare release can regenerate/i);
+  assert.match(helpSource, /regenerates waveform-peaks\.json/i);
 });

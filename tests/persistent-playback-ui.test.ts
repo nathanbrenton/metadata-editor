@@ -177,3 +177,26 @@ test("persistent playback consumes shared queue navigation and transport control
   assert.match(playerSource, /next: playback\.next/);
   assert.doesNotMatch(playerSource, /queueRef\.current\[currentIndex \+ direction\]/);
 });
+
+test("persistent footer is visible before the first playback selection", () => {
+  assert.doesNotMatch(
+    playerSource,
+    /if \(!track\) \{\s*return null;\s*\}/,
+  );
+  assert.match(
+    playerSource,
+    /title=\{track\?\.title \?\? "Ready to preview"\}/,
+  );
+  assert.match(
+    playerSource,
+    /Choose a track in Ingest, Staging, or Library/,
+  );
+  assert.match(
+    playerSource,
+    /canToggle: Boolean\(track\)/,
+  );
+  assert.match(
+    helpSource,
+    /player footer is always visible/,
+  );
+});

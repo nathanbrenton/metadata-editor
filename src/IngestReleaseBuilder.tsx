@@ -402,11 +402,13 @@ function PlanKindIcon({
   const iconKind =
     kind === "directory"
       ? "directory"
-      : kind === "toml"
-        ? "toml"
-        : kind === "receipt"
-          ? "receipt"
-          : mediaKind === "audio"
+      : kind === "waveform"
+        ? "waveform"
+        : kind === "toml"
+          ? "toml"
+          : kind === "receipt"
+            ? "receipt"
+            : mediaKind === "audio"
             ? "audio"
             : mediaKind === "video"
               ? "video"
@@ -416,9 +418,11 @@ function PlanKindIcon({
   const label =
     iconKind === "directory"
       ? "Directory"
-      : iconKind === "toml"
-        ? "TOML document"
-        : iconKind === "audio"
+      : iconKind === "waveform"
+        ? "Waveform peaks"
+        : iconKind === "toml"
+          ? "TOML document"
+          : iconKind === "audio"
           ? "Audio file"
           : iconKind === "video"
             ? "Video file"
@@ -438,6 +442,10 @@ function PlanKindIcon({
       {iconKind === "directory" ? (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M3 5.5h6l2 2H21v11H3z" />
+        </svg>
+      ) : iconKind === "waveform" ? (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 12h2l1.5-5 2.5 10 2-8 2.5 6 2-9 2.5 11 1.5-5H21v2h-3l-1 3.5L14.5 8l-2 9-2.5-6-2 8L5.5 9 5 14H3z" />
         </svg>
       ) : iconKind === "audio" ? (
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -535,113 +543,335 @@ function artworkPhysicalCopyCount(
 function ArtworkAssignmentsEditor({
   asset,
   tracks,
+  existingTracks,
   disabled,
   onChange,
 }: {
   asset: IngestBuildAssetDraft;
   tracks: IngestBuildTrackDraft[];
+  existingTracks: IngestStagingTargetStatus["existingTracks"];
   disabled: boolean;
   onChange: (
     patch: Partial<IngestBuildAssetDraft>,
   ) => void;
 }) {
-  if (asset.mediaKind !== "image") {
-    return (
-      <span className="ingest-artwork-assignment-empty">
-        Not artwork
-      </span>
-    );
-  }
+  const [draftAssignment, setDraftAssignment] =
+    useState<IngestArtworkAssignmentDraft | null>(null);
 
-  const assignments = asset.artworkAssignments;
-  const roleListId =
-    `ingest-artwork-role-${asset.sourceRelativePath.replace(/[^a-z0-9]+/gi, "-")}`;
+  const existingTrackSourcePaths = new Set(
+    existingTracks.map((track) =>
+      track.sourceRelativePath
+    ),
+  );
 
-  const updateAssignment = (
-    assignmentId: string,
+  const updateExistingAssignment = (
+    assignmentIndex: number,
     patch: Partial<IngestArtworkAssignmentDraft>,
   ) => {
-    onChange({
-      include: true,
-      artworkAssignments: assignments.map(
-        (assignment) =>
-          assignment.id === assignmentId
+    const artworkAssignments =
+      asset.artworkAssignments.map(
+        (assignment, index) =>
+          index === assignmentIndex
             ? {
                 ...assignment,
                 ...patch,
               }
             : assignment,
-      ),
+      );
+
+    onChange({
+      include: artworkAssignments.length > 0,
+      artworkAssignments,
     });
   };
 
-  const removeAssignment = (
-    assignmentId: string,
+  const removeExistingAssignment = (
+    assignmentIndex: number,
   ) => {
-    const next = assignments.filter(
-      (assignment) =>
-        assignment.id !== assignmentId,
+    const artworkAssignments =
+      asset.artworkAssignments.filter(
+        (_, index) => index !== assignmentIndex,
+      );
+
+    onChange({
+      include: artworkAssignments.length > 0,
+      artworkAssignments,
+    });
+  };
+
+  const updateDraftAssignment = (
+    patch: Partial<IngestArtworkAssignmentDraft>,
+  ) => {
+    setDraftAssignment((current) =>
+      current
+        ? {
+            ...current,
+            ...patch,
+          }
+        : current,
     );
+  };
 
-    onChange({
-      artworkAssignments: next,
-      include: next.length > 0,
+  const renderRoleOptions = (
+    assignment: IngestArtworkAssignmentDraft,
+  ) => (
+    <>
+      {!ingestArtworkRoleOptions.some(
+        (role) => role === assignment.role,
+      ) &&
+        assignment.role.trim() && (
+          <option value={assignment.role}>
+            {artworkRoleLabel(assignment.role)}
+          </option>
+        )}
+      {ingestArtworkRoleOptions.map((role) => (
+        <option key={role} value={role}>
+          {artworkRoleLabel(role)}
+        </option>
+      ))}
+    </>
+  );
+
+  const renderTrackTargets = (
+    assignment: IngestArtworkAssignmentDraft,
+    draft: boolean,
+    assignmentIndex?: number,
+  ) => {
+    if (assignment.scope !== "track") {
+      return null;
+    }
+
+    return (
+      <fieldset className="ingest-artwork-assignment-track-targets">
+        <legend>Tracks</legend>
+        <div>
+          {tracks.map((track) => {
+            const selected =
+              assignment.trackSourceRelativePaths.includes(
+                track.sourceRelativePath,
+              );
+            const existingLibraryTrack =
+              existingTrackSourcePaths.has(
+                track.sourceRelativePath,
+              );
+            const trackDisabled =
+              disabled ||
+              (
+                !track.include &&
+                !existingLibraryTrack
+              );
+
+            return (
+              <label
+                key={track.sourceRelativePath}
+                title={
+                  existingLibraryTrack
+                    ? "Existing Library track preserved in this update; it remains available for artwork assignment."
+                    : track.include
+                      ? undefined
+                      : "This candidate track is not included in the staging draft."
+                }
+              >
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  disabled={trackDisabled}
+                  onChange={(event) => {
+                    const trackSourceRelativePaths =
+                      event.target.checked
+                        ? [
+                            ...new Set([
+                              ...assignment.trackSourceRelativePaths,
+                              track.sourceRelativePath,
+                            ]),
+                          ]
+                        : assignment.trackSourceRelativePaths.filter(
+                            (path) =>
+                              path !==
+                              track.sourceRelativePath,
+                          );
+
+                    if (draft) {
+                      updateDraftAssignment({
+                        trackSourceRelativePaths,
+                      });
+                    } else if (
+                      assignmentIndex !== undefined
+                    ) {
+                      updateExistingAssignment(
+                        assignmentIndex,
+                        {
+                          trackSourceRelativePaths,
+                        },
+                      );
+                    }
+                  }}
+                />
+                <span>
+                  {trackLabel(track)}
+                  {existingLibraryTrack
+                    ? " · Existing Library"
+                    : ""}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+    );
+  };
+
+  const beginDraftAssignment = () => {
+    setDraftAssignment({
+      id: createArtworkAssignmentId(
+        asset.artworkAssignments,
+      ),
+      scope: "release",
+      role:
+        asset.artworkAssignments.length > 0
+          ? "alternate_front_cover"
+          : "front_cover",
+      trackSourceRelativePaths: [],
     });
   };
 
-  const addAssignment = () => {
-    onChange({
-      include: true,
-      artworkAssignments: [
-        ...assignments,
-        {
-          id: createArtworkAssignmentId(assignments),
-          scope: "release",
-          role: assignments.length === 0
-            ? "front_cover"
-            : "alternate",
-          trackSourceRelativePaths: [],
-        },
-      ],
-    });
-  };
+  const draftNeedsTrack =
+    draftAssignment?.scope === "track" &&
+    draftAssignment.trackSourceRelativePaths.length === 0;
 
   return (
-    <div className="ingest-artwork-assignment-editor">
-      {assignments.length === 0 ? (
-        <p className="metadata-empty-value">
-          No release-level or track-level use assigned.
-        </p>
-      ) : (
-        assignments.map((assignment) => (
-          <fieldset
+    <div className="ingest-artwork-assignments-editor">
+      {asset.artworkAssignments.length === 0 &&
+        !draftAssignment && (
+          <p className="metadata-empty-value">
+            No release-level or track-level use assigned.
+          </p>
+        )}
+
+      {asset.artworkAssignments.map(
+        (assignment, assignmentIndex) => (
+          <section
             key={assignment.id}
             className="ingest-artwork-assignment-row"
-            disabled={disabled}
           >
-            <legend>
-              {assignmentLabel(assignment, tracks)}
-            </legend>
+            <header>
+              <strong>
+                {assignmentLabel(
+                  assignment,
+                  tracks,
+                )}
+              </strong>
+            </header>
 
-            <label>
+            <div className="ingest-artwork-assignment-fields">
+              <label className="ingest-artwork-assignment-field">
+                <span>Scope</span>
+                <select
+                  value={assignment.scope}
+                  disabled={disabled}
+                  onChange={(event) => {
+                    const scope =
+                      event.target.value === "track"
+                        ? "track"
+                        : "release";
+
+                    updateExistingAssignment(
+                      assignmentIndex,
+                      {
+                        scope,
+                        trackSourceRelativePaths:
+                          scope === "release"
+                            ? []
+                            : assignment.trackSourceRelativePaths,
+                      },
+                    );
+                  }}
+                >
+                  <option value="release">
+                    Release level
+                  </option>
+                  <option value="track">
+                    Track level
+                  </option>
+                </select>
+              </label>
+
+              <label className="ingest-artwork-assignment-field">
+                <span>Artwork role</span>
+                <select
+                  value={assignment.role}
+                  disabled={disabled}
+                  onChange={(event) =>
+                    updateExistingAssignment(
+                      assignmentIndex,
+                      {
+                        role: event.target.value,
+                      },
+                    )
+                  }
+                >
+                  {renderRoleOptions(assignment)}
+                </select>
+              </label>
+
+              {renderTrackTargets(
+                assignment,
+                false,
+                assignmentIndex,
+              )}
+            </div>
+
+            <div className="ingest-artwork-assignment-actions">
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() =>
+                  removeExistingAssignment(
+                    assignmentIndex,
+                  )
+                }
+              >
+                Remove assignment
+              </button>
+            </div>
+          </section>
+        ),
+      )}
+
+      {draftAssignment && (
+        <section
+          className="ingest-artwork-assignment-draft"
+          aria-label="New artwork assignment"
+        >
+          <header>
+            <div>
+              <strong>New artwork assignment</strong>
+              <small>
+                Choose the scope and role, then apply
+                this assignment.
+              </small>
+            </div>
+            <span className="badge">
+              Not applied
+            </span>
+          </header>
+
+          <div className="ingest-artwork-assignment-fields">
+            <label className="ingest-artwork-assignment-field">
               <span>Scope</span>
               <select
-                value={assignment.scope}
+                value={draftAssignment.scope}
+                disabled={disabled}
                 onChange={(event) => {
-                  const scope = event.target.value as
-                    | "release"
-                    | "track";
+                  const scope =
+                    event.target.value === "track"
+                      ? "track"
+                      : "release";
 
-                  updateAssignment(
-                    assignment.id,
-                    {
-                      scope,
-                      trackSourceRelativePaths:
-                        scope === "release"
-                          ? []
-                          : assignment.trackSourceRelativePaths,
-                    },
-                  );
+                  updateDraftAssignment({
+                    scope,
+                    trackSourceRelativePaths: [],
+                  });
                 }}
               >
                 <option value="release">
@@ -653,110 +883,83 @@ function ArtworkAssignmentsEditor({
               </select>
             </label>
 
-            <label>
+            <label className="ingest-artwork-assignment-field">
               <span>Artwork role</span>
               <select
-                value={assignment.role}
+                value={draftAssignment.role}
+                disabled={disabled}
                 onChange={(event) =>
-                  updateAssignment(
-                    assignment.id,
-                    { role: event.target.value },
-                  )
+                  updateDraftAssignment({
+                    role: event.target.value,
+                  })
                 }
               >
-                  {!ingestArtworkRoleOptions.some(
-                    (role) => role === assignment.role,
-                  ) &&
-                    assignment.role.trim() && (
-                    <option value={assignment.role}>
-                      {artworkRoleLabel(assignment.role)}
-                    </option>
-                  )}
-                  {ingestArtworkRoleOptions.map((role) => (
-                    <option key={role} value={role}>
-                      {artworkRoleLabel(role)}
-                    </option>
-                  ))}
-                </select>
+                {renderRoleOptions(draftAssignment)}
+              </select>
             </label>
 
-            {assignment.scope === "track" && (
-              <div className="ingest-artwork-track-picker">
-                <strong>Apply to tracks</strong>
-                {tracks
-                  .filter((track) => track.include)
-                  .map((track) => {
-                    const selected =
-                      assignment.trackSourceRelativePaths.includes(
-                        track.sourceRelativePath,
-                      );
-
-                    return (
-                      <label key={track.sourceRelativePath}>
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={(event) => {
-                            const next = event.target.checked
-                              ? [
-                                  ...assignment.trackSourceRelativePaths,
-                                  track.sourceRelativePath,
-                                ]
-                              : assignment.trackSourceRelativePaths.filter(
-                                  (path) =>
-                                    path !== track.sourceRelativePath,
-                                );
-
-                            updateAssignment(
-                              assignment.id,
-                              {
-                                trackSourceRelativePaths: [
-                                  ...new Set(next),
-                                ],
-                              },
-                            );
-                          }}
-                        />
-                        {trackLabel(track)}
-                      </label>
-                    );
-                  })}
-              </div>
+            {renderTrackTargets(
+              draftAssignment,
+              true,
             )}
+          </div>
 
+          {draftNeedsTrack && (
+            <p className="ingest-artwork-assignment-draft-note">
+              Select at least one available track before
+              applying a track-level assignment.
+            </p>
+          )}
+
+          <div className="ingest-artwork-assignment-draft-actions">
             <button
               type="button"
-              className="link-button danger-text"
+              className="primary-button"
+              disabled={
+                disabled ||
+                draftNeedsTrack
+              }
+              onClick={() => {
+                onChange({
+                  include: true,
+                  artworkAssignments: [
+                    ...asset.artworkAssignments,
+                    draftAssignment,
+                  ],
+                });
+                setDraftAssignment(null);
+              }}
+            >
+              Apply assignment
+            </button>
+            <button
+              type="button"
+              disabled={disabled}
               onClick={() =>
-                removeAssignment(assignment.id)
+                setDraftAssignment(null)
               }
             >
-              Remove assignment
+              Cancel
             </button>
-          </fieldset>
-        ))
+          </div>
+        </section>
       )}
 
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={addAssignment}
-      >
-        {asset.artworkAssignments.length > 0
-          ? "Add another assignment"
-          : "Add artwork assignment"}
-      </button>
-
-      <datalist id={roleListId}>
-        {ingestArtworkRoleOptions.map((role) => (
-          <option key={role} value={role} />
-        ))}
-      </datalist>
+      {!draftAssignment && (
+        <button
+          type="button"
+          className="ingest-artwork-add-assignment"
+          disabled={disabled}
+          onClick={beginDraftAssignment}
+        >
+          {asset.artworkAssignments.length > 0
+            ? "Add another assignment"
+            : "Add artwork assignment"}
+        </button>
+      )}
     </div>
   );
 }
-
-
 function artworkAssignmentIssues(
   draft: IngestBuildDraft,
 ): string[] {
@@ -2513,7 +2716,7 @@ function GuidedIngestBuilder({
     },
     {
       number: 5 as const,
-      label: "Review",
+      label: "Build",
     },
   ];
 
@@ -2664,11 +2867,14 @@ function GuidedIngestBuilder({
               Step 5 of 5
             </p>
             <h3>
-              Review destination and {operation === "update" ? "update" : "create"}
+              {operation === "update"
+                ? "Build release update"
+                : "Build release"}
             </h3>
             <p>
-              Generate a fresh server-validated
-              plan before any files are written.
+              Preview the server-validated build plan, confirm the final
+              release, then write canonical Library files and current
+              waveform peaks together.
             </p>
           </header>
           <BuildReview
@@ -5042,15 +5248,25 @@ function AssetDraftTable({
                       )}
                       <code>{asset.sourceRelativePath}</code>
                       <div className="ingest-artwork-advanced-source-controls">
-                        <SourceReviewCell
-                          status={status}
-                          onReviewed={(reviewed) =>
-                            onSourceReviewed(
-                              sourceStatusPath,
-                              reviewed,
-                            )
-                          }
-                        />
+                        {status?.state !== "unchanged" && (
+                          <SourceReviewCell
+                            status={status}
+                            onReviewed={(reviewed) =>
+                              onSourceReviewed(
+                                sourceStatusPath,
+                                reviewed,
+                              )
+                            }
+                          />
+                        )}
+                        {status?.state === "unchanged" && (
+                          <span
+                            className="ingest-artwork-source-ready-label"
+                            title="The source asset is available and unchanged. This does not indicate an artwork assignment."
+                          >
+                            Source ready
+                          </span>
+                        )}
 
                         {sourceMissing ? (
                           <button
@@ -5087,16 +5303,29 @@ function AssetDraftTable({
                     <ArtworkAssignmentsEditor
                       asset={asset}
                       tracks={tracks}
+                      existingTracks={existingTracks}
                       disabled={status?.state === "missing"}
                       onChange={(patch) => {
                         const nextAssignments =
                           patch.artworkAssignments ??
                           asset.artworkAssignments;
+                        const newlyAppliedAssignment =
+                          nextAssignments.find(
+                            (candidate) =>
+                              !asset.artworkAssignments.some(
+                                (previous) =>
+                                  previous.id === candidate.id,
+                              ),
+                          );
                         const advancedAssignmentChanged =
                           nextAssignments.find(
-                            (assignment, index) => {
+                            (assignment) => {
                               const previous =
-                                asset.artworkAssignments[index];
+                                asset.artworkAssignments.find(
+                                  (candidate) =>
+                                    candidate.id ===
+                                    assignment.id,
+                                );
 
                               return (
                                 previous !== undefined &&
@@ -5115,7 +5344,14 @@ function AssetDraftTable({
                           patch,
                         );
 
-                        if (advancedAssignmentChanged) {
+                        if (newlyAppliedAssignment) {
+                          onNotify(
+                            `${sourceFilename(asset.sourceRelativePath)} assigned: ${assignmentLabel(newlyAppliedAssignment, tracks)}.`,
+                            "success",
+                          );
+                        } else if (
+                          advancedAssignmentChanged
+                        ) {
                           onNotify(
                             `${sourceFilename(asset.sourceRelativePath)} assignment updated: ${assignmentLabel(advancedAssignmentChanged, tracks)}.`,
                             "success",
@@ -5672,6 +5908,83 @@ function BuildReview({
     .sort((left, right) =>
       left.trackNumber - right.trackNumber,
     );
+  const existingTrackBySource = new Map(
+    existingTracks.map((track) => [
+      track.sourceRelativePath,
+      track,
+    ]),
+  );
+  const existingTrackById = new Map(
+    existingTracks.map((track) => [
+      track.id,
+      track,
+    ]),
+  );
+  const existingTrackForCandidate = (
+    track: IngestBuildTrackDraft,
+  ) => {
+    if (track.replacementTrackId?.trim()) {
+      return existingTrackById.get(
+        track.replacementTrackId.trim(),
+      );
+    }
+
+    return existingTrackBySource.get(
+      track.sourceRelativePath,
+    );
+  };
+  const representedExistingTrackIds = new Set(
+    includedTracks
+      .map((track) =>
+        existingTrackForCandidate(track)?.id
+      )
+      .filter(
+        (trackId): trackId is string =>
+          Boolean(trackId),
+      ),
+  );
+  const preservedExistingTracks =
+    operation === "update"
+      ? existingTracks
+          .filter(
+            (track) =>
+              !representedExistingTrackIds.has(
+                track.id,
+              ),
+          )
+          .slice()
+          .sort(
+            (left, right) =>
+              left.number - right.number ||
+              left.title.localeCompare(right.title),
+          )
+      : [];
+  const newCandidateTrackCount =
+    includedTracks.filter(
+      (track) =>
+        !existingTrackForCandidate(track),
+    ).length;
+  const modifiedCandidateTrackCount =
+    includedTracks.length -
+    newCandidateTrackCount;
+  const resultingTrackCount =
+    includedTracks.length +
+    preservedExistingTracks.length;
+  const reviewTrackOrder = [
+    ...preservedExistingTracks.map((track) => ({
+      kind: "preserved" as const,
+      number: track.number,
+      track,
+    })),
+    ...includedTracks.map((track) => ({
+      kind: "candidate" as const,
+      number: track.trackNumber,
+      track,
+    })),
+  ].sort(
+    (left, right) =>
+      left.number - right.number,
+  );
   const includedVideos = [...(draft.videos ?? [])]
     .filter((video) => video.include);
   const missingVideoSources = includedVideos.filter(
@@ -5744,6 +6057,70 @@ function BuildReview({
 
   return (
     <div className="ingest-build-review">
+      <section className="ingest-build-plan-launcher">
+        <div className="ingest-build-plan-launcher-copy">
+          <span className="ingest-review-eyebrow">
+            Server-validated build plan
+          </span>
+          <h3>
+            {operation === "update"
+              ? "Preview this release update"
+              : "Preview this release build"}
+          </h3>
+          <p>
+            Nothing is written until this plan is current and explicitly
+            confirmed. Library waveforms are generated or refreshed from
+            canonical audio during the guarded build; playback MP3 and HLS
+            preparation remain separate.
+          </p>
+        </div>
+        <div className="ingest-build-plan-launcher-actions">
+          <button
+            type="button"
+            className="primary-button"
+            disabled={
+              previewLoading ||
+              buildLoading ||
+              blockingSources.length > 0 ||
+              assignmentIssues.length > 0
+            }
+            onClick={onPreview}
+          >
+            {previewLoading
+              ? "Validating plan…"
+              : preview
+                ? operation === "update"
+                  ? "Refresh update plan"
+                  : "Refresh build plan"
+                : operation === "update"
+                  ? "Preview update plan"
+                  : "Preview build plan"}
+          </button>
+          {preview && (
+            <div className="ingest-build-plan-launcher-status">
+              <span
+                className={`badge ${
+                  preview.summary.blockedCount === 0
+                    ? "complete"
+                    : "missing"
+                }`}
+              >
+                {preview.summary.blockedCount === 0
+                  ? "Plan ready"
+                  : `${preview.summary.blockedCount} blocked`}
+              </span>
+              <span>
+                Waveforms: {preview.summary.waveformCreateCount} create
+                {" · "}
+                {preview.summary.waveformReplaceCount} refresh
+                {" · "}
+                {preview.summary.waveformPreserveCount} current
+              </span>
+            </div>
+          )}
+        </div>
+      </section>
+
       <section className="ingest-review-release-card">
         <div className="ingest-review-release-artwork">
           <ReviewArtworkThumbnail
@@ -5756,7 +6133,7 @@ function BuildReview({
           <div className="ingest-review-release-heading">
             <div>
               <span className="ingest-review-eyebrow">
-                Release review
+                Final release
               </span>
               <h3>{draft.releaseTitle || "Untitled release"}</h3>
               <p>{draft.releaseArtist || "Unknown artist"}</p>
@@ -5769,7 +6146,15 @@ function BuildReview({
             <span>{draft.releaseDate || "No release date"}</span>
             <span>{draft.releaseType || "No release type"}</span>
             <span>
-              {includedTracks.length} track{includedTracks.length === 1 ? "" : "s"}
+              {operation === "update"
+                ? `${resultingTrackCount} tracks total · ${newCandidateTrackCount} new · ${preservedExistingTracks.length} preserved${
+                    modifiedCandidateTrackCount > 0
+                      ? ` · ${modifiedCandidateTrackCount} modified`
+                      : ""
+                  }`
+                : `${includedTracks.length} track${
+                    includedTracks.length === 1 ? "" : "s"
+                  }`}
             </span>
             <span>
               {includedVideos.length} video{includedVideos.length === 1 ? "" : "s"}
@@ -5790,17 +6175,21 @@ function BuildReview({
           <div>
             <h4>Tracks</h4>
             <p>
-              Confirm titles, source audio, and the effective front artwork each track will use.
+              {operation === "update"
+                ? "Confirm the final resulting track set. Existing Library rows are preserved unless explicitly revised; candidate rows show what this update adds or modifies."
+                : "Confirm titles, source audio, and the effective front artwork each track will use."}
             </p>
           </div>
           <span className="badge">
-            {includedTracks.length} included
+            {operation === "update"
+              ? `${resultingTrackCount} final`
+              : `${includedTracks.length} included`}
           </span>
         </header>
 
-        {includedTracks.length === 0 ? (
+        {resultingTrackCount === 0 ? (
           <p className="metadata-empty-value ingest-review-empty-state">
-            No tracks are included in this staging draft.
+            No tracks are included in the resulting release.
           </p>
         ) : (
           <div className="ingest-table-scroll">
@@ -5815,7 +6204,63 @@ function BuildReview({
                 </tr>
               </thead>
               <tbody>
-                {includedTracks.map((track) => {
+                {reviewTrackOrder.map((reviewTrack) => {
+                  if (reviewTrack.kind === "preserved") {
+                    const track = reviewTrack.track;
+
+                    return (
+                      <tr
+                        key={`existing:${track.id}`}
+                        className="ingest-review-track-row--preserved"
+                      >
+                        <td className="ingest-review-track-artwork-cell">
+                          <div
+                            className="ingest-review-track-existing-art"
+                            role="img"
+                            aria-label={`Existing Library artwork remains unchanged for Track ${track.number}`}
+                          >
+                            Library
+                          </div>
+                          <small>Existing art</small>
+                        </td>
+                        <td className="numeric ingest-review-track-number">
+                          {track.number}
+                        </td>
+                        <th
+                          scope="row"
+                          className="ingest-review-track-title-cell"
+                        >
+                          <strong>{track.title || "Untitled"}</strong>
+                          {track.version.trim() && (
+                            <span>{track.version.trim()}</span>
+                          )}
+                          <small>
+                            {track.artist || draft.releaseArtist || "Unknown artist"}
+                            {track.sourceDate ? ` · ${track.sourceDate}` : ""}
+                          </small>
+                          <div className="ingest-review-track-provenance">
+                            <span className="badge">
+                              Existing Library
+                            </span>
+                          </div>
+                        </th>
+                        <td className="ingest-review-track-source-cell">
+                          <span className="ingest-review-track-preserved-source">
+                            Existing Library source
+                          </span>
+                        </td>
+                        <td>
+                          <span className="badge complete">
+                            Preserved
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  const track = reviewTrack.track;
+                  const candidateExistingTrack =
+                    existingTrackForCandidate(track);
                   const trackStatus = sourceStatusForPath(
                     sourceStatuses,
                     track.sourceRelativePath,
@@ -5877,6 +6322,20 @@ function BuildReview({
                           {track.artist || draft.releaseArtist || "Unknown artist"}
                           {track.date ? ` · ${track.date}` : ""}
                         </small>
+                        {operation === "update" && (
+                          <div className="ingest-review-track-provenance">
+                            <span className="badge">
+                              {candidateExistingTrack
+                                ? "Existing Library"
+                                : "New"}
+                            </span>
+                            {candidateExistingTrack && (
+                              <span className="badge">
+                                Modified
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </th>
                       <td className="ingest-review-track-source-cell">
                         <div>
@@ -6003,32 +6462,12 @@ function BuildReview({
       <section className="ingest-review-preflight">
         <header className="ingest-review-section-header">
           <div>
-            <h4>Preflight</h4>
+            <h4>Build readiness</h4>
             <p>
-              Resolve source decisions first, then generate the server-validated destination plan before writing files.
+              Confirm identity, source decisions, artwork, waveform work,
+              and the current destination plan before applying the build.
             </p>
           </div>
-          <button
-            type="button"
-            className="primary-button"
-            disabled={
-              previewLoading ||
-              buildLoading ||
-              blockingSources.length > 0 ||
-              assignmentIssues.length > 0
-            }
-            onClick={onPreview}
-          >
-            {previewLoading
-              ? "Validating plan…"
-              : preview
-                ? operation === "update"
-                  ? "Refresh update plan"
-                  : "Refresh build plan"
-                : operation === "update"
-                  ? "Preview update plan"
-                  : "Preview build plan"}
-          </button>
         </header>
 
         <div className="ingest-review-preflight-grid">
@@ -6110,7 +6549,16 @@ function BuildReview({
               {!preview
                 ? "Not yet server-validated"
                 : preview.summary.blockedCount === 0
-                  ? `No blocked destinations · ${formatByteSize(preview.summary.totalCopyBytes)} to copy`
+                  ? `No blocked destinations · ${formatByteSize(preview.summary.totalCopyBytes)} to copy · ${
+                      preview.summary.waveformCreateCount +
+                      preview.summary.waveformReplaceCount
+                    } waveform job${
+                      preview.summary.waveformCreateCount +
+                        preview.summary.waveformReplaceCount ===
+                      1
+                        ? ""
+                        : "s"
+                    }`
                   : `${preview.summary.blockedCount} blocked destination${preview.summary.blockedCount === 1 ? "" : "s"}`}
             </small>
           </div>
@@ -6453,6 +6901,18 @@ function BuildReview({
                     <dd>{preview.summary.copiedFileCount}</dd>
                   </div>
                   <div>
+                    <dt>Waveforms created</dt>
+                    <dd>{preview.summary.waveformCreateCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Waveforms refreshed</dt>
+                    <dd>{preview.summary.waveformReplaceCount}</dd>
+                  </div>
+                  <div>
+                    <dt>Waveforms current</dt>
+                    <dd>{preview.summary.waveformPreserveCount}</dd>
+                  </div>
+                  <div>
                     <dt>Files updated</dt>
                     <dd>{preview.summary.updatedFileCount}</dd>
                   </div>
@@ -6526,8 +6986,8 @@ function BuildReview({
             />
             <span>
               {preview.operation === "update"
-                ? "I reviewed the update plan. Apply this staging update, preserve existing authored files, and leave all ingest sources unchanged."
-                : "I reviewed the destination plan. Create a new staging release and leave all ingest sources unchanged."}
+                ? "I reviewed the update plan. Build this Library update, preserve existing authored files, generate current waveforms, and leave all ingest sources unchanged."
+                : "I reviewed the destination plan. Build this Library release with current waveforms and leave all ingest sources unchanged."}
             </span>
           </label>
 
@@ -6545,11 +7005,11 @@ function BuildReview({
           >
             {buildLoading
               ? preview.operation === "update"
-                ? "Updating and verifying…"
-                : "Copying and verifying…"
+                ? "Building update and waveforms…"
+                : "Building release and waveforms…"
               : preview.operation === "update"
-                ? "Apply staging update"
-                : "Create staging release"}
+                ? "Build release update"
+                : "Build release"}
           </button>
         </>
       )}

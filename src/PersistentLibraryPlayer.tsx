@@ -461,14 +461,10 @@ export function PersistentLibraryPlayerBar({
 }) {
   const track = playback.currentTrack;
 
-  if (!track) {
-    return null;
-  }
-
   const { canPrevious, canNext } =
     getPlaybackQueueCapabilities(
       playback.queue,
-      track.key,
+      track?.key,
     );
   const duration = Math.max(0, playback.duration);
   const currentTime = Math.min(
@@ -477,16 +473,21 @@ export function PersistentLibraryPlayerBar({
   );
   return (
     <CompactNowPlayingBar
-      artworkUrl={track.artworkUrl}
+      artworkUrl={track?.artworkUrl ?? null}
       artworkFallback={<span>HL</span>}
-      title={track.title}
-      context={getPlayableMediaContext(track)}
-      detail={track.detail}
+      title={track?.title ?? "Ready to preview"}
+      context={
+        track
+          ? getPlayableMediaContext(track)
+          : "Choose a track in Ingest, Staging, or Library"
+      }
+      detail={track?.detail ?? "Local media preview"}
       transport={{
         currentTime: playback.currentTime,
         duration,
         isPlaying: playback.isPlaying,
         isLoading: playback.isLoading,
+        canToggle: Boolean(track),
         canPrevious,
         canNext,
         previous: playback.previous,
@@ -506,10 +507,12 @@ export function PersistentLibraryPlayerBar({
           disabled={!duration}
           aria-label="Playback position"
           title={
-            playback.waveformLoading
-              ? "Loading waveform…"
-              : playback.waveformError ??
-                "Waveform is not available for this source preview."
+            !track
+              ? "Select a track to enable playback."
+              : playback.waveformLoading
+                ? "Loading waveform…"
+                : playback.waveformError ??
+                  "Waveform is not available for this source preview."
           }
           onChange={(event: ChangeEvent<HTMLInputElement>) =>
             playback.seek(Number(event.target.value))

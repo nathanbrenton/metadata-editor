@@ -74,7 +74,7 @@ test(
     );
     assert.match(
       builderSource,
-      /Apply staging update/,
+      /Build release update/,
     );
   },
 );
@@ -188,7 +188,7 @@ test(
 );
 
 test(
-  "previews inspected source audio from Tracks and Review without writing derivatives",
+  "previews inspected source audio from Tracks and Build without mutating ingest sources",
   () => {
     assert.match(
       builderSource,

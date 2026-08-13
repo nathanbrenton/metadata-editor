@@ -304,6 +304,10 @@ import {
   type IngestTargetReleaseMode,
 } from "./ingest-target-release.js";
 
+import {
+  StagingLibraryBuildWorkspace,
+} from "./StagingLibraryBuildWorkspace.js";
+
 // Defer secondary workflows until they are opened so the initial editor
 // bundle remains smaller and faster to parse.
 const LazyIngestReleaseBuilder = lazy(async () => {
@@ -2564,6 +2568,9 @@ export function App() {
               }
               onOpenRelease={(releaseId) =>
                 void openReleaseInLibrary(releaseId)
+              }
+              onLibraryChanged={() =>
+                refreshLibrary(true)
               }
               onReleaseCreated={async (
                 releaseId,
@@ -5031,6 +5038,7 @@ function StagingWorkspace({
   onChooseCandidate,
   onBackToInspection,
   onOpenRelease,
+  onLibraryChanged,
   onReleaseCreated,
   onNotify,
   playback,
@@ -5042,6 +5050,7 @@ function StagingWorkspace({
   onChooseCandidate: () => void;
   onBackToInspection: () => void;
   onOpenRelease: (releaseId: string) => void;
+  onLibraryChanged: () => void | Promise<void>;
   onReleaseCreated: (
     releaseId: string,
   ) => void | Promise<void>;
@@ -5057,6 +5066,16 @@ function StagingWorkspace({
     () => sortLibraryReleases(releases, sortMode),
     [releases, sortMode],
   );
+
+  const [selectedBuildReleaseId, setSelectedBuildReleaseId] =
+    useState<string | null>(null);
+  const selectedBuildRelease =
+    selectedBuildReleaseId
+      ? releases.find(
+          (release) =>
+            release.id === selectedBuildReleaseId,
+        ) ?? null
+      : null;
 
   if (inspection) {
     return (
@@ -5082,6 +5101,20 @@ function StagingWorkspace({
     );
   }
 
+  if (selectedBuildRelease) {
+    return (
+      <StagingLibraryBuildWorkspace
+        release={selectedBuildRelease}
+        onBack={() => setSelectedBuildReleaseId(null)}
+        onOpenLibrary={() =>
+          onOpenRelease(selectedBuildRelease.id)
+        }
+        onLibraryChanged={onLibraryChanged}
+        onNotify={onNotify}
+      />
+    );
+  }
+
   return (
     <section className="workflow-workspace staging-workspace">
       <header className="workflow-workspace-header">
@@ -5101,8 +5134,9 @@ function StagingWorkspace({
         <div className="staging-ingest-candidate-copy">
           <strong>No Ingest candidate selected</strong>
           <span>
-            Inspect and choose source media in Ingest before
-            building or updating a release.
+            Choose an Ingest candidate for release-content changes.
+            Existing Library releases can be opened directly below
+            for derivative-only Build and waveform repair.
           </span>
         </div>
         <button
@@ -5125,9 +5159,9 @@ function StagingWorkspace({
           <div>
             <h3>Existing release workspaces</h3>
             <p>
-              These library releases can be targeted by an
-              incremental update when a matching release ID
-              is configured in the staging builder.
+              Open Build to inspect or repair Library waveforms from
+              existing canonical masters without a new Ingest candidate.
+              Use Ingest when the release content itself is changing.
             </p>
           </div>
           <div className="workflow-release-table-controls">
@@ -5163,13 +5197,12 @@ function StagingWorkspace({
                 <th scope="col" className="numeric">Videos</th>
                 <th scope="col">Metadata</th>
                 <th scope="col">Update mode</th>
-                <th scope="col" className="action-column">Next step</th>
               </tr>
             </thead>
             <tbody>
               {releases.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="workflow-empty-cell">
+                  <td colSpan={7} className="workflow-empty-cell">
                     No staged release workspaces were found in the configured library root.
                   </td>
                 </tr>
@@ -5201,7 +5234,28 @@ function StagingWorkspace({
                     );
 
                   return (
-                    <tr key={release.id}>
+                    <tr
+                      key={release.id}
+                      className="staging-release-row staging-release-row--clickable"
+                      tabIndex={0}
+                      aria-label={`Open Build for ${
+                        release.releaseTitle ??
+                        formatReleaseTitle(release.id)
+                      }`}
+                      title="Open Build"
+                      onClick={() =>
+                        setSelectedBuildReleaseId(release.id)
+                      }
+                      onKeyDown={(event) => {
+                        if (
+                          event.key === "Enter" ||
+                          event.key === " "
+                        ) {
+                          event.preventDefault();
+                          setSelectedBuildReleaseId(release.id);
+                        }
+                      }}
+                    >
                       <td className="staging-release-artwork-cell">
                         <span
                           className="staging-release-artwork"
@@ -5256,14 +5310,6 @@ function StagingWorkspace({
                         >
                           Guarded
                         </span>
-                      </td>
-                      <td className="action-column">
-                        <button
-                          type="button"
-                          onClick={() => onOpenRelease(release.id)}
-                        >
-                          Open in Library
-                        </button>
                       </td>
                     </tr>
                   );

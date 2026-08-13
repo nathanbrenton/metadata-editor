@@ -111,7 +111,7 @@ test(
     );
     assert.match(
       builderSource,
-      /Apply to tracks/,
+      /<legend>Tracks<\/legend>/,
     );
     assert.match(
       builderSource,
