@@ -67,7 +67,7 @@ test("renders desktop-first Staging, Web Package, and Live workspaces", () => {
   assert.match(appSource, /function StagingWorkspace/);
   assert.match(appSource, /function PublishWorkspace/);
   assert.match(appSource, /Existing release workspaces/);
-  assert.match(appSource, /<h3>Releases<\/h3>/);
+  assert.match(appSource, /Included in Web Package/);
   assert.match(
     styleSource,
     /--workflow-stage-columns:[\s\S]*minmax\(15rem,\s*4fr\)[\s\S]*minmax\(13rem,\s*3fr\)/,

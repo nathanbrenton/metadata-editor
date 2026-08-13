@@ -97,9 +97,9 @@ const quickQuestions = [
       "Use Public Package → Review unpublish on an already-packaged release. The first step is a read-only plan that fingerprints the complete public release and catalog state. Confirmed unpublish removes only the sanitized public package and catalog membership; the canonical Library release and masters remain private and unchanged. Then refresh the deployment manifest, Check host, and deploy the reviewed removals to the sandbox or production target.",
   },
   {
-    question: "What does Published-only mean?",
+    question: "What if an Included release is missing from Library?",
     answer:
-      "Published-only means a release is still present in the public catalog but is absent from the active Library scan. Metadata Editor never treats that mismatch as permission to delete public content. Review it explicitly and use Review unpublish only when you intend to withdraw it from the public snapshot.",
+      "An Included release can remain in the Web Package even when it is absent from the active Library scan. Metadata Editor never treats that mismatch as permission to delete public content. Review it explicitly and use Review removal only when you intend to remove it from the Web Package and create a future Live removal.",
   },
 ] as const;
 

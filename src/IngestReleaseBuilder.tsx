@@ -111,6 +111,35 @@ const releaseTypeOptions = [
   "other",
 ] as const;
 
+
+function artworkRoleLabel(role: string): string {
+  switch (role) {
+    case "front_cover":
+      return "Front cover";
+    case "alternate_front_cover":
+      return "Alternate front cover";
+    case "track_artwork":
+      return "Track artwork";
+    case "back_cover":
+      return "Back cover";
+    case "liner_notes":
+      return "Liner notes / booklet";
+    case "disc":
+      return "Disc / media artwork";
+    case "thumbnail":
+      return "Thumbnail";
+    case "other":
+      return "Other";
+    default:
+      return role
+        .replaceAll("_", " ")
+        .replaceAll("-", " ")
+        .replace(/\b\w/g, (character) =>
+          character.toUpperCase()
+        );
+  }
+}
+
 function formatByteSize(
   sizeBytes: number,
 ): string {
@@ -452,7 +481,7 @@ function assignmentLabel(
   tracks: IngestBuildTrackDraft[],
 ): string {
   if (assignment.scope === "release") {
-    return `Release · ${assignment.role}`;
+    return `Release · ${artworkRoleLabel(assignment.role)}`;
   }
 
   const selectedTracks = tracks.filter((track) =>
@@ -462,12 +491,12 @@ function assignmentLabel(
   );
 
   if (selectedTracks.length === 0) {
-    return `Track level · ${assignment.role} · no tracks selected`;
+    return `Track level · ${artworkRoleLabel(assignment.role)} · no tracks selected`;
   }
 
   return `${selectedTracks
     .map((track) => `Track ${track.trackNumber}`)
-    .join(", ")} · ${assignment.role}`;
+    .join(", ")} · ${artworkRoleLabel(assignment.role)}`;
 }
 
 function artworkTomlTargets(
@@ -626,9 +655,7 @@ function ArtworkAssignmentsEditor({
 
             <label>
               <span>Artwork role</span>
-              <input
-                type="text"
-                list={roleListId}
+              <select
                 value={assignment.role}
                 onChange={(event) =>
                   updateAssignment(
@@ -636,7 +663,21 @@ function ArtworkAssignmentsEditor({
                     { role: event.target.value },
                   )
                 }
-              />
+              >
+                  {!ingestArtworkRoleOptions.some(
+                    (role) => role === assignment.role,
+                  ) &&
+                    assignment.role.trim() && (
+                    <option value={assignment.role}>
+                      {artworkRoleLabel(assignment.role)}
+                    </option>
+                  )}
+                  {ingestArtworkRoleOptions.map((role) => (
+                    <option key={role} value={role}>
+                      {artworkRoleLabel(role)}
+                    </option>
+                  ))}
+                </select>
             </label>
 
             {assignment.scope === "track" && (
@@ -701,7 +742,9 @@ function ArtworkAssignmentsEditor({
         disabled={disabled}
         onClick={addAssignment}
       >
-        Add assignment
+        {asset.artworkAssignments.length > 0
+          ? "Add another assignment"
+          : "Add artwork assignment"}
       </button>
 
       <datalist id={roleListId}>
@@ -4980,6 +5023,15 @@ function AssetDraftTable({
                     className="ingest-artwork-advanced-item"
                   >
                     <header>
+                      <div className="ingest-artwork-advanced-preview">
+                        <ArtworkPreview
+                          sourceRelativePath={asset.sourceRelativePath}
+                          modifiedAt={status?.modifiedAt}
+                          embeddedArtwork={asset.embeddedArtwork}
+                          label={sourceFilename(asset.sourceRelativePath)}
+                          thumbnailOnly
+                        />
+                      </div>
                       <strong>
                         {sourceFilename(asset.sourceRelativePath)}
                       </strong>
@@ -5036,12 +5088,40 @@ function AssetDraftTable({
                       asset={asset}
                       tracks={tracks}
                       disabled={status?.state === "missing"}
-                      onChange={(patch) =>
+                      onChange={(patch) => {
+                        const nextAssignments =
+                          patch.artworkAssignments ??
+                          asset.artworkAssignments;
+                        const advancedAssignmentChanged =
+                          nextAssignments.find(
+                            (assignment, index) => {
+                              const previous =
+                                asset.artworkAssignments[index];
+
+                              return (
+                                previous !== undefined &&
+                                (
+                                  previous.scope !==
+                                    assignment.scope ||
+                                  previous.role !==
+                                    assignment.role
+                                )
+                              );
+                            },
+                          );
+
                         onChange(
                           asset.sourceRelativePath,
                           patch,
-                        )
-                      }
+                        );
+
+                        if (advancedAssignmentChanged) {
+                          onNotify(
+                            `${sourceFilename(asset.sourceRelativePath)} assignment updated: ${assignmentLabel(advancedAssignmentChanged, tracks)}.`,
+                            "success",
+                          );
+                        }
+                      }}
                     />
                   </section>
                 );

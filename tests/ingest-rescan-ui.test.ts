@@ -115,7 +115,7 @@ test(
     );
     assert.match(
       builderSource,
-      /Add assignment/,
+      /Add (?:artwork|another) assignment/,
     );
     assert.match(
       builderSource,

@@ -25,7 +25,7 @@ test("enables one reviewed Web Package prepare or update action", () => {
   );
   assert.match(
     appSource,
-    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update Web Package[\s\S]*?Prepare for Web/,
+    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update Web Package[\s\S]*?Add to Web Package/,
   );
   assert.match(
     appSource,
@@ -37,7 +37,7 @@ test("enables one reviewed Web Package prepare or update action", () => {
   );
   assert.match(
     appSource,
-    /Existing public releases are replaced as a unit so obsolete files cannot survive an update/i,
+    /Existing Included releases are replaced as a unit so obsolete files cannot survive an update/i,
   );
 });
 

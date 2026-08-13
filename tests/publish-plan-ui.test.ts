@@ -16,7 +16,7 @@ test("Web Package exposes guided Ready Check, preparation, and guarded package w
   assert.match(appSource, /publish-release-row/);
   assert.match(appSource, /Web Package Ready Check ·/);
   assert.match(appSource, /Technical package plan/);
-  assert.match(appSource, /Prepare for Web/);
+  assert.match(appSource, /Add to Web Package/);
   assert.match(appSource, /Update Web Package/);
   assert.match(serverSource, /\/api\/publish\/plan/);
   assert.match(serverSource, /\/api\/publish\/prepare/);
@@ -28,7 +28,7 @@ test("Web Package exposes guided Ready Check, preparation, and guarded package w
 test("uses Publish for first publication and Update for later publication", () => {
   assert.match(
     appSource,
-    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update Web Package[\s\S]*?Prepare for Web/,
+    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update Web Package[\s\S]*?Add to Web Package/,
   );
   assert.doesNotMatch(
     appSource,
@@ -36,12 +36,14 @@ test("uses Publish for first publication and Update for later publication", () =
   );
 });
 
-test("Web Package readiness table combines readiness and package state", () => {
+test("Web Package table makes exact public-set inclusion explicit", () => {
   assert.match(appSource, /<th scope="col">Release<\/th>/);
-  assert.match(appSource, /<th scope="col">Ready<\/th>/);
-  assert.match(appSource, /<th scope="col">Web Package<\/th>/);
-  assert.match(appSource, /webPackageReleaseStatus/);
-  assert.match(appSource, /waveform checked in Ready Check/);
+  assert.match(appSource, /<th[^>]*>Public set<\/th>/);
+  assert.match(appSource, /<th[^>]*>Package status<\/th>/);
+  assert.match(appSource, /webPackageMembershipStatus/);
+  assert.match(appSource, /label: "Included"/);
+  assert.match(appSource, /label: "Not included"/);
+  assert.match(appSource, /Public set:<\/strong> only releases marked/);
   assert.doesNotMatch(appSource, /<th scope="col">Current guidance<\/th>/);
   assert.doesNotMatch(appSource, /<th scope="col">Publication<\/th>/);
   assert.doesNotMatch(appSource, />Dry-run only<\/span>/);
@@ -141,7 +143,7 @@ test("Web Package Ready Check keeps technical detail collapsed behind one next-s
   assert.match(publishWorkspaceSource, /publishNextStepLabel/);
   assert.match(publishWorkspaceSource, /Resolve blockers/);
   assert.match(publishWorkspaceSource, /Prepare release/);
-  assert.match(publishWorkspaceSource, /Prepare for Web/);
+  assert.match(publishWorkspaceSource, /Add to Web Package/);
   assert.match(publishWorkspaceSource, /Update Web Package/);
   assert.match(publishWorkspaceSource, /HLS/);
   assert.match(publishWorkspaceSource, /selectedPlan\.webStreams/);

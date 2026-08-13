@@ -5709,14 +5709,14 @@ function publishPreflightGuidance(
 ): string {
   if (canPreparePublishPlan(plan)) {
     return hasNonDerivativePublishBlockers(plan)
-      ? "Prepare the reproducible private media that can be generated now. Other publish-only blockers remain visible and must still be resolved before the public package can be built."
+      ? "Prepare the reproducible private media that can be generated now. Other Web Package blockers remain visible and must still be resolved before the release can be added."
       : browserArtworkNeedsPreparation(plan)
         ? "The release is ready for derivative preparation. Prepare release will generate current browser artwork from the canonical TIFF/TIF master along with any missing audio HLS or waveform resources."
         : "The canonical release can continue, but its segmented audio HLS stream or waveform derivatives must be prepared first.";
   }
 
   if (canPrepareVideoPublishPlan(plan)) {
-    return "Canonical video masters are ready, but one or more private H.264/AAC segmented video derivatives and poster frames must be prepared before the public package can include video.";
+    return "Canonical video masters are ready, but one or more private H.264/AAC segmented video derivatives and poster frames must be prepared before the Web Package can include video.";
   }
 
   if (
@@ -5735,11 +5735,11 @@ function publishPreflightGuidance(
   }
 
   if (plan.status === "warning") {
-    return "No blocking issue was found, but the remaining warnings should be reviewed before publishing the public package.";
+    return "No blocking issue was found, but the remaining warnings should be reviewed before adding or updating this release in the Web Package.";
   }
 
   if (publicPackageIsUpToDate(plan)) {
-    return "The current canonical metadata and public media inputs match the published snapshot. No public-package update is required.";
+    return "The current canonical metadata and web-facing media inputs match the Web Package snapshot. No Web Package update is required.";
   }
 
   return "Ready Check passed. This release can be prepared for the Hiplingo web app.";
@@ -5777,7 +5777,7 @@ function publishNextStepLabel(
 
   return publicReleaseAlreadyExists(plan)
     ? "Update Web Package"
-    : "Prepare for Web";
+    : "Add to Web Package";
 }
 
 function latestPublishOperationForRelease(
@@ -5800,7 +5800,7 @@ function publishOperationBadge(
     return {
       label:
         operation.mode === "unpublish"
-          ? "Interrupted unpublish"
+          ? "Interrupted removal"
           : "Interrupted",
       tone: "missing",
     };
@@ -5810,7 +5810,7 @@ function publishOperationBadge(
     return {
       label:
         operation.mode === "unpublish"
-          ? "Unpublish failed"
+          ? "Removal failed"
           : "Package build failed",
       tone: "missing",
     };
@@ -5820,7 +5820,7 @@ function publishOperationBadge(
     return {
       label:
         operation.mode === "unpublish"
-          ? "Unpublishing"
+          ? "Removing from Web Package"
           : "Building package",
       tone: "preview",
     };
@@ -5928,6 +5928,8 @@ function PublishWorkspace({
     useState(false);
   const [sortMode, setSortMode] =
     useState<LibraryReleaseSortMode>("date-desc");
+  const [webPackageFilter, setWebPackageFilter] =
+    useState<"included" | "not-included" | "all">("included");
   const sortedReleases = useMemo(
     () => sortLibraryReleases(releases, sortMode),
     [releases, sortMode],
@@ -5994,7 +5996,7 @@ function PublishWorkspace({
 
       await loadPublishFleet();
       onNotify(
-        "Deployment manifest refreshed and the published-media snapshot verified.",
+        "Package index refreshed and the Web Package snapshot verified.",
         "success",
       );
     } catch (manifestError) {
@@ -6117,13 +6119,13 @@ function PublishWorkspace({
       !allowPendingLibraryDeployment
     ) {
       setDeploymentSyncError(
-        `${pendingLibraryChanges} published ${pendingLibraryChanges === 1 ? "release has" : "releases have"} pending Library changes. Update the Web Package first, or explicitly allow deployment of the older web snapshot.`,
+        `${pendingLibraryChanges} Included ${pendingLibraryChanges === 1 ? "release has" : "releases have"} pending Library changes. Update the Web Package first, or explicitly allow deployment of the older Web Package snapshot.`,
       );
       return;
     }
 
     const pendingNotice = pendingLibraryChanges > 0
-      ? `\n\nWARNING: ${pendingLibraryChanges} published ${pendingLibraryChanges === 1 ? "release has" : "releases have"} newer Library changes that are not included in this public snapshot.`
+      ? `\n\nWARNING: ${pendingLibraryChanges} Included ${pendingLibraryChanges === 1 ? "release has" : "releases have"} newer Library changes that are not included in this Web Package snapshot.`
       : "";
     const reviewed = window.confirm(
       `Deploy the reviewed local sandbox plan?\n\n${deploymentSyncPlan.summary.changeCount} changes · +${deploymentSyncPlan.summary.addCount} add · ${deploymentSyncPlan.summary.updateCount} update · −${deploymentSyncPlan.summary.removeCount} remove\n\nTarget: ${deploymentTargetStatus.target.destinationPath}${pendingNotice}\n\nThis writes only to the local deployment sandbox.`,
@@ -6724,7 +6726,7 @@ function PublishWorkspace({
         throw new Error(
           "error" in payload && payload.error
             ? payload.error
-            : "Unable to publish the public package.",
+            : "Unable to update the Web Package.",
         );
       }
 
@@ -6732,14 +6734,14 @@ function PublishWorkspace({
       await loadPublishOperations();
       await Promise.resolve(onRefresh());
       onNotify(
-        `Public package ${payload.mode === "update" ? "updated" : "published"} successfully.`,
+        `Web Package ${payload.mode === "update" ? "updated" : "added"} successfully.`,
         "success",
       );
     } catch (publishError) {
       setPlanError(
         publishError instanceof Error
           ? publishError.message
-          : "Unable to publish the public package.",
+          : "Unable to update the Web Package.",
       );
     } finally {
       setPublishLoading(false);
@@ -6773,7 +6775,7 @@ function PublishWorkspace({
         throw new Error(
           "error" in planPayload && planPayload.error
             ? planPayload.error
-            : "Unable to build the public unpublish plan.",
+            : "Unable to build the Web Package removal plan.",
         );
       }
 
@@ -6783,7 +6785,7 @@ function PublishWorkspace({
             ? planPayload.issues
                 .map((issue) => issue.message)
                 .join(" ")
-            : "Public release is not safe to unpublish.",
+            : "This release is not safe to remove from the Web Package.",
         );
       }
 
@@ -6792,10 +6794,10 @@ function PublishWorkspace({
         planPayload.catalogEntry?.title ??
         releaseId;
       const reviewed = window.confirm(
-        `Unpublish “${label}” from the public catalog?\n\n` +
+        `Remove “${label}” from the Web Package?\n\n` +
         `${planPayload.publicFiles.fileCount} public files · ${formatByteSize(planPayload.publicFiles.totalBytes)}\n` +
         `Public path: ${planPayload.destinationReleaseRelativePath}\n\n` +
-        "This removes only the sanitized public package and catalog membership. " +
+        "This removes only the sanitized Web Package release and catalog membership. " +
         "The canonical Library release and masters are not deleted.\n\n" +
         "Afterward, refresh the package index and review the resulting Live removal.",
       );
@@ -6833,7 +6835,7 @@ function PublishWorkspace({
         throw new Error(
           "error" in payload && payload.error
             ? payload.error
-            : "Unable to unpublish the public release.",
+            : "Unable to remove the release from the Web Package.",
         );
       }
 
@@ -6852,14 +6854,14 @@ function PublishWorkspace({
       ]);
 
       onNotify(
-        `Unpublished ${label} · ${payload.removedFileCount} public files removed. Refresh the package index before reviewing Live changes.`,
+        `Removed ${label} from the Web Package · ${payload.removedFileCount} web files removed. Refresh the package index before reviewing Live changes.`,
         "success",
       );
     } catch (unpublishError) {
       setPlanError(
         unpublishError instanceof Error
           ? unpublishError.message
-          : "Unable to unpublish the public release.",
+          : "Unable to remove the release from the Web Package.",
       );
     } finally {
       setUnpublishLoadingReleaseId(null);
@@ -6898,12 +6900,39 @@ function PublishWorkspace({
     publishFleet?.releases.map((release) => [release.releaseId, release]) ?? [],
   );
 
+  const includedWebPackageRelease = (release: ReleaseScanResult): boolean => {
+    const fleetRelease = publishFleetByReleaseId.get(release.id);
+    return Boolean(
+      fleetRelease && fleetRelease.publicationState !== "not-published",
+    );
+  };
+
   const workspaceReleases = mode === "production"
-    ? sortedReleases.filter((release) => {
-        const fleetRelease = publishFleetByReleaseId.get(release.id);
-        return fleetRelease && fleetRelease.publicationState !== "not-published";
-      })
-    : sortedReleases;
+    ? sortedReleases.filter(includedWebPackageRelease)
+    : sortedReleases.filter((release) => {
+        if (webPackageFilter === "all") {
+          return true;
+        }
+
+        const included = includedWebPackageRelease(release);
+        return webPackageFilter === "included" ? included : !included;
+      });
+
+  const webPackageListHeading = webPackageFilter === "included"
+    ? "Included in Web Package"
+    : webPackageFilter === "not-included"
+      ? "Not included in Web Package"
+      : "All Library releases";
+
+  const batchPreparationEligibleReleaseIds = new Set(
+    workspaceReleases.flatMap((release) =>
+      publishFleetByReleaseId.get(release.id)?.needsPreparation
+        ? [release.id]
+        : []
+    ),
+  );
+  const showBatchPreparationControls =
+    mode === "public-package" && batchPreparationEligibleReleaseIds.size > 0;
 
   const liveReleaseStatus = (releaseId: string): { label: string; tone: string } => {
     if (!deploymentTargetStatus?.configured) {
@@ -6938,6 +6967,43 @@ function PublishWorkspace({
     return { label: "Up to date", tone: "success" };
   };
 
+  const liveReleaseChangeCount = mode === "production" && deploymentSyncPlan
+    ? workspaceReleases.filter((release) =>
+        liveReleaseStatus(release.id).label !== "Up to date"
+      ).length
+    : null;
+
+  const liveLeavingReleaseIds = mode === "production" &&
+    deploymentSyncPlan?.status === "changes"
+    ? Array.from(new Set(
+        deploymentSyncPlan.changes.flatMap((change) => {
+          if (change.action !== "remove") {
+            return [];
+          }
+
+          const match = change.path.match(/^releases\/([^/]+)(?:\/|$)/);
+          return match ? [match[1]] : [];
+        }),
+      )).filter((releaseId) =>
+        !workspaceReleases.some((release) => release.id === releaseId)
+      )
+    : [];
+
+  const liveLeavingReleases = liveLeavingReleaseIds.map((releaseId) => ({
+    releaseId,
+    release: releases.find((release) => release.id === releaseId),
+  }));
+
+  const webPackageMembershipStatus = (releaseId: string): { label: string; tone: string } => {
+    const fleetRelease = publishFleetByReleaseId.get(releaseId);
+
+    if (!fleetRelease || fleetRelease.publicationState === "not-published") {
+      return { label: "Not included", tone: "preview" };
+    }
+
+    return { label: "Included", tone: "success" };
+  };
+
   const webPackageReleaseStatus = (releaseId: string): { label: string; tone: string } => {
     const fleetRelease = publishFleetByReleaseId.get(releaseId);
 
@@ -6954,14 +7020,14 @@ function PublishWorkspace({
     }
 
     if (fleetRelease.publicationState === "up-to-date") {
-      return { label: "Prepared", tone: "success" };
+      return { label: "Current", tone: "success" };
     }
 
     if (fleetRelease.publicationState === "update-available") {
       return { label: "Update ready", tone: "warning" };
     }
 
-    return { label: "Not prepared", tone: "preview" };
+    return { label: "Ready to add", tone: "preview" };
   };
 
   return (
@@ -6979,13 +7045,13 @@ function PublishWorkspace({
           </p>
           <h2>
             {mode === "production"
-              ? "Compare Web Package with Live"
-              : "Prepare releases for the web"}
+              ? "Included Web Package → Live"
+              : "Choose releases for the Web Package"}
           </h2>
           <p>
             {mode === "production"
-              ? "Live shows what Hiplingo visitors can currently access. Compare it with the Web Package before publishing any changes."
-              : "Web Package contains the sanitized releases prepared for the Hiplingo web app. Preparing or updating a release here does not make it live."}
+              ? "Live compares the same releases currently marked Included in Web Package. Not included Library releases are never sent; if previously Live content leaves the Web Package, Check Live surfaces that removal before deployment."
+              : "Only releases marked Included are part of the exact Web Package that a future Live deployment will publish. Not included releases remain private in Library."}
           </p>
         </div>
         <div className="workflow-workspace-actions publish-workspace-actions">
@@ -7090,7 +7156,7 @@ function PublishWorkspace({
 
       <section
         className="publish-deployment-overview"
-        aria-label="Published media deployment snapshot"
+        aria-label="Web Package deployment snapshot"
       >
         <header className="publish-deployment-overview-header">
           <div>
@@ -7118,7 +7184,9 @@ function PublishWorkspace({
             >
               {publishFleetLoading
                 ? "Refreshing…"
-                : "Refresh status"}
+                : mode === "production"
+                  ? "Refresh Web Package"
+                  : "Refresh status"}
             </button>
 
           </div>
@@ -7130,7 +7198,7 @@ function PublishWorkspace({
               {mode === "production" ? (
                 <>
                   <div>
-                    <span>Web Package</span>
+                    <span>Included</span>
                     <strong>{publishFleet.summary.publicCatalogCount} releases</strong>
                   </div>
                   <div>
@@ -7141,23 +7209,23 @@ function PublishWorkspace({
                         : deploymentSyncPlan?.status === "current"
                           ? "Up to date"
                           : deploymentSyncPlan?.status === "changes"
-                            ? `${deploymentSyncPlan.summary.changeCount} changes ready`
+                            ? "Changes ready"
                             : "Check required"}
                     </strong>
                   </div>
                   <div>
-                    <span>New / updated</span>
+                    <span>Included changes</span>
                     <strong>
-                      {deploymentSyncPlan?.status === "changes"
-                        ? `${deploymentSyncPlan.summary.addCount} / ${deploymentSyncPlan.summary.updateCount}`
-                        : "—"}
+                      {liveReleaseChangeCount === null
+                        ? "—"
+                        : liveReleaseChangeCount}
                     </strong>
                   </div>
                   <div>
-                    <span>Removals</span>
+                    <span>Leaving Live</span>
                     <strong>
-                      {deploymentSyncPlan?.status === "changes"
-                        ? deploymentSyncPlan.summary.removeCount
+                      {deploymentSyncPlan
+                        ? liveLeavingReleases.length
                         : "—"}
                     </strong>
                   </div>
@@ -7165,12 +7233,12 @@ function PublishWorkspace({
               ) : (
                 <>
                   <div>
-                    <span>Prepared for web</span>
+                    <span>Included</span>
                     <strong>{publishFleet.summary.publicCatalogCount}</strong>
                   </div>
                   <div>
-                    <span>Up to date</span>
-                    <strong>{publishFleet.summary.currentCount}</strong>
+                    <span>Not included</span>
+                    <strong>{publishFleet.summary.notPublishedCount}</strong>
                   </div>
                   <div>
                     <span>Updates ready</span>
@@ -7183,6 +7251,57 @@ function PublishWorkspace({
                 </>
               )}
             </div>
+
+            {mode === "public-package" && (
+              <p className="publish-public-set-note">
+                <strong>Public set:</strong> only releases marked <strong>Included</strong> are part of the Web Package and can be sent to Live. <strong>Not included</strong> releases stay private in Library.
+              </p>
+            )}
+
+            {mode === "production" && (
+              <p className="publish-live-set-note">
+                <strong>Included set:</strong> this is the same {publishFleet.summary.publicCatalogCount}-release set shown under <strong>Web Package → Included</strong>. Only these releases are sent to Live. Check Live also reports removals when content that was previously Live has been removed from the Web Package.
+              </p>
+            )}
+
+            {mode === "production" && liveLeavingReleases.length > 0 && (
+              <aside
+                className="publish-live-leaving-alert"
+                aria-label="Releases leaving Live"
+              >
+                <div className="publish-live-leaving-heading">
+                  <div>
+                    <span className="publish-deployment-kicker">Leaving Live</span>
+                    <strong>
+                      {liveLeavingReleases.length} {liveLeavingReleases.length === 1 ? "release is" : "releases are"} no longer in the Included Web Package set
+                    </strong>
+                  </div>
+                  <span className="badge warning">Review before deploy</span>
+                </div>
+                <p>
+                  These releases still exist on the checked Live target but are absent from the current Web Package. A future deployment would remove them from Live. No removal has been performed by Check Live.
+                </p>
+                <div className="publish-live-leaving-list">
+                  {liveLeavingReleases.map(({ releaseId, release }) => (
+                    <div key={releaseId}>
+                      <span>
+                        <strong>
+                          {release?.releaseTitle ?? formatReleaseTitle(releaseId)}
+                        </strong>
+                        {release?.primaryArtistName && (
+                          <small>{release.primaryArtistName}</small>
+                        )}
+                        {release && libraryReleaseSortDate(release) && (
+                          <small>{libraryReleaseSortDate(release)}</small>
+                        )}
+                        <code>{releaseId}</code>
+                      </span>
+                      <span className="badge warning">Leaving Live</span>
+                    </div>
+                  ))}
+                </div>
+              </aside>
+            )}
 
             {mode === "public-package" && (
               <details className="publish-package-details">
@@ -7253,19 +7372,19 @@ function PublishWorkspace({
               publishFleet.summary.publishedOnlyCount > 0 && (
               <aside
                 className="publish-public-only-membership"
-                aria-label="Published releases missing from the Library"
+                aria-label="Included releases missing from the Library"
               >
                 <div className="publish-public-only-membership-heading">
                   <div>
-                    <span className="publish-deployment-kicker">Public catalog membership</span>
+                    <span className="publish-deployment-kicker">Web Package inclusion</span>
                     <strong>
-                      {publishFleet.summary.publishedOnlyCount} published-only {publishFleet.summary.publishedOnlyCount === 1 ? "release" : "releases"}
+                      {publishFleet.summary.publishedOnlyCount} included {publishFleet.summary.publishedOnlyCount === 1 ? "release is" : "releases are"} missing from Library
                     </strong>
                   </div>
                   <span className="badge warning">Review membership</span>
                 </div>
                 <p>
-                  These releases are still public but are not present in the current Library scan. Metadata Editor will never remove them automatically. Review each one and explicitly unpublish it if it should leave the public catalog.
+                  These releases are still included in the Web Package but are not present in the current Library scan. Metadata Editor will never remove them automatically. Review each one and explicitly remove it from the Web Package if it should no longer be eligible for Live.
                 </p>
                 <div className="publish-public-only-membership-list">
                   {publishFleet.releases
@@ -7296,8 +7415,8 @@ function PublishWorkspace({
                           }
                         >
                           {unpublishLoadingReleaseId === release.releaseId
-                            ? "Unpublishing…"
-                            : "Review unpublish"}
+                            ? "Removing…"
+                            : "Review removal"}
                         </button>
                       </div>
                     ))}
@@ -7448,7 +7567,7 @@ function PublishWorkspace({
                                   }
                                 />
                                 <span>
-                                  Deploy the current public snapshot anyway; {pendingLibraryChangesCount} published {pendingLibraryChangesCount === 1 ? "release has" : "releases have"} newer Library changes.
+                                  Deploy the current Web Package snapshot anyway; {pendingLibraryChangesCount} Included {pendingLibraryChangesCount === 1 ? "release has" : "releases have"} newer Library changes.
                                 </span>
                               </label>
                             )}
@@ -7502,7 +7621,7 @@ function PublishWorkspace({
                         </code>
                         {hasPendingLibraryChanges && (
                           <small>
-                            CLI deployment is also blocked by default while published releases have pending Library changes. Add <code>--allow-pending-library-changes</code> only when intentionally deploying this older public snapshot.
+                            CLI deployment is also blocked by default while Included releases have pending Library changes. Add <code>--allow-pending-library-changes</code> only when intentionally deploying this older Web Package snapshot.
                           </small>
                         )}
                       </div>
@@ -7604,8 +7723,40 @@ function PublishWorkspace({
 
       <section className="workflow-table-panel">
         <header className="publish-release-list-header">
-          <h3>Releases</h3>
+          <h3>{mode === "public-package" ? webPackageListHeading : "Included Web Package → Live"}</h3>
           <div className="workflow-release-table-controls">
+            {mode === "public-package" && (
+              <div
+                className="publish-public-set-filter"
+                role="group"
+                aria-label="Web Package release membership"
+              >
+                <button
+                  type="button"
+                  className={webPackageFilter === "included" ? "active" : ""}
+                  aria-pressed={webPackageFilter === "included"}
+                  onClick={() => setWebPackageFilter("included")}
+                >
+                  Included ({publishFleet?.summary.publicCatalogCount ?? 0})
+                </button>
+                <button
+                  type="button"
+                  className={webPackageFilter === "not-included" ? "active" : ""}
+                  aria-pressed={webPackageFilter === "not-included"}
+                  onClick={() => setWebPackageFilter("not-included")}
+                >
+                  Not included ({publishFleet?.summary.notPublishedCount ?? 0})
+                </button>
+                <button
+                  type="button"
+                  className={webPackageFilter === "all" ? "active" : ""}
+                  aria-pressed={webPackageFilter === "all"}
+                  onClick={() => setWebPackageFilter("all")}
+                >
+                  All Library ({releases.length})
+                </button>
+              </div>
+            )}
             <label className="workspace-release-sort-control">
               <span>Sort by</span>
               <select
@@ -7623,7 +7774,7 @@ function PublishWorkspace({
                 <option value="library">Library order</option>
               </select>
             </label>
-            {mode === "public-package" && selectedBatchReleaseIds.size > 0 && (
+            {showBatchPreparationControls && selectedBatchReleaseIds.size > 0 && (
               <button
                 type="button"
                 className="publish-batch-prepare-button"
@@ -7640,7 +7791,7 @@ function PublishWorkspace({
                   : `Prepare selected (${selectedBatchReleaseIds.size})`}
               </button>
             )}
-            <strong>{workspaceReleases.length} releases</strong>
+            <strong>{mode === "production" ? `${workspaceReleases.length} included releases` : `${workspaceReleases.length} releases`}</strong>
           </div>
         </header>
 
@@ -7650,17 +7801,23 @@ function PublishWorkspace({
               {mode === "production" ? (
                 <tr>
                   <th scope="col">Release</th>
-                  <th scope="col">Web Package</th>
+                  <th scope="col">Included Web Package</th>
                   <th scope="col">Live</th>
                 </tr>
               ) : (
                 <tr>
-                  <th scope="col" className="publish-batch-select-column">
-                    <span className="visually-hidden">Batch prepare</span>
-                  </th>
-                  <th scope="col">Release</th>
-                  <th scope="col">Ready</th>
-                  <th scope="col">Web Package</th>
+                  {showBatchPreparationControls && (
+                    <th
+                      scope="col"
+                      className="publish-batch-select-column"
+                      title="Select releases that need private derivative preparation"
+                    >
+                      Prepare
+                    </th>
+                  )}
+                  <th scope="col" className="publish-release-column">Release</th>
+                  <th scope="col" className="publish-membership-column">Public set</th>
+                  <th scope="col" className="publish-package-status-column">Package status</th>
                 </tr>
               )}
             </thead>
@@ -7668,12 +7825,22 @@ function PublishWorkspace({
               {workspaceReleases.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={mode === "production" ? 3 : 4}
+                    colSpan={
+                      mode === "production"
+                        ? 3
+                        : showBatchPreparationControls
+                          ? 4
+                          : 3
+                    }
                     className="workflow-empty-cell"
                   >
                     {mode === "production"
                       ? "No Web Package releases are available to compare with Live."
-                      : "No Library releases are available to prepare for the web."}
+                      : webPackageFilter === "included"
+                        ? "No releases are currently included in the Web Package."
+                        : webPackageFilter === "not-included"
+                          ? "Every Library release is currently included in the Web Package."
+                          : "No Library releases are available to prepare for the web."}
                   </td>
                 </tr>
               ) : (
@@ -7690,6 +7857,9 @@ function PublishWorkspace({
                   );
                   const operationBadge = publishOperationBadge(latestOperation);
                   const batchSelected = selectedBatchReleaseIds.has(release.id);
+                  const batchPreparationEligible =
+                    batchPreparationEligibleReleaseIds.has(release.id);
+                  const webPackageMembership = webPackageMembershipStatus(release.id);
                   const webPackageStatus = webPackageReleaseStatus(release.id);
                   const liveStatus = liveReleaseStatus(release.id);
 
@@ -7700,6 +7870,11 @@ function PublishWorkspace({
                         "publish-release-row",
                         selected && mode === "public-package" ? "selected" : "",
                         loadingPlan && mode === "public-package" ? "is-loading" : "",
+                        mode === "production"
+                          ? "is-public-included"
+                          : webPackageMembership.label === "Included"
+                            ? "is-public-included"
+                            : "is-public-excluded",
                       ].filter(Boolean).join(" ")}
                       tabIndex={mode === "public-package" && !loadingPlan ? 0 : undefined}
                       aria-busy={mode === "public-package" && loadingPlan || undefined}
@@ -7707,8 +7882,8 @@ function PublishWorkspace({
                         mode === "public-package"
                           ? `${loadingPlan ? "Loading Ready Check for" : "Open Ready Check for"} ${
                               release.releaseTitle ?? formatReleaseTitle(release.id)
-                            }`
-                          : `${release.releaseTitle ?? formatReleaseTitle(release.id)} · ${liveStatus.label}`
+                            } · ${webPackageMembership.label}`
+                          : `${release.releaseTitle ?? formatReleaseTitle(release.id)} · Included in Web Package · ${liveStatus.label}`
                       }
                       onClick={() => {
                         if (mode === "public-package" && !loadingPlan) {
@@ -7730,26 +7905,35 @@ function PublishWorkspace({
                         }
                       }}
                     >
-                      {mode === "public-package" && (
+                      {showBatchPreparationControls && (
                         <td className="publish-batch-select-cell">
-                          <input
-                            type="checkbox"
-                            checked={batchSelected}
-                            aria-label={`Select ${release.releaseTitle ?? formatReleaseTitle(release.id)} for batch preparation`}
-                            onClick={(event) => event.stopPropagation()}
-                            onChange={(event) => {
-                              const checked = event.target.checked;
-                              setSelectedBatchReleaseIds((current) => {
-                                const next = new Set(current);
-                                if (checked) {
-                                  next.add(release.id);
-                                } else {
-                                  next.delete(release.id);
-                                }
-                                return next;
-                              });
-                            }}
-                          />
+                          {batchPreparationEligible ? (
+                            <input
+                              type="checkbox"
+                              checked={batchSelected}
+                              aria-label={`Select ${release.releaseTitle ?? formatReleaseTitle(release.id)} for preparation`}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) => {
+                                const checked = event.target.checked;
+                                setSelectedBatchReleaseIds((current) => {
+                                  const next = new Set(current);
+                                  if (checked) {
+                                    next.add(release.id);
+                                  } else {
+                                    next.delete(release.id);
+                                  }
+                                  return next;
+                                });
+                              }}
+                            />
+                          ) : (
+                            <span
+                              className="publish-batch-not-needed"
+                              aria-label="No preparation needed"
+                            >
+                              —
+                            </span>
+                          )}
                         </td>
                       )}
                       <th scope="row">
@@ -7777,43 +7961,49 @@ function PublishWorkspace({
                             {release.primaryArtistName && (
                               <span>{release.primaryArtistName}</span>
                             )}
+                            {libraryReleaseSortDate(release) && (
+                              <small className="publish-release-date">
+                                {libraryReleaseSortDate(release)}
+                              </small>
+                            )}
                           </span>
                         </div>
                       </th>
 
                       {mode === "public-package" ? (
                         <>
+                          <td className="publish-status-cell publish-membership-cell">
+                            <span className={`badge ${webPackageMembership.tone}`}>
+                              {webPackageMembership.label}
+                            </span>
+                          </td>
                           <td className="publish-status-cell publish-ready-check-cell">
                             {operationBadge ? (
                               <span className={`badge ${operationBadge.tone}`}>
                                 {operationBadge.label}
                               </span>
                             ) : (
-                              <span className={`badge ${assessment.preflightTone}`}>
-                                {assessment.preflightLabel}
+                              <span
+                                className={`badge ${webPackageStatus.tone}`}
+                                title={assessment.note}
+                              >
+                                {webPackageStatus.label}
                               </span>
                             )}
-                            {loadingPlan && (
+                            {loadingPlan ? (
                               <small className="publish-row-loading" role="status">
                                 Checking…
                               </small>
+                            ) : (
+                              <small>Click row for Ready Check</small>
                             )}
-                          </td>
-                          <td className="publish-status-cell">
-                            <span className={`badge ${webPackageStatus.tone}`}>
-                              {webPackageStatus.label}
-                            </span>
-                            <small>
-                              {assessment.streamLabel} · waveform checked in Ready Check
-                            </small>
                           </td>
                         </>
                       ) : (
                         <>
-                          <td className="publish-status-cell">
-                            <span className={`badge ${webPackageStatus.tone}`}>
-                              {webPackageStatus.label}
-                            </span>
+                          <td className="publish-status-cell publish-live-package-cell">
+                            <span className="badge success">Included</span>
+                            <small>{webPackageStatus.label}</small>
                           </td>
                           <td className="publish-status-cell live-status-cell">
                             <span className={`badge ${liveStatus.tone}`}>
@@ -7870,7 +8060,7 @@ function PublishWorkspace({
                     </th>
                     <td>
                       {operation.mode === "unpublish"
-                        ? "Unpublish"
+                        ? "Remove from Web Package"
                         : operation.mode === "update"
                           ? "Rebuild"
                           : "Build"}
@@ -7967,7 +8157,7 @@ function PublishWorkspace({
           >
           <header>
             <div>
-              <p className="eyebrow">Preflight result</p>
+              <p className="eyebrow">Ready Check result</p>
               <h3>
                 {releases.find((release) =>
                   release.id === selectedPlan.releaseId
@@ -8060,7 +8250,7 @@ function PublishWorkspace({
                     {selectedPlan.publication.publishedAt
                       ? `Web Package ${new Date(selectedPlan.publication.publishedAt).toLocaleString()}. `
                       : ""}
-                    Current canonical metadata and public media inputs match the published snapshot.
+                    Current canonical metadata and web-facing media inputs match the Web Package snapshot.
                   </small>
                 </div>
               ) : (
@@ -8108,7 +8298,7 @@ function PublishWorkspace({
                             )
                           ? "Recover or review the interrupted package operation in Operation history before building again."
                           : canBuildPublishPlan(selectedPlan)
-                            ? "Build a complete sanitized public release snapshot, validate it, and atomically promote it into published-media."
+                            ? "Build a complete sanitized Web Package release snapshot, validate it, and atomically promote it into published-media."
                             : "Resolve the blocking Ready Check issues first."
                     }
                   >
@@ -8136,7 +8326,7 @@ function PublishWorkspace({
                           )
                         ? "Web Package updates are paused until the interrupted operation is verified and finalized or safely rolled back from Web Package history."
                         : canBuildPublishPlan(selectedPlan)
-                          ? "Publishes the complete public snapshot from current Library metadata, browser artwork, waveform peaks, and HLS assets. Existing public releases are replaced as a unit so obsolete files cannot survive an update."
+                          ? "Builds the complete Web Package snapshot from current Library metadata, browser artwork, waveform peaks, and HLS assets. Existing Included releases are replaced as a unit so obsolete files cannot survive an update."
                           : "Resolve the blocking issues shown in Ready Check before preparing derivatives or publishing."}
                   </small>
                 </>
@@ -8147,13 +8337,13 @@ function PublishWorkspace({
           {selectedPlan.destinationReleaseExists && (
             <section
               className="publish-public-membership-action"
-              aria-label="Public catalog membership action"
+              aria-label="Web Package inclusion action"
             >
               <div>
-                <span className="eyebrow">Public catalog membership</span>
-                <strong>This release currently has a public package</strong>
+                <span className="eyebrow">Web Package inclusion</span>
+                <strong>Included in Web Package</strong>
                 <small>
-                  Unpublishing removes only the sanitized package from published-media and its catalog entry. The canonical Library release, masters, metadata, and private derivatives remain unchanged.
+                  This release is part of the exact set eligible for a future Live deployment. Removing it affects only the sanitized Web Package; the canonical Library release, masters, metadata, and private derivatives remain unchanged.
                 </small>
               </div>
               <button
@@ -8179,11 +8369,11 @@ function PublishWorkspace({
                     )?.releaseTitle,
                   )
                 }
-                title="Build a read-only removal plan, review its public file count, then remove this release from published-media and catalog.json. Library content is never deleted."
+                title="Build a read-only removal plan, review its public file count, then remove this release from the Web Package and catalog.json. Library content is never deleted."
               >
                 {unpublishLoadingReleaseId === selectedPlan.releaseId
-                  ? "Unpublishing…"
-                  : "Review unpublish"}
+                  ? "Removing…"
+                  : "Review removal"}
               </button>
             </section>
           )}
@@ -8254,18 +8444,18 @@ function PublishWorkspace({
                   );
                   return operation
                     ? `${operation.state} · ${operation.phase.replaceAll("-", " ")}`
-                    : "No recorded publish operation";
+                    : "No recorded Web Package operation";
                 })()}
               </dd>
             </div>
             <div>
-              <dt>Public package</dt>
+              <dt>Web Package</dt>
               <dd>
                 {selectedPlan.publication.state === "up-to-date"
                   ? "Up to date"
                   : selectedPlan.publication.state === "update-available"
-                    ? "Published · update available"
-                    : "Not published"}
+                    ? "Included · update available"
+                    : "Not included"}
               </dd>
             </div>
             <div>

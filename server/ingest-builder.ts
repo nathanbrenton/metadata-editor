@@ -799,6 +799,13 @@ function artworkRoleDirectory(
     return "liner-notes";
   }
 
+  if (role === "alternate_front_cover") {
+    const assignmentSlug =
+      slugifyIngestValue(assignment.id) || "assignment";
+
+    return `alternate/${assignmentSlug}`;
+  }
+
   const roleSlug = slugifyIngestValue(role) || "supplemental";
 
   if (roleSlug === "disc" || roleSlug === "thumbnail") {
@@ -1235,7 +1242,11 @@ function customizeGeneratedDocuments(
   const primaryReleaseAssignment =
     releaseAssignments.find(
       ({ assignment }) => assignment.role === "front_cover",
-    ) ?? releaseAssignments[0];
+    ) ??
+    releaseAssignments.find(
+      ({ assignment }) =>
+        assignment.role !== "alternate_front_cover",
+    );
 
   return documents.map((document) => {
     const data = parse(
@@ -1287,7 +1298,8 @@ function customizeGeneratedDocuments(
       document.filename === "release-settings.toml" &&
       releaseAssignments.length > 0
     ) {
-      const releaseFallback = primaryReleaseAssignment;
+      const releaseFallback =
+        primaryReleaseAssignment ?? releaseAssignments[0];
       setNestedRecordValue(
         data,
         ["settings", "inheritance"],
@@ -4342,7 +4354,9 @@ export async function prepareIngestReleaseBuild(
       for (const { placement, assignment } of releaseArtworkUpdates) {
         const primary =
           assignment.role === "front_cover" ||
-          (!hasPrimaryArtwork && !releaseFrontArtwork);
+          (!hasPrimaryArtwork &&
+            !releaseFrontArtwork &&
+            assignment.role !== "alternate_front_cover");
         const mergedArtwork = mergeArtworkRecord(
           artworkRecords,
           assignment,
@@ -4566,7 +4580,9 @@ export async function prepareIngestReleaseBuild(
           const primary =
             assignment.role === "front_cover" ||
             assignment.role === "track_artwork" ||
-            (!hasPrimaryArtwork && !trackFrontArtwork);
+            (!hasPrimaryArtwork &&
+              !trackFrontArtwork &&
+              assignment.role !== "alternate_front_cover");
           const mergedArtwork = mergeArtworkRecord(
             artworkRecords,
             assignment,

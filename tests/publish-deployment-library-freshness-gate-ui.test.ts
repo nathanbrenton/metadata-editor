@@ -58,7 +58,7 @@ test(
     );
     assert.match(
       appSource,
-      /Deploy the current public snapshot anyway/,
+      /Deploy the current Web Package snapshot anyway/,
     );
     assert.match(
       serverSource,

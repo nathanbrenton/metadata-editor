@@ -97,6 +97,7 @@ export type IngestArtworkAssignmentDraft = {
 
 export const ingestArtworkRoleOptions = [
   "front_cover",
+  "alternate_front_cover",
   "back_cover",
   "booklet",
   "disc",

@@ -44,8 +44,8 @@ test("Library MP3 preparation uses a playback-only preparation scope", () => {
 });
 
 test("Web Package state is distinct from generic Library health", () => {
-  assert.match(app, /return \{ label: "Prepared", tone: "success" \};/);
+  assert.match(app, /return \{ label: "Current", tone: "success" \};/);
   assert.match(app, /return \{ label: "Update ready", tone: "warning" \};/);
-  assert.match(app, /return \{ label: "Not prepared", tone: "preview" \};/);
+  assert.match(app, /return \{ label: "Ready to add", tone: "preview" \};/);
   assert.match(app, /: "Library ready";/);
 });

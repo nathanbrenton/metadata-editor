@@ -24,7 +24,7 @@ const helpViewSource = await readFile(
 );
 
 test("Publish exposes guarded release-scoped unpublish instead of deployment-level partial selection", () => {
-  assert.match(appSource, /Review unpublish/);
+  assert.match(appSource, /Review removal/);
   assert.match(appSource, /UNPUBLISH_PUBLIC_RELEASE/);
   assert.match(appSource, /canonical Library release, masters, metadata, and private derivatives remain unchanged/i);
   assert.match(serverSource, /\/api\/publish\/unpublish-plan/);
@@ -40,8 +40,8 @@ test("fleet surfaces public catalog members missing from the active Library with
 
 test("Workflow Help documents unpublish and track-removal propagation", () => {
   assert.match(helpSource, /How do I remove a release from the public catalog without deleting the Library release\?/);
-  assert.match(helpSource, /What does Published-only mean in the Publish fleet\?/);
+  assert.match(helpSource, /What if an Included release is missing from Library\?/);
   assert.match(helpSource, /If I remove a track from a Library release, how does that disappear from the website\?/);
   assert.match(helpViewSource, /How do I remove a release from the public catalog\?/);
-  assert.match(helpViewSource, /What does Published-only mean\?/);
+  assert.match(helpViewSource, /What if an Included release is missing from Library\?/);
 });

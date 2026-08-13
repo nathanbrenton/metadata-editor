@@ -44,7 +44,7 @@ test("Library persists sorting and uses icon view controls with columnar rows", 
 
 test("Publish labels the release table concisely", () => {
   assert.match(appSource, /<header className="publish-release-list-header">/);
-  assert.match(appSource, /<h3>Releases<\/h3>/);
+  assert.match(appSource, /Included in Web Package/);
   assert.doesNotMatch(appSource, /<h3>Release readiness overview<\/h3>/);
 });
 

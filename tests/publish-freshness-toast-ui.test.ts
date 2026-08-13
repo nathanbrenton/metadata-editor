@@ -23,14 +23,14 @@ test("shows persistent up-to-date publish state instead of a repeat write action
   );
   assert.match(
     appSource,
-    /Current canonical metadata and public media inputs match the published snapshot/,
+    /Current canonical metadata and web-facing media inputs match the Web Package snapshot/,
   );
 });
 
 test("uses the shared success toast for publish and preparation writes", () => {
   assert.match(
     appSource,
-    /Public package .* successfully\.`,[\s\S]*?"success"/,
+    /Web Package .* successfully\.`,[\s\S]*?"success"/,
   );
   assert.match(appSource, /const preparedParts =/);
   assert.match(
@@ -43,6 +43,6 @@ test("uses the shared success toast for publish and preparation writes", () => {
 
 test("documents publish freshness and transient success feedback", () => {
   assert.match(helpSource, /stable content fingerprint/i);
-  assert.match(helpSource, /Web Package is up to date/i);
+  assert.match(helpSource, /row reports Current and removes the repeat publish action/i);
   assert.match(helpSource, /transient success toast/i);
 });
