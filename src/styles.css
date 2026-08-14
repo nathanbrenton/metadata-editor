@@ -1949,9 +1949,10 @@ button,
 
 .library-health-row-badge {
   flex: 0 0 auto;
-  min-width: 1.25rem;
-  padding-inline: 0.3rem;
+  min-width: auto;
+  padding-inline: 0.42rem;
   text-align: center;
+  white-space: nowrap;
 }
 
 .badge.warning {
@@ -15078,8 +15079,10 @@ main:has(.persistent-library-player) {
 }
 
 .library-waveform-display {
+  --waveform-canvas-height: clamp(12rem, 22vw, 20rem);
+
   display: grid;
-  min-height: 12rem;
+  min-height: calc(var(--waveform-canvas-height) + 1.6rem);
   place-items: stretch;
   padding: 0.8rem 0.9rem;
   border-bottom: 1px solid #303841;
@@ -15128,20 +15131,21 @@ main:has(.persistent-library-player) {
 }
 
 .library-waveform-canvas {
-  min-height: 10.4rem;
+  min-height: var(--waveform-canvas-height);
+  overflow: hidden;
   border: 1px solid #2f3942;
   border-radius: 0.35rem;
-  background:
-    linear-gradient(to bottom, transparent 49.7%, #313a43 50%, transparent 50.3%),
-    #10151a;
+  background: #181818;
 }
 
 .library-waveform-canvas canvas {
-  min-height: 10.4rem;
+  min-height: var(--waveform-canvas-height);
 }
 
 .library-waveform-technical-line {
   display: flex;
+  min-height: 1.8rem;
+  box-sizing: border-box;
   flex-wrap: wrap;
   gap: 0.65rem;
   padding: 0.38rem 0.9rem;
@@ -15149,6 +15153,10 @@ main:has(.persistent-library-player) {
   color: #727e88;
   background: #14191e;
   font-size: 0.64rem;
+}
+
+.library-waveform-technical-line.is-placeholder {
+  visibility: hidden;
 }
 
 .library-waveform-detail-status {
@@ -15589,4 +15597,171 @@ main:has(.persistent-library-player) {
   .staging-library-build-header-confirmation {
     justify-content: center;
   }
+}
+
+/* Metadata-editor footer controls matching Hiplingo's compact volume interaction. */
+.persistent-library-player__volume-control {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+
+.persistent-library-player__volume-button {
+  position: relative;
+  display: grid;
+  width: 36px;
+  min-width: 36px;
+  max-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #444;
+  border-radius: 50%;
+  color: #d7d7d7;
+  background: #202020;
+  box-shadow: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.persistent-library-player__volume-button:hover {
+  border-color: #7893a1;
+  color: #fff;
+  background: #2b414c;
+}
+
+.persistent-library-player__volume-button:focus-visible {
+  outline: 2px solid #8fd3ff;
+  outline-offset: 2px;
+}
+
+.persistent-library-player__volume-icon {
+  display: block;
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.persistent-library-player__volume-popup {
+  position: absolute;
+  right: 50%;
+  bottom: calc(100% + 10px);
+  z-index: 80;
+  width: 54px;
+  height: 166px;
+  padding: 8px;
+  overflow: hidden;
+  border: 1px solid #454545;
+  border-radius: 10px;
+  background: rgb(24 24 24 / 98%);
+  box-shadow: 0 12px 30px rgb(0 0 0 / 52%);
+  transform: translateX(50%);
+  backdrop-filter: blur(8px);
+}
+
+.persistent-library-player__volume-slider {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.persistent-library-player__volume-slider input[type="range"] {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 142px;
+  min-width: 142px;
+  max-width: none;
+  height: 28px;
+  margin: 0;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  cursor: pointer;
+}
+
+@media (max-width: 58rem) {
+  .persistent-library-player__volume-control {
+    display: none;
+  }
+}
+
+/* Footer artwork is the temporary route back to the active release Waveform view. */
+.persistent-library-player__artwork.shared-now-playing__artwork-action {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.persistent-library-player__artwork.shared-now-playing__artwork-action:hover {
+  outline: 2px solid #7893a1;
+  outline-offset: 2px;
+}
+
+.persistent-library-player__artwork.shared-now-playing__artwork-action:focus-visible {
+  outline: 2px solid #8fd3ff;
+  outline-offset: 2px;
+}
+
+/* Shared waveform zoom -> oscilloscope controls. */
+.library-waveform-canvas {
+  position: relative;
+}
+
+.library-waveform-canvas > .oscilloscope-canvas {
+  display: block;
+  width: 100%;
+  height: var(--waveform-canvas-height);
+  min-height: var(--waveform-canvas-height);
+  background: #181818;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.library-waveform-zoom-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.library-waveform-zoom-button {
+  position: absolute;
+  right: 0.55rem;
+  display: grid;
+  width: 1.9rem;
+  height: 1.9rem;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #3a4650;
+  border-radius: 0.3rem;
+  color: #dbe3e9;
+  background: rgb(18 24 29 / 88%);
+  font-size: 1rem;
+  line-height: 1;
+  pointer-events: auto;
+}
+
+.library-waveform-zoom-button--increase {
+  top: 0.55rem;
+}
+
+.library-waveform-zoom-button--decrease {
+  bottom: 0.55rem;
+}
+
+.library-waveform-zoom-button:hover:not(:disabled),
+.library-waveform-zoom-button:focus-visible {
+  border-color: #70869a;
+  background: rgb(27 35 42 / 94%);
+}
+
+.library-waveform-zoom-button:disabled {
+  opacity: 0.38;
 }

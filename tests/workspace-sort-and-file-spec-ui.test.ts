@@ -35,10 +35,11 @@ test("Staging defaults to newest release date and keeps the path hover on releas
   assert.match(styles, /\.staging-release-table\s*\{[\s\S]*?min-width:\s*0/);
 });
 
-test("Library defaults to expanded cards sorted by newest release date", () => {
+test("Library defaults to Artwork-First Tiles sorted by newest release date", () => {
+  assert.doesNotMatch(appSource, /function readLibraryReleaseViewMode\(/);
   assert.match(
     appSource,
-    /function readLibraryReleaseViewMode\(\)[\s\S]*?return "cards";/,
+    /useState<LibraryReleaseViewMode>\("tiles"\)/,
   );
   assert.match(
     appSource,

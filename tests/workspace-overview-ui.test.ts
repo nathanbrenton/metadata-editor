@@ -31,9 +31,13 @@ test("Staging uses metadata readiness icons and compact guarded update guidance"
   assert.match(appSource, /tabIndex=\{0\}/);
 });
 
-test("Library offers persisted Rows Cards Tiles and Waveform views without a redundant metadata button", () => {
-  assert.match(appSource, /LIBRARY_RELEASE_VIEW_STORAGE_KEY/);
-  assert.match(appSource, /metadata-editor\.library-release-view/);
+test("Library offers in-session Rows Cards Tiles and Waveform views without a redundant metadata button", () => {
+  assert.doesNotMatch(appSource, /LIBRARY_RELEASE_VIEW_STORAGE_KEY/);
+  assert.doesNotMatch(appSource, /metadata-editor\.library-release-view/);
+  assert.match(
+    appSource,
+    /useState<LibraryReleaseViewMode>\("tiles"\)/,
+  );
   assert.match(appSource, /LIBRARY_RELEASE_SORT_STORAGE_KEY/);
   assert.match(appSource, /metadata-editor\.library-release-sort/);
   assert.match(appSource, /LibraryReleaseViewIcon/);

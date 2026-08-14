@@ -40,6 +40,7 @@ import { buildLibraryWaveformUrl } from "./library-waveform.js";
 
 import {
   LibraryWaveformView,
+  type LibraryWaveformNavigationRequest,
 } from "./LibraryWaveformView.js";
 
 import {
@@ -1611,8 +1612,15 @@ export function App() {
     });
   const [applicationView, setApplicationView] =
     useState<ApplicationView>("library");
+  const [libraryReleaseViewMode, setLibraryReleaseViewMode] =
+    useState<LibraryReleaseViewMode>("tiles");
   const libraryPlayback =
     usePersistentLibraryPlayback();
+  const [
+    libraryWaveformNavigationRequest,
+    setLibraryWaveformNavigationRequest,
+  ] = useState<LibraryWaveformNavigationRequest | null>(null);
+  const libraryWaveformNavigationRequestIdRef = useRef(0);
   const [waveformColorMode, setWaveformColorMode] =
     useState<WaveformColorMode>(() => {
       try {
@@ -2142,6 +2150,17 @@ export function App() {
     setMenuOpen(false);
   }, []);
 
+  const openCurrentReleaseInLibraryWaveform = useCallback((
+    releaseId: string,
+  ) => {
+    libraryWaveformNavigationRequestIdRef.current += 1;
+    setLibraryWaveformNavigationRequest({
+      releaseId,
+      requestId: libraryWaveformNavigationRequestIdRef.current,
+    });
+    navigateWorkflowView("library");
+  }, [navigateWorkflowView]);
+
   const returnToLibraryHome = useCallback(() => {
     setWorkflowHelpReturnTarget(null);
     setSelectedReleaseDetail(null);
@@ -2630,6 +2649,11 @@ export function App() {
                     technicalByRelease={mediaTechnicalByRelease}
                     playback={libraryPlayback}
                     waveformColorMode={waveformColorMode}
+                    waveformNavigationRequest={
+                      libraryWaveformNavigationRequest
+                    }
+                    viewMode={libraryReleaseViewMode}
+                    onViewModeChange={setLibraryReleaseViewMode}
                   />
 
                 </>
@@ -2653,6 +2677,9 @@ export function App() {
       <PersistentLibraryPlayerBar
         playback={libraryPlayback}
         colorMode={waveformColorMode}
+        onOpenLibraryWaveform={
+          openCurrentReleaseInLibraryWaveform
+        }
       />
 
       <footer className="app-footer">
@@ -5499,18 +5526,18 @@ function libraryHealthCompactLabel(
   summary: LibraryHealthSummary,
 ): string {
   if (summary.blocked > 0) {
-    return `!${summary.blocked}`;
+    return `Block ${summary.blocked}`;
   }
 
   if (summary.warning > 0) {
-    return `⚠${summary.warning}`;
+    return `Warn ${summary.warning}`;
   }
 
   if (summary.preparation > 0) {
-    return `◌${summary.preparation}`;
+    return `Web prep ${summary.preparation}`;
   }
 
-  return "✓";
+  return "Ready";
 }
 
 function libraryHealthTitle(
@@ -5524,7 +5551,7 @@ function libraryHealthTitle(
       ? `${summary.warning} warning${summary.warning === 1 ? "" : "s"}`
       : "",
     summary.preparation > 0
-      ? `${summary.preparation} preparation item${summary.preparation === 1 ? "" : "s"}`
+      ? `${summary.preparation} Web Package preparation item${summary.preparation === 1 ? "" : "s"}`
       : "",
   ].filter(Boolean);
 
@@ -10270,8 +10297,6 @@ type LibraryReleaseSortMode =
   | "title"
   | "artist";
 
-const LIBRARY_RELEASE_VIEW_STORAGE_KEY =
-  "metadata-editor.library-release-view";
 const LIBRARY_RELEASE_SORT_STORAGE_KEY =
   "metadata-editor.library-release-sort";
 
@@ -10279,27 +10304,6 @@ const LIBRARY_TILE_SIZE_MIN_REM = 9;
 const LIBRARY_TILE_SIZE_MAX_REM = 24;
 const LIBRARY_TILE_SIZE_STEP_REM = 0.25;
 const LIBRARY_TILE_SIZE_DEFAULT_REM = 16;
-
-function readLibraryReleaseViewMode(): LibraryReleaseViewMode {
-  if (typeof window === "undefined") {
-    return "cards";
-  }
-
-  try {
-    const stored = window.localStorage.getItem(
-      LIBRARY_RELEASE_VIEW_STORAGE_KEY,
-    );
-
-    return stored === "rows" ||
-      stored === "cards" ||
-      stored === "tiles" ||
-      stored === "waveform"
-      ? stored
-      : "cards";
-  } catch {
-    return "cards";
-  }
-}
 
 function readLibraryReleaseSortMode(): LibraryReleaseSortMode {
   if (typeof window === "undefined") {
@@ -10447,6 +10451,9 @@ function LibraryReleaseBrowser({
   technicalByRelease,
   playback,
   waveformColorMode,
+  waveformNavigationRequest,
+  viewMode,
+  onViewModeChange,
 }: {
   releases: ReleaseScanResult[];
   onLibraryChanged: () => Promise<void>;
@@ -10463,11 +10470,10 @@ function LibraryReleaseBrowser({
   >;
   playback: PersistentLibraryPlaybackController;
   waveformColorMode: WaveformColorMode;
+  waveformNavigationRequest: LibraryWaveformNavigationRequest | null;
+  viewMode: LibraryReleaseViewMode;
+  onViewModeChange: (mode: LibraryReleaseViewMode) => void;
 }) {
-  const [viewMode, setViewMode] =
-    useState<LibraryReleaseViewMode>(
-      readLibraryReleaseViewMode,
-    );
   const [sortMode, setSortMode] =
     useState<LibraryReleaseSortMode>(
       readLibraryReleaseSortMode,
@@ -10506,19 +10512,27 @@ function LibraryReleaseBrowser({
     setTileSizeRem(clamped);
   };
 
+  useEffect(() => {
+    const releaseId = waveformNavigationRequest?.releaseId;
+    if (
+      !releaseId ||
+      !releases.some((release) => release.id === releaseId)
+    ) {
+      return;
+    }
+
+    onViewModeChange("waveform");
+  }, [
+    releases,
+    waveformNavigationRequest?.releaseId,
+    waveformNavigationRequest?.requestId,
+    onViewModeChange,
+  ]);
+
   const chooseViewMode = (
     mode: LibraryReleaseViewMode,
   ) => {
-    setViewMode(mode);
-
-    try {
-      window.localStorage.setItem(
-        LIBRARY_RELEASE_VIEW_STORAGE_KEY,
-        mode,
-      );
-    } catch {
-      // View preference persistence is optional UI convenience.
-    }
+    onViewModeChange(mode);
   };
 
   return (
@@ -10608,6 +10622,7 @@ function LibraryReleaseBrowser({
           releases={sortedReleases}
           playback={playback}
           colorMode={waveformColorMode}
+          navigationRequest={waveformNavigationRequest}
           onOpenMetadata={onOpenMetadata}
         />
       ) : (
@@ -22434,7 +22449,10 @@ function ReleaseMetadataDetailView({
           </span>
 
           {!libraryHealthLoading &&
-            !libraryHealthError && (
+            !libraryHealthError &&
+            (libraryHealthSummary.blocked > 0 ||
+              libraryHealthSummary.warning > 0 ||
+              libraryHealthSummary.preparation > 0) && (
               <small
                 className={`badge library-health-row-badge ${libraryHealthTone(
                   libraryHealthSummary,
@@ -22451,13 +22469,6 @@ function ReleaseMetadataDetailView({
                 )}
               </small>
             )}
-
-          <small
-            className="document-count"
-            title={`${releaseDocuments.length} metadata documents`}
-          >
-            {releaseDocuments.length}
-          </small>
 
           <ReadinessNavBadge
             scope={releaseReadinessScope}
@@ -22499,9 +22510,6 @@ function ReleaseMetadataDetailView({
             navigationEntry?.hasNumberConflict
               ? `Duplicate track number ${trackNumber} on disc ${navigationEntry.effectiveDiscNumber}`
               : undefined;
-
-          const trackDocumentCount =
-            trackDocuments.length;
 
           const trackDraftCount =
             countDraftChangesForDocuments(
@@ -22658,7 +22666,7 @@ function ReleaseMetadataDetailView({
 
                       <span
                         className="track-navigation-badges"
-                        aria-label="Track metadata status"
+                        aria-label="Track status"
                       >
                         {!libraryHealthLoading &&
                           !libraryHealthError &&
@@ -22679,13 +22687,6 @@ function ReleaseMetadataDetailView({
                               )}
                             </small>
                           )}
-
-                        <small
-                          className="document-count"
-                          title={`${trackDocumentCount} metadata documents`}
-                        >
-                          {trackDocumentCount}
-                        </small>
 
                         <ReadinessNavBadge
                           scope={trackReadinessScope}

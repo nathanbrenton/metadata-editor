@@ -30,7 +30,9 @@ Implemented capabilities:
 - Return SHA-256 verification receipts
 - Display parsed metadata as document-style key/value tables
 - Show raw TOML alongside structured metadata
-- Preview inspected Ingest/Staging audio and Library release tracks through one always-visible persistent application-level player footer that survives workspace navigation; the footer spans the same desktop width as metadata-editor, shows the prepared waveform for Library tracks when available, and falls back to an ordinary seek control for source previews without prepared peaks. Space is reserved for play/pause everywhere except actual text-entry fields. The application menu exposes the same 3Band, RGB, Blue, and Monochrome waveform palette choices as the Hiplingo player, and the selected palette applies to both the footer and Library Waveform view. The footer now renders the same shared compact Now Playing structure as the Hiplingo web app while metadata-editor continues to own its private playback engine and volume control. Library also offers a Waveform browser mode with large artwork, previous/next release browsing, authored track order/titles, and read-only private `waveform-peaks.json` visualization that seeks the same persistent player
+- Preview inspected Ingest/Staging audio and Library release tracks through one always-visible persistent application-level player footer that survives workspace navigation; the footer spans the same desktop width as metadata-editor, shows the prepared waveform for Library tracks when available, and falls back to an ordinary seek control for source previews without prepared peaks. Space is reserved for play/pause everywhere except actual text-entry fields. The application menu exposes the same 3Band, RGB, Blue, and Monochrome waveform palette choices as the Hiplingo player, and the selected palette applies to both the footer and Library Waveform view. The footer now renders the same shared compact Now Playing and volume-control structure as the Hiplingo web app while metadata-editor continues to own its private playback engine and source adapter. Library also offers a Waveform browser mode with large artwork, previous/next release browsing, authored track order/titles, and the shared Hiplingo fixed-center scrolling waveform over private `waveform-peaks.json`; mouse/touch scrubbing activates the selected Library track when needed and provides brief audible scrub auditions while still driving the same persistent private player The footer consumes the same shared speaker-button/vertical 0–100 volume control and perceptual volume curve as Hiplingo, and the footer artwork is the temporary Waveform shortcut that returns the active Library release to its single-release Waveform viewer.
+- Library browsing starts in Artwork-First Tiles mode on every fresh browser load or reload. Rows, Cards, and Waveform are in-session choices only; the Library view mode is not persisted across refreshes. The footer artwork can still explicitly switch the current session to the active release's single-release Waveform viewer.
+- Library Waveform reserves the final visualization and technical-detail space while a newly selected track's peaks load, preventing track changes from shifting the surrounding Library layout.
 - Stream preview audio through a root-confined, byte-range-aware local API
 - Prefer generated `audio-playback` files and fall back to one unambiguous audio master
 - Edit scalar values locally in the browser with dirty-state tracking
@@ -54,7 +56,7 @@ Scalar edits are currently browser-local only. Persisting edits to existing TOML
 Repository boundaries:
 
 - `metadata-editor/` is its own Git repository.
-- `audio-player/` is a separate Git repository and is evolving into the Hiplingo public web application. Its `packages/media-player/` subpackage contains reusable player primitives consumed by both Hiplingo and metadata-editor, including waveform rendering/colors, transport SVGs, player time formatting, the Spacebar shortcut contract, a queue-neutral transport-controller shape, stable queue navigation helpers, and the normalized playable-media item contract used for title/artist/release identity, artwork, waveform, and host-owned source descriptors; each host still owns its own audio engine, queue state, and data adapter.
+- `audio-player/` is a separate Git repository and is evolving into the Hiplingo public web application. Its `packages/media-player/` subpackage contains reusable player primitives consumed by both Hiplingo and metadata-editor, including compact and fixed-center scrubbable waveform rendering/colors, transport SVGs, player time formatting, the Spacebar shortcut contract, the shared compact Now Playing/volume shell and perceptual volume curve, a queue-neutral transport-controller shape, stable queue navigation helpers, and the normalized playable-media item contract used for title/artist/release identity, artwork, waveform, and host-owned source descriptors; each host still owns its own audio engine, queue state, and data adapter.
 - `ingest-drop/`, `media-library/`, and `published-media/` remain outside both application repositories.
 - Private canonical roots and public deployment output must not be committed with either application source repository.
 - Do not initialize Git at `~/Desktop/record-label/`.
@@ -809,3 +811,23 @@ npm run unpublish:release -- --release <release-id> --plan-fingerprint <reviewed
 ```
 
 `plan:unpublish-release` is read-only. The guarded removal command keeps its historical `unpublish` CLI name, but it removes only the sanitized Web Package release and its catalog entry; it never deletes `media-library` masters, TOML, receipts, or private derivatives. After removal, refresh the deployment manifest and use Check Live so the target exposes the corresponding release-level **Leaving Live** warning before any deployment.
+
+- Library Waveform renders the same shared `MediaVisualizationSurface` as Hiplingo: fixed-center audible scrubbing, the 2–6400 px/s zoom ladder, transition past maximum waveform zoom into the 2048–128-sample oscilloscope, press-and-hold freeze inspection, cached per-track frames, and shared zoom chrome. metadata-editor continues to supply its private playback/master source and Library navigation.
+
+- Waveform zoom chrome keeps `+` in the upper-right and `−` in the lower-right, without a persistent numeric magnification readout.
+
+Both metadata-editor and Hiplingo now use the same `useMediaElementAnalyser` adapter for the persistent HTML audio element. Playback startup and first waveform activation initialize that shared graph before audible scrubbing, so Firefox does not require entering Oscilloscope first to reach the responsive seek path.
+
+The persistent footer now supplies the same shared `PlaybackShellController` as Hiplingo, and its persistent HTML audio element uses shared `useMediaElementVolume()` state/gain behavior. Private Library source resolution and queue/navigation remain host-owned.
+
+Persistent Library current-time, duration, and direct seek state now use the same shared `useMediaElementTimeline()` controller as Hiplingo. Source selection, queue advancement, loading/error state, and private preview routing remain metadata-editor-owned.
+
+Persistent play/pause/loading state now comes from the same shared `useMediaElementPlaybackState()` controller used by Hiplingo. metadata-editor still owns private preview source loading, queue auto-advance, and media-event wiring.
+
+The persistent Library player now uses the same shared `useMediaElementPlaybackEvents()` transitions for ordinary media events. Its private preview error messaging, source loading, and ended/queue auto-advance policy remain metadata-editor-owned.
+
+Private preview source attachment now implements the same shared `MediaSourceAdapter<TSource>` contract as Hiplingo. metadata-editor still owns guarded private preview URLs, analyser-before-play startup, private decode/transcode errors, and queue auto-advance; no Library path becomes public through the shared contract.
+
+Private preview attachment now also runs through shared `useMediaSourceSession()`, which owns persistent-element-to-adapter orchestration and the current attached media key. The adapter still contains metadata-editor's private direct-source operations, and private Library URL construction remains outside the shared package.
+
+The persistent Library player now renders the same shared `PersistentMediaElement` used by Hiplingo instead of constructing a host-local `new Audio()` instance. metadata-editor still owns private preview URLs, queue advancement, and error policy; all shared media hooks observe the same package-owned persistent element reference.

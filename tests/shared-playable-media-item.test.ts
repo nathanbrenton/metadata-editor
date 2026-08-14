@@ -21,7 +21,15 @@ const waveformViewSource = await readFile(
 
 test("metadata-editor normalizes private playback items through the shared media contract", () => {
   assert.match(playerSource, /type PersistentPlaybackTrack = PlayableMediaItem<string>/);
-  assert.match(playerSource, /audio\.src = track\.source/);
+  assert.match(playerSource, /audio\.src = source/);
+  assert.match(
+    playerSource,
+    /useMediaSourceSession\(\s*audioRef,\s*metadataPreviewSourceAdapter,/,
+  );
+  assert.match(
+    playerSource,
+    /attachMediaSource\(\{[\s\S]*source: track\.source/,
+  );
   assert.match(
     playerSource,
     /track\s*\?\s*getPlayableMediaContext\(track\)/,

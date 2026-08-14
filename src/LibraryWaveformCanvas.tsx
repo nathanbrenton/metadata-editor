@@ -1,4 +1,10 @@
-import { MediaWaveformCanvas } from "./MediaWaveformCanvas.js";
+import type {
+  RefObject,
+} from "react";
+
+import {
+  MediaVisualizationSurface,
+} from "@hiplingo/media-player";
 import type {
   MediaWaveformPeak,
   WaveformColorMode,
@@ -7,24 +13,59 @@ import type {
 type LibraryWaveformCanvasProps = {
   peaks: MediaWaveformPeak[];
   colorMode: WaveformColorMode;
-  progress: number;
-  onSeek?: (progress: number) => void;
+  audioRef: RefObject<HTMLAudioElement | null>;
+  analyser: AnalyserNode | null;
+  ensureAnalyser: () => Promise<AnalyserNode | null>;
+  trackKey: string;
+  sampleRate: number;
+  isPlaying: boolean;
+  peaksPerSecond: number;
+  durationSeconds: number;
+  currentTimeOverride?: number;
+  onActivate?: () => void;
+  onScrubbingChange?: (isScrubbing: boolean) => void;
 };
 
 export function LibraryWaveformCanvas({
   peaks,
   colorMode,
-  progress,
-  onSeek,
+  audioRef,
+  analyser,
+  ensureAnalyser,
+  trackKey,
+  sampleRate,
+  isPlaying,
+  peaksPerSecond,
+  durationSeconds,
+  currentTimeOverride,
+  onActivate,
+  onScrubbingChange,
 }: LibraryWaveformCanvasProps) {
   return (
-    <MediaWaveformCanvas
+    <MediaVisualizationSurface
       peaks={peaks}
       colorMode={colorMode}
-      progress={progress}
-      onSeek={onSeek}
-      className="library-waveform-canvas"
-      seekLabel="Seek within selected Library track"
+      audioRef={audioRef}
+      analyser={analyser}
+      ensureAnalyser={ensureAnalyser}
+      trackKey={trackKey}
+      sampleRate={sampleRate}
+      waveformIsPlaying={isPlaying}
+      oscilloscopeIsPlaying={isPlaying}
+      peaksPerSecond={peaksPerSecond}
+      durationSeconds={durationSeconds}
+      currentTimeOverride={currentTimeOverride}
+      onActivate={onActivate}
+      onScrubbingChange={onScrubbingChange}
+      classNames={{
+        root: "library-waveform-canvas",
+        zoomControls: "library-waveform-zoom-controls",
+        zoomButton: "library-waveform-zoom-button",
+        zoomIncreaseButton:
+          "library-waveform-zoom-button--increase",
+        zoomDecreaseButton:
+          "library-waveform-zoom-button--decrease",
+      }}
     />
   );
 }

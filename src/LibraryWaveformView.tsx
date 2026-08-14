@@ -70,10 +70,16 @@ type LibraryWaveformReleaseDetail = {
   documents: LibraryWaveformDocument[];
 };
 
+export type LibraryWaveformNavigationRequest = {
+  releaseId: string;
+  requestId: number;
+};
+
 type LibraryWaveformViewProps = {
   releases: LibraryWaveformReleaseScan[];
   playback: PersistentLibraryPlaybackController;
   colorMode: WaveformColorMode;
+  navigationRequest?: LibraryWaveformNavigationRequest | null;
   onOpenMetadata: (releaseId: string) => void;
 };
 
@@ -206,6 +212,7 @@ export function LibraryWaveformView({
   releases,
   playback,
   colorMode,
+  navigationRequest,
   onOpenMetadata,
 }: LibraryWaveformViewProps) {
   const activeLibraryReleaseId = playback.currentTrack?.releaseId;
@@ -233,6 +240,29 @@ export function LibraryWaveformView({
       setSelectedReleaseId(activeLibraryReleaseId);
     }
   }, [activeLibraryReleaseId, releases]);
+
+  useEffect(() => {
+    const releaseId = navigationRequest?.releaseId;
+    if (
+      !releaseId ||
+      !releases.some((release) => release.id === releaseId)
+    ) {
+      return;
+    }
+
+    setSelectedReleaseId(releaseId);
+    setSelectedTrackId(
+      playback.currentTrack?.releaseId === releaseId
+        ? playback.currentTrack.trackId ?? ""
+        : "",
+    );
+  }, [
+    navigationRequest?.releaseId,
+    navigationRequest?.requestId,
+    playback.currentTrack?.releaseId,
+    playback.currentTrack?.trackId,
+    releases,
+  ]);
 
   useEffect(() => {
     if (
@@ -523,11 +553,6 @@ export function LibraryWaveformView({
     ? selectPreferredReleaseArtwork(selectedTrack.track.artworkMasters) ??
       releaseArtwork
     : releaseArtwork;
-  const playbackProgress =
-    selectedTrackIsActive && playback.duration > 0
-      ? playback.currentTime / playback.duration
-      : 0;
-
   return (
     <section className="library-waveform-view" aria-label="Library Waveform view">
       <header className="library-waveform-toolbar">
@@ -649,12 +674,35 @@ export function LibraryWaveformView({
               <LibraryWaveformCanvas
                 peaks={waveform.peaks}
                 colorMode={colorMode}
-                progress={playbackProgress}
-                onSeek={
-                  selectedTrackIsActive && playback.duration > 0
-                    ? (progress) => playback.seek(progress * playback.duration)
-                    : undefined
+                audioRef={playback.audioRef}
+                analyser={playback.analyser}
+                ensureAnalyser={playback.ensureAnalyser}
+                trackKey={
+                  selectedQueueTrack?.key ??
+                  `${selectedRelease.id}::${selectedTrackId}`
                 }
+                sampleRate={waveform.sampleRate}
+                isPlaying={
+                  selectedTrackIsActive && playback.isPlaying
+                }
+                peaksPerSecond={waveform.peaksPerSecond}
+                durationSeconds={waveform.durationSeconds}
+                currentTimeOverride={
+                  selectedTrackIsActive ? undefined : 0
+                }
+                onActivate={() => {
+                  if (
+                    !selectedTrackIsActive &&
+                    selectedQueueTrack
+                  ) {
+                    playback.playQueue({
+                      trackKey: selectedQueueTrack.key,
+                      queue,
+                      autoplay: false,
+                    });
+                  }
+                }}
+                onScrubbingChange={playback.setScrubbing}
               />
             ) : waveformLoading ? (
               <p>Loading waveform…</p>
@@ -666,20 +714,29 @@ export function LibraryWaveformView({
             )}
           </div>
 
-          {waveform && (
-            <div className="library-waveform-technical-line">
-              <span>{waveform.sampleRate.toLocaleString()} Hz</span>
-              <span>{waveform.bitsPerSample}-bit</span>
-              <span>
-                {waveform.sourceChannels === 1
-                  ? "Mono"
-                  : waveform.sourceChannels === 2
-                    ? "Stereo"
-                    : `${waveform.sourceChannels} channels`}
-              </span>
-              <span>{waveform.peaksPerSecond} peaks/s</span>
-            </div>
-          )}
+          <div
+            className={`library-waveform-technical-line${
+              waveform ? "" : " is-placeholder"
+            }`}
+            aria-hidden={waveform ? undefined : true}
+          >
+            {waveform ? (
+              <>
+                <span>{waveform.sampleRate.toLocaleString()} Hz</span>
+                <span>{waveform.bitsPerSample}-bit</span>
+                <span>
+                  {waveform.sourceChannels === 1
+                    ? "Mono"
+                    : waveform.sourceChannels === 2
+                      ? "Stereo"
+                      : `${waveform.sourceChannels} channels`}
+                </span>
+                <span>{waveform.peaksPerSecond} peaks/s</span>
+              </>
+            ) : (
+              <span>Waveform technical details</span>
+            )}
+          </div>
 
           {detailLoading && (
             <p className="library-waveform-detail-status">Loading track metadata…</p>

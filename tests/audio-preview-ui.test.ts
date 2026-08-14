@@ -34,11 +34,11 @@ test("renders sidebar preview controls through one persistent application player
   );
   assert.match(
     playerSource,
-    /aria-label="Player volume"/,
+    /volume:\s*\{[\s\S]*volumePercent: playback\.volumePercent,[\s\S]*setVolumePercent: playback\.setVolumePercent,/,
   );
   assert.match(
     playerSource,
-    /transport=\{\{/,
+    /controller=\{\{[\s\S]*transport:\s*\{/,
   );
   assert.match(
     playerSource,
@@ -65,7 +65,7 @@ test("keeps persistent playback mounted above workspace navigation and advances 
   );
   assert.match(
     playerSource,
-    /const audio = new Audio\(\)/,
+    /const mediaElement = usePersistentMediaElement\(\)/,
   );
   assert.match(
     playerSource,

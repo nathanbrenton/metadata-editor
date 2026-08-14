@@ -4,16 +4,27 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type RefObject,
 } from "react";
 
 import {
   CompactNowPlayingBar,
+  PersistentMediaElement,
   dedupePlaybackQueue,
   getPlaybackQueueCapabilities,
   getPlaybackQueueNeighbor,
   getPlayableMediaContext,
   type PlayableMediaItem,
+  type MediaSourceAdapter,
   useSpacebarPlaybackShortcut,
+  useMediaElementAnalyser,
+  useMediaElementVolume,
+  useMediaElementTimeline,
+  useMediaElementPlaybackState,
+  useMediaElementPlaybackEvents,
+  useMediaSourceSession,
+  usePersistentMediaElement,
+  type PersistentMediaElementController,
 } from "@hiplingo/media-player";
 import {
   parseMediaWaveformData,
@@ -32,18 +43,36 @@ export type PersistentPlaybackRequest = {
   autoplay: boolean;
 };
 
+const metadataPreviewSourceAdapter: MediaSourceAdapter<string> = {
+  attach: ({ audio, source }) => {
+    audio.pause();
+    audio.src = source;
+    audio.load();
+    return true;
+  },
+  dispose: (audio) => {
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+  },
+};
+
 export type PersistentLibraryPlaybackController = {
+  audioRef: RefObject<HTMLAudioElement | null>;
+  mediaElement: PersistentMediaElementController;
   currentTrack: PersistentPlaybackTrack | null;
   queue: PersistentPlaybackTrack[];
   isPlaying: boolean;
   isLoading: boolean;
   error: string | null;
-  volume: number;
+  volumePercent: number;
   currentTime: number;
   duration: number;
   waveform: MediaWaveformData | null;
   waveformLoading: boolean;
   waveformError: string | null;
+  analyser: AnalyserNode | null;
+  ensureAnalyser: () => Promise<AnalyserNode | null>;
   playQueue: (request: PersistentPlaybackRequest) => void;
   toggleTrack: (
     trackKey: string,
@@ -52,25 +81,18 @@ export type PersistentLibraryPlaybackController = {
   togglePlayback: () => void;
   previous: () => void;
   next: () => void;
-  setVolume: (volume: number) => void;
+  setVolumePercent: (volumePercent: number) => void;
   seek: (seconds: number) => void;
+  setScrubbing: (isScrubbing: boolean) => void;
   clearIfTrack: (
     releaseId: string,
     trackId: string,
   ) => void;
 };
 
-function clampVolume(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 0.8;
-  }
-
-  return Math.min(1, Math.max(0, value));
-}
-
 export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackController {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const loadedTrackKeyRef = useRef<string | null>(null);
+  const mediaElement = usePersistentMediaElement();
+  const { audioRef } = mediaElement;
   const queueRef = useRef<PersistentPlaybackTrack[]>([]);
   const currentTrackRef = useRef<PersistentPlaybackTrack | null>(null);
   const loadTrackRef = useRef<
@@ -81,17 +103,56 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
     useState<PersistentPlaybackTrack | null>(null);
   const [queue, setQueue] =
     useState<PersistentPlaybackTrack[]>([]);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [volume, setVolumeState] = useState(0.8);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
   const [waveform, setWaveform] =
     useState<MediaWaveformData | null>(null);
   const [waveformLoading, setWaveformLoading] = useState(false);
   const [waveformError, setWaveformError] =
     useState<string | null>(null);
+
+  const {
+    analyser,
+    ensureAnalyser,
+  } = useMediaElementAnalyser(
+    audioRef,
+    currentTrack?.key,
+  );
+  const {
+    volumePercent,
+    setVolumePercent,
+  } = useMediaElementVolume(audioRef);
+  const {
+    currentTime,
+    duration,
+    reset: resetTimeline,
+    syncCurrentTime,
+    syncDuration,
+    seek,
+  } = useMediaElementTimeline(audioRef);
+  const playbackState =
+    useMediaElementPlaybackState(audioRef);
+  const {
+    isPlaying,
+    isLoading,
+    setPlaying: setIsPlaying,
+    setLoading: setIsLoading,
+  } = playbackState;
+  const {
+    handlePlay,
+    handlePause,
+    handleWaiting,
+    handleCanPlay,
+    handleError: handlePlaybackError,
+  } = useMediaElementPlaybackEvents(playbackState);
+  const {
+    attach: attachMediaSource,
+    dispose: disposeMediaSource,
+    isCurrent: isCurrentMediaSource,
+  } = useMediaSourceSession(
+    audioRef,
+    metadataPreviewSourceAdapter,
+  );
 
   const setCurrent = useCallback(
     (track: PersistentPlaybackTrack | null) => {
@@ -112,13 +173,13 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
       setError(null);
       setCurrent(track);
 
-      if (loadedTrackKeyRef.current !== track.key) {
-        audio.pause();
-        audio.src = track.source;
-        audio.load();
-        loadedTrackKeyRef.current = track.key;
-        setCurrentTime(0);
-        setDuration(0);
+      if (!isCurrentMediaSource(track.key)) {
+        void attachMediaSource({
+          mediaKey: track.key,
+          source: track.source,
+          autoplay,
+        });
+        resetTimeline();
         setIsLoading(true);
       }
 
@@ -126,6 +187,14 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
         audio.pause();
         return;
       }
+
+      /*
+       * Hiplingo already attaches its Web Audio media/analyser graph
+       * before playback begins. Do the same through the shared adapter
+       * so Firefox's prepared-MP3 path does not require visiting
+       * Oscilloscope before responsive audible scrubbing is available.
+       */
+      void ensureAnalyser();
 
       void audio.play().catch((playError) => {
         setIsPlaying(false);
@@ -137,39 +206,32 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
         );
       });
     },
-    [setCurrent],
+    [
+      attachMediaSource,
+      ensureAnalyser,
+      isCurrentMediaSource,
+      resetTimeline,
+      setCurrent,
+    ],
   );
 
   loadTrackRef.current = loadTrack;
 
   useEffect(() => {
-    const audio = new Audio();
-    audio.preload = "metadata";
-    audio.volume = volume;
+    const audio = audioRef.current;
 
-    const handlePlay = () => {
-      setIsPlaying(true);
-      setIsLoading(false);
-    };
-    const handlePause = () => {
-      setIsPlaying(false);
-      setIsLoading(false);
-    };
-    const handleWaiting = () => setIsLoading(true);
-    const handleCanPlay = () => setIsLoading(false);
+    if (!audio) {
+      return;
+    }
+
     const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime);
+      syncCurrentTime(audio);
     };
     const handleDuration = () => {
-      setDuration(
-        Number.isFinite(audio.duration)
-          ? audio.duration
-          : 0,
-      );
+      syncDuration(audio);
     };
     const handleError = () => {
-      setIsPlaying(false);
-      setIsLoading(false);
+      handlePlaybackError();
       setError(
         "The selected source could not be decoded or transcoded for preview. Confirm FFmpeg is available, or generate audio-playback.mp3.",
       );
@@ -202,12 +264,9 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
     audio.addEventListener("loadedmetadata", handleDuration);
     audio.addEventListener("error", handleError);
     audio.addEventListener("ended", handleEnded);
-    audioRef.current = audio;
 
     return () => {
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
+      disposeMediaSource();
       audio.removeEventListener("play", handlePlay);
       audio.removeEventListener("pause", handlePause);
       audio.removeEventListener("waiting", handleWaiting);
@@ -217,9 +276,17 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
       audio.removeEventListener("loadedmetadata", handleDuration);
       audio.removeEventListener("error", handleError);
       audio.removeEventListener("ended", handleEnded);
-      audioRef.current = null;
     };
-  }, []);
+  }, [
+    disposeMediaSource,
+    handleCanPlay,
+    handlePause,
+    handlePlay,
+    handlePlaybackError,
+    handleWaiting,
+    syncCurrentTime,
+    syncDuration,
+  ]);
 
   useEffect(() => {
     const waveformUrl = currentTrack?.waveformUrl?.trim();
@@ -272,13 +339,6 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
     return () => controller.abort();
   }, [currentTrack?.waveformUrl]);
 
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (audio) {
-      audio.volume = volume;
-    }
-  }, [volume]);
-
   const playQueue = useCallback(
     (request: PersistentPlaybackRequest) => {
       const uniqueQueue = dedupePlaybackQueue(request.queue);
@@ -308,6 +368,8 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
 
       if (active?.key === trackKey && audio) {
         if (audio.paused) {
+          void ensureAnalyser();
+
           void audio.play().catch((playError) => {
             setError(
               playError instanceof Error
@@ -327,7 +389,7 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
         autoplay: true,
       });
     },
-    [playQueue],
+    [ensureAnalyser, playQueue],
   );
 
   const move = useCallback(
@@ -363,6 +425,8 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
     }
 
     if (audio.paused) {
+      void ensureAnalyser();
+
       void audio.play().catch((playError) => {
         setError(
           playError instanceof Error
@@ -373,32 +437,12 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
     } else {
       audio.pause();
     }
-  }, []);
+  }, [ensureAnalyser]);
 
   useSpacebarPlaybackShortcut({
     onToggle: togglePlayback,
     canToggle: () => Boolean(currentTrackRef.current),
   });
-
-  const setVolume = useCallback((nextVolume: number) => {
-    setVolumeState(clampVolume(nextVolume));
-  }, []);
-
-  const seek = useCallback((seconds: number) => {
-    const audio = audioRef.current;
-    if (!audio || !Number.isFinite(seconds)) {
-      return;
-    }
-
-    const upperBound = Number.isFinite(audio.duration)
-      ? audio.duration
-      : Math.max(0, seconds);
-    audio.currentTime = Math.min(
-      upperBound,
-      Math.max(0, seconds),
-    );
-    setCurrentTime(audio.currentTime);
-  }, []);
 
   const clearIfTrack = useCallback(
     (releaseId: string, trackId: string) => {
@@ -411,43 +455,41 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
         return;
       }
 
-      const audio = audioRef.current;
-      audio?.pause();
-      if (audio) {
-        audio.removeAttribute("src");
-        audio.load();
-      }
-      loadedTrackKeyRef.current = null;
+      disposeMediaSource();
       queueRef.current = [];
       setQueue([]);
       setCurrent(null);
-      setCurrentTime(0);
-      setDuration(0);
+      resetTimeline();
       setError(null);
       setIsLoading(false);
     },
-    [setCurrent],
+    [disposeMediaSource, resetTimeline, setCurrent],
   );
 
   return {
+    audioRef,
+    mediaElement,
     currentTrack,
     queue,
-    isPlaying,
+    isPlaying: isPlaying && !isScrubbing,
     isLoading,
     error,
-    volume,
+    volumePercent,
     currentTime,
     duration,
     waveform,
     waveformLoading,
     waveformError,
+    analyser,
+    ensureAnalyser,
     playQueue,
     toggleTrack,
     togglePlayback,
     previous: () => move(-1),
     next: () => move(1),
-    setVolume,
+    setVolumePercent,
     seek,
+    setScrubbing: setIsScrubbing,
     clearIfTrack,
   };
 }
@@ -455,9 +497,11 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
 export function PersistentLibraryPlayerBar({
   playback,
   colorMode,
+  onOpenLibraryWaveform,
 }: {
   playback: PersistentLibraryPlaybackController;
   colorMode: WaveformColorMode;
+  onOpenLibraryWaveform?: (releaseId: string) => void;
 }) {
   const track = playback.currentTrack;
 
@@ -472,8 +516,20 @@ export function PersistentLibraryPlayerBar({
     Math.max(0, playback.currentTime),
   );
   return (
-    <CompactNowPlayingBar
+    <>
+      <PersistentMediaElement
+        controller={playback.mediaElement}
+        preload="metadata"
+        aria-hidden="true"
+      />
+      <CompactNowPlayingBar
       artworkUrl={track?.artworkUrl ?? null}
+      onArtworkClick={
+        track?.releaseId && onOpenLibraryWaveform
+          ? () => onOpenLibraryWaveform(track.releaseId!)
+          : undefined
+      }
+      artworkActionLabel="Open current release in Library Waveform view"
       artworkFallback={<span>HL</span>}
       title={track?.title ?? "Ready to preview"}
       context={
@@ -482,18 +538,24 @@ export function PersistentLibraryPlayerBar({
           : "Choose a track in Ingest, Staging, or Library"
       }
       detail={track?.detail ?? "Local media preview"}
-      transport={{
-        currentTime: playback.currentTime,
-        duration,
-        isPlaying: playback.isPlaying,
-        isLoading: playback.isLoading,
-        canToggle: Boolean(track),
-        canPrevious,
-        canNext,
-        previous: playback.previous,
-        toggle: playback.togglePlayback,
-        next: playback.next,
-        seek: duration > 0 ? playback.seek : undefined,
+      controller={{
+        transport: {
+          currentTime: playback.currentTime,
+          duration,
+          isPlaying: playback.isPlaying,
+          isLoading: playback.isLoading,
+          canToggle: Boolean(track),
+          canPrevious,
+          canNext,
+          previous: playback.previous,
+          toggle: playback.togglePlayback,
+          next: playback.next,
+          seek: duration > 0 ? playback.seek : undefined,
+        },
+        volume: {
+          volumePercent: playback.volumePercent,
+          setVolumePercent: playback.setVolumePercent,
+        },
       }}
       waveformPeaks={playback.waveform?.peaks ?? null}
       waveformColorMode={colorMode}
@@ -519,22 +581,6 @@ export function PersistentLibraryPlayerBar({
           }
         />
       }
-      endControls={
-        <label className="persistent-library-player__volume">
-          <span>Volume</span>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={playback.volume}
-            aria-label="Player volume"
-            onChange={(event: ChangeEvent<HTMLInputElement>) =>
-              playback.setVolume(Number(event.target.value))
-            }
-          />
-        </label>
-      }
       error={playback.error}
       ariaLabel="Persistent media player"
       classNames={{
@@ -550,8 +596,14 @@ export function PersistentLibraryPlayerBar({
         transport: "persistent-library-player__transport",
         playButton: "persistent-library-player__play",
         transportIcon: "persistent-library-player__transport-icon",
+        volumeControl: "persistent-library-player__volume-control",
+        volumeButton: "persistent-library-player__volume-button",
+        volumeIcon: "persistent-library-player__volume-icon",
+        volumePopup: "persistent-library-player__volume-popup",
+        volumeSlider: "persistent-library-player__volume-slider",
         error: "persistent-library-player__error",
       }}
-    />
+      />
+    </>
   );
 }
