@@ -56,16 +56,26 @@ test("Staging candidate is compact context and five setup tabs stay on one row",
   );
 });
 
-test("Web Package and Live boundary renders terse names and retains full roots as tooltips", () => {
-  assert.match(appSource, /mode === "production" \? "published-media" : "media-library"/);
-  assert.match(appSource, /mode === "production" \? "Live" : "Web Package"/);
+test("Web Package and Live keep technical roots in details instead of default headers", () => {
   assert.match(
     appSource,
-    /location\.id === "library"[\s\S]*\?\.displayPath[\s\S]*Configured Library root/,
+    /<details className="publish-package-details">[\s\S]*?Web Package root/,
   );
   assert.match(
     appSource,
-    /location\.id === "public-package"[\s\S]*\?\.displayPath[\s\S]*Configured published-media root/,
+    /location\.id === "public-package"[\s\S]*?\?\.displayPath[\s\S]*?Configured published-media root/,
+  );
+  assert.match(
+    appSource,
+    /<details className="publish-live-connection-details">/,
+  );
+  assert.match(
+    appSource,
+    /Connection & deployment details/,
+  );
+  assert.doesNotMatch(
+    appSource,
+    /className="publish-header-storage-boundary"/,
   );
   assert.doesNotMatch(
     appSource,

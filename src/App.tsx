@@ -2478,56 +2478,6 @@ export function App() {
                   </p>
                 )}
 
-              {applicationView === "ingest" && (
-                <button
-                  type="button"
-                  className="page-header-refresh-button"
-                  disabled={ingestLoading}
-                  onClick={() =>
-                    void refreshIngest(true)
-                  }
-                >
-                  {ingestLoading
-                    ? "Inspecting…"
-                    : "Refresh Ingest"}
-                </button>
-              )}
-
-              {applicationView === "staging" && (
-                <button
-                  type="button"
-                  className="page-header-refresh-button"
-                  disabled={ingestLoading || loading}
-                  title="Refresh both the ingest drop and canonical Library inputs used by Staging."
-                  onClick={() => {
-                    void Promise.all([
-                      refreshIngest(false),
-                      refreshLibrary(false),
-                    ]);
-                  }}
-                >
-                  {ingestLoading || loading
-                    ? "Refreshing…"
-                    : "Refresh inputs"}
-                </button>
-              )}
-
-              {(applicationView === "library" ||
-                applicationView === "public-package") && (
-                <button
-                  type="button"
-                  className="page-header-refresh-button"
-                  disabled={loading}
-                  onClick={() =>
-                    void refreshLibrary(true)
-                  }
-                >
-                  {loading
-                    ? "Refreshing…"
-                    : "Refresh Library"}
-                </button>
-              )}
-
               <button
                 type="button"
                 className="menu-button"
@@ -2653,6 +2603,10 @@ export function App() {
               inspectionLoading={
                 ingestInspectionLoading
               }
+              refreshing={ingestLoading}
+              onRefresh={() =>
+                void refreshIngest(true)
+              }
               onInspect={(candidateId) =>
                 void inspectCandidate(candidateId)
               }
@@ -2689,6 +2643,13 @@ export function App() {
               inspectionError={
                 ingestInspectionError
               }
+              inputsRefreshing={ingestLoading || loading}
+              onRefreshInputs={() => {
+                void Promise.all([
+                  refreshIngest(false),
+                  refreshLibrary(false),
+                ]);
+              }}
               onChooseCandidate={() =>
                 navigateWorkflowView("ingest")
               }
@@ -2757,6 +2718,18 @@ export function App() {
                       }
                     }}
                   />
+                  <div className="library-workspace-local-actions">
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() =>
+                        void refreshLibrary(true)
+                      }
+                      title="Rescan the canonical Library from disk. Use this after external filesystem changes or when you need to force reconciliation."
+                    >
+                      {loading ? "Rescanning…" : "Rescan Library"}
+                    </button>
+                  </div>
 
                   {libraryEntityView === "artists" ? (
                     <LibraryArtistRoster
@@ -5192,6 +5165,8 @@ function StagingWorkspace({
   identitySeed,
   releases,
   inspectionError,
+  inputsRefreshing,
+  onRefreshInputs,
   onChooseCandidate,
   onBackToInspection,
   onOpenRelease,
@@ -5204,6 +5179,8 @@ function StagingWorkspace({
   identitySeed: IngestDraftIdentitySeed | null;
   releases: ReleaseScanResult[];
   inspectionError: string | null;
+  inputsRefreshing: boolean;
+  onRefreshInputs: () => void;
   onChooseCandidate: () => void;
   onBackToInspection: () => void;
   onOpenRelease: (releaseId: string) => void;
@@ -5288,6 +5265,17 @@ function StagingWorkspace({
             candidate in Ingest before configuring track
             order, destinations, and create/update actions.
           </p>
+        </div>
+
+        <div className="workflow-workspace-actions">
+          <button
+            type="button"
+            disabled={inputsRefreshing}
+            onClick={onRefreshInputs}
+            title="Rescan both the ingest drop and canonical Library inputs used by Staging."
+          >
+            {inputsRefreshing ? "Refreshing…" : "Refresh inputs"}
+          </button>
         </div>
       </header>
 
@@ -7277,6 +7265,19 @@ function PublishWorkspace({
       ).length
     : null;
 
+  const liveFullPackageUploadBytes =
+    mode === "production" &&
+    deploymentSyncPlan?.status === "changes" &&
+    deploymentAudit &&
+    deploymentSyncPlan.summary.updateCount === 0 &&
+    deploymentSyncPlan.summary.removeCount === 0 &&
+    deploymentSyncPlan.summary.addCount >= deploymentAudit.summary.fileCount &&
+    deploymentSyncPlan.summary.addCount <= deploymentAudit.summary.fileCount + 1
+      ? deploymentAudit.summary.totalBytes
+      : deploymentSyncPlan?.status === "current"
+        ? 0
+        : null;
+
   const liveLeavingReleaseIds = mode === "production" &&
     deploymentSyncPlan?.status === "changes"
     ? Array.from(new Set(
@@ -7376,43 +7377,6 @@ function PublishWorkspace({
                 Live comparison · read-only
               </span>
             )}
-          </div>
-          <div
-            className="publish-header-storage-boundary"
-            aria-label="Web Package storage boundary"
-          >
-            <div className="private">
-              <span>{mode === "production" ? "Web Package" : "Library"}</span>
-              <code
-                title={
-                  workflowLocations.find(
-                    (location) =>
-                      location.id === (mode === "production" ? "public-package" : "library"),
-                  )?.displayPath ??
-                    (mode === "production"
-                      ? "Configured published-media root"
-                      : "Configured Library root")
-                }
-              >
-                {mode === "production" ? "published-media" : "media-library"}
-              </code>
-            </div>
-            <span className="publish-location-arrow" aria-hidden="true">→</span>
-            <div className="planned">
-              <span>{mode === "production" ? "Live on Hiplingo" : "Web-ready output"}</span>
-              <code
-                title={
-                  mode === "production"
-                    ? deploymentTargetStatus?.target?.display ??
-                      "/var/www/hiplingo.com/published-media"
-                    : workflowLocations.find(
-                        (location) => location.id === "public-package",
-                      )?.displayPath ?? "Configured published-media root"
-                }
-              >
-                {mode === "production" ? "Live" : "Web Package"}
-              </code>
-            </div>
           </div>
         </div>
       </header>
@@ -7557,7 +7521,12 @@ function PublishWorkspace({
                 <>
                   <div>
                     <span>Web Package</span>
-                    <strong>{publishFleet.summary.publicCatalogCount} releases</strong>
+                    <strong>
+                      {publishFleet.summary.publicCatalogCount} releases
+                      {deploymentAudit
+                        ? ` · ${formatByteSize(deploymentAudit.summary.totalBytes)}`
+                        : ""}
+                    </strong>
                   </div>
                   <div>
                     <span>Live</span>
@@ -7567,7 +7536,7 @@ function PublishWorkspace({
                         : deploymentSyncPlan?.status === "current"
                           ? "Up to date"
                           : deploymentSyncPlan?.status === "changes"
-                            ? "Changes ready"
+                            ? "Changes to deploy"
                             : "Check required"}
                     </strong>
                   </div>
@@ -7576,7 +7545,10 @@ function PublishWorkspace({
                     <strong>
                       {liveReleaseChangeCount === null
                         ? "—"
-                        : liveReleaseChangeCount}
+                        : liveFullPackageUploadBytes !== null &&
+                            liveFullPackageUploadBytes > 0
+                          ? `${liveReleaseChangeCount} · ~${formatByteSize(liveFullPackageUploadBytes)} upload`
+                          : liveReleaseChangeCount}
                     </strong>
                   </div>
                   <div>
@@ -7730,6 +7702,20 @@ function PublishWorkspace({
             {mode === "public-package" && (
               <details className="publish-package-details">
                 <summary>Package details</summary>
+                <div className="publish-package-location-detail">
+                  <span>Web Package root</span>
+                  <code
+                    title={
+                      workflowLocations.find(
+                        (location) => location.id === "public-package",
+                      )?.displayPath ?? "Configured published-media root"
+                    }
+                  >
+                    {workflowLocations.find(
+                      (location) => location.id === "public-package",
+                    )?.displayPath ?? "published-media"}
+                  </code>
+                </div>
                 <div className="publish-deployment-integrity-line">
                   <strong>
                     {deploymentAudit?.summary.readyReleaseCount ?? 0}/
@@ -7841,7 +7827,7 @@ function PublishWorkspace({
                         : deploymentSyncPlan?.status === "current"
                           ? "success"
                           : deploymentSyncPlan?.status === "changes"
-                            ? "warning"
+                            ? "preview"
                             : "preview"
                     }`}
                   >
@@ -7850,7 +7836,7 @@ function PublishWorkspace({
                       : deploymentSyncPlan?.status === "current"
                         ? "Live is up to date"
                         : deploymentSyncPlan?.status === "changes"
-                          ? "Changes ready"
+                          ? "Changes to deploy"
                           : "Ready to check"}
                   </span>
                 </div>
@@ -7918,14 +7904,24 @@ function PublishWorkspace({
                     <div className="publish-host-sync-summary">
                       <strong>
                         {deploymentSyncPlan.status === "current"
-                          ? "Live matches the current Web Package."
-                          : `${deploymentSyncPlan.summary.changeCount} changes ready`}
+                          ? `Live matches the current Web Package · ${formatByteSize(deploymentAudit?.summary.totalBytes ?? 0)} package`
+                          : liveFullPackageUploadBytes !== null &&
+                              liveFullPackageUploadBytes > 0
+                            ? `${deploymentSyncPlan.summary.changeCount} changes to deploy · ~${formatByteSize(liveFullPackageUploadBytes)} upload`
+                            : `${deploymentSyncPlan.summary.changeCount} changes to deploy`}
                       </strong>
                       {deploymentSyncPlan.status === "changes" && (
                         <span>
                           +{deploymentSyncPlan.summary.addCount} add · {deploymentSyncPlan.summary.updateCount} update · −{deploymentSyncPlan.summary.removeCount} remove
                         </span>
                       )}
+                      {deploymentSyncPlan.status === "changes" &&
+                        liveFullPackageUploadBytes === null &&
+                        deploymentAudit && (
+                          <span>
+                            Web Package size {formatByteSize(deploymentAudit.summary.totalBytes)} · incremental upload size depends on changed files
+                          </span>
+                        )}
                       <span>
                         Snapshot {deploymentSyncPlan.sourceContentFingerprint.slice(0, 12)}…
                       </span>
@@ -9092,6 +9088,8 @@ function IngestView({
   inspection,
   inspectionError,
   inspectionLoading,
+  refreshing,
+  onRefresh,
   onInspect,
   onBackToCandidates,
   onOpenStaging,
@@ -9104,6 +9102,8 @@ function IngestView({
   inspection: IngestCandidateInspection | null;
   inspectionError: string | null;
   inspectionLoading: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
   onInspect: (candidateId: string) => void;
   onBackToCandidates: () => void;
   onOpenStaging: (
@@ -9139,6 +9139,16 @@ function IngestView({
           </p>
         </div>
 
+        <div className="workflow-workspace-actions">
+          <button
+            type="button"
+            disabled={refreshing}
+            onClick={onRefresh}
+            title="Rescan the disposable ingest-drop folder for new or changed source media."
+          >
+            {refreshing ? "Inspecting…" : "Refresh Ingest"}
+          </button>
+        </div>
       </header>
 
       {error && (

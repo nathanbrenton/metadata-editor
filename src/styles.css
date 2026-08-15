@@ -16407,3 +16407,41 @@ main:has(.persistent-library-player) {
   display: grid;
   gap: 7px;
 }
+
+/* Workspace-local refresh actions */
+.library-workspace-local-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0.15rem 0 0.75rem;
+}
+
+.publish-package-location-detail {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.35rem 0.7rem;
+  color: #98a6af;
+  font-size: 0.72rem;
+}
+
+.publish-package-location-detail code {
+  min-width: 0;
+  overflow: hidden;
+  color: #c4cfd6;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .library-workspace-local-actions {
+    justify-content: stretch;
+  }
+
+  .library-workspace-local-actions button {
+    width: 100%;
+  }
+
+  .publish-package-location-detail {
+    grid-template-columns: 1fr;
+  }
+}

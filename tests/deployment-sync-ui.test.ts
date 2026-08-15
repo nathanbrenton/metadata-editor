@@ -39,8 +39,20 @@ test(
       /className="primary"[\s\S]*?loadDeploymentSyncPlan\(\)[\s\S]*?"Check Live"/,
     );
     assert.match(appSource, /Recheck Web Package/);
-    assert.match(appSource, /changes ready/);
+    assert.match(appSource, /changes to deploy/);
     assert.match(appSource, /Live is up to date/);
+    assert.match(
+      appSource,
+      /deploymentAudit\.summary\.totalBytes/,
+    );
+    assert.match(
+      appSource,
+      /liveFullPackageUploadBytes/,
+    );
+    assert.match(
+      appSource,
+      /incremental upload size depends on changed files/,
+    );
     assert.ok(
       appSource.indexOf('"Check Live"') <
         appSource.indexOf('className="publish-host-boundary"'),

@@ -17,16 +17,25 @@ test("shows configured media roots as workflow-tab hover details", async () => {
   assert.doesNotMatch(source, /workflow-location-strip/);
 });
 
-test("explains the private Library to Web Package storage boundary", async () => {
+test("keeps publication storage details available without a default boundary diagram", async () => {
   const source = await readFile(
     new URL("../src/App.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(source, /Library/);
-  assert.match(source, /Web-ready output/);
-  assert.match(source, /"media-library"/);
-  assert.match(source, /"published-media"/);
+  assert.match(
+    source,
+    /<details className="publish-package-details">[\s\S]*?Web Package root/,
+  );
+  assert.match(
+    source,
+    /<details className="publish-live-connection-details">/,
+  );
+  assert.match(source, /Connection & deployment details/);
+  assert.doesNotMatch(
+    source,
+    /className="publish-header-storage-boundary"/,
+  );
   assert.doesNotMatch(source, /Validated snapshot output/i);
 });
 

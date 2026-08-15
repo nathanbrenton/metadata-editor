@@ -889,3 +889,34 @@ Short public text remains canonical metadata owned by metadata-editor:
 The Library → Artists detail view contains the Artist Bio / Info editor.
 Release Description is a registered multiline field under Text and Notes in
 the release metadata editor.
+
+## Live deployment size visibility
+
+The Live workspace always displays the total verified Web Package size from
+the published-media deployment audit.
+
+After **Check Live**, a complete add-only first deployment also shows the
+Web Package size as an approximate upload size. This is intentionally limited
+to the full-package case: later incremental plans may contain only a small
+subset of changed files, so the UI keeps their add/update/remove counts and
+does not present the total package size as though it were the exact transfer
+size.
+
+Production comparison remains read-only in the browser. Production writes
+continue to use the separately guarded CLI deployment flow.
+
+## Workspace-local refresh controls
+
+Refresh actions are kept beside the workspace they affect instead of in the
+global application header. Ingest provides **Refresh Ingest**, Staging provides
+**Refresh inputs**, and Library provides **Rescan Library** for external
+filesystem changes or an explicit reconciliation with disk.
+
+Web Package and Live do not expose Library-rescan controls. Their own
+package/index/comparison actions remain authoritative for those lifecycle
+stages. Technical storage roots are kept under Package details or Connection &
+deployment details instead of occupying the default workspace header.
+
+A successful Live comparison with differences is presented neutrally as
+**Changes to deploy**; warnings remain reserved for states that actually need
+attention.

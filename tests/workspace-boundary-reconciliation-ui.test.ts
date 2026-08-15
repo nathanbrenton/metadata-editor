@@ -37,7 +37,7 @@ test("Staging keeps Choose ingest candidate inside the explicit Ingest candidate
   assert.doesNotMatch(header, /Choose ingest candidate/);
 });
 
-test("Publish embeds its blue-private amber-public boundary inside the Step 4 header", () => {
+test("Publish keeps technical storage roots out of the default Step 4 header", () => {
   const publish = appSource.slice(
     appSource.indexOf("function PublishWorkspace"),
     appSource.indexOf("type LibraryReleaseViewMode"),
@@ -45,21 +45,31 @@ test("Publish embeds its blue-private amber-public boundary inside the Step 4 he
 
   assert.match(
     publish,
-    /Step 4 · Web Package[\s\S]*?publish-header-storage-boundary/,
+    /Step 4 · Web Package[\s\S]*?Ready Check · read-only/,
   );
-  assert.match(publish, /className="private"/);
-  assert.match(publish, /className="planned"/);
+  assert.doesNotMatch(
+    publish,
+    /className="publish-header-storage-boundary"/,
+  );
+  assert.match(
+    publish,
+    /<details className="publish-package-details">[\s\S]*?Web Package root/,
+  );
+  assert.match(
+    publish,
+    /<details className="publish-live-connection-details">/,
+  );
   assert.doesNotMatch(
     publish,
     /<section className="publish-location-boundary"/,
   );
   assert.match(
     styles,
-    /\.publish-header-storage-boundary > \.private/,
+    /\.publish-package-location-detail/,
   );
   assert.match(
     styles,
-    /\.publish-header-storage-boundary > \.planned/,
+    /\.publish-live-connection-details/,
   );
 });
 
