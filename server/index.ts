@@ -34,6 +34,12 @@ import {
   selectTrackAudioPreview,
   type AudioPreviewSourceKind,
 } from "./audio-preview.js";
+import {
+  importArtistPhoto,
+  listArtistPhotoCandidates,
+  removeArtistPhoto,
+  setPrimaryArtistPhoto,
+} from "./artist-assets.js";
 import { buildMetadataExportPlan } from "./export-plan.js";
 import {
   executeValidatedExportPlan,
@@ -2103,6 +2109,191 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Video preview not found",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname ===
+        "/api/library/artist-photo-candidates"
+    ) {
+      try {
+        const ingestRoot = await resolveIngestRoot();
+        sendJson(response, 200, {
+          candidates: await listArtistPhotoCandidates(
+            ingestRoot,
+          ),
+        });
+      } catch (error) {
+        sendJson(response, 500, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to list Artist photo candidates",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/import-artist-photo"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          Array.isArray(body)
+        ) {
+          throw new Error("Artist photo import body must be an object");
+        }
+
+        const record = body as Record<string, unknown>;
+        if (
+          typeof record.artistId !== "string" ||
+          typeof record.sourceRelativePath !== "string"
+        ) {
+          throw new Error(
+            "Artist photo import requires artistId and sourceRelativePath",
+          );
+        }
+        if (
+          record.setPrimary !== undefined &&
+          typeof record.setPrimary !== "boolean"
+        ) {
+          throw new Error("setPrimary must be a boolean");
+        }
+
+        const [mediaRoot, ingestRoot] = await Promise.all([
+          resolveMediaRoot(),
+          resolveIngestRoot(),
+        ]);
+        sendJson(
+          response,
+          200,
+          await importArtistPhoto(
+            mediaRoot,
+            ingestRoot,
+            {
+              artistId: record.artistId,
+              sourceRelativePath:
+                record.sourceRelativePath,
+              ...(typeof record.setPrimary === "boolean"
+                ? { setPrimary: record.setPrimary }
+                : {}),
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to import Artist photo",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/set-primary-artist-photo"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          Array.isArray(body)
+        ) {
+          throw new Error("Primary Artist photo body must be an object");
+        }
+
+        const record = body as Record<string, unknown>;
+        if (
+          typeof record.artistId !== "string" ||
+          typeof record.assetId !== "string"
+        ) {
+          throw new Error(
+            "Setting a primary Artist photo requires artistId and assetId",
+          );
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        sendJson(
+          response,
+          200,
+          await setPrimaryArtistPhoto(
+            mediaRoot,
+            {
+              artistId: record.artistId,
+              assetId: record.assetId,
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to set primary Artist photo",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/remove-artist-photo"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          Array.isArray(body)
+        ) {
+          throw new Error("Remove Artist photo body must be an object");
+        }
+
+        const record = body as Record<string, unknown>;
+        if (
+          typeof record.artistId !== "string" ||
+          typeof record.assetId !== "string"
+        ) {
+          throw new Error(
+            "Removing an Artist photo requires artistId and assetId",
+          );
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        sendJson(
+          response,
+          200,
+          await removeArtistPhoto(
+            mediaRoot,
+            {
+              artistId: record.artistId,
+              assetId: record.assetId,
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to remove Artist photo",
         });
       }
 

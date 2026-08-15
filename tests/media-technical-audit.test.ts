@@ -32,6 +32,7 @@ test("parses audio master technical characteristics", () => {
   assert.equal(result.sampleRate, 48000);
   assert.equal(result.channels, 2);
   assert.equal(result.bitDepth, 24);
+  assert.equal(result.durationSeconds, 12.5);
 });
 
 
@@ -196,6 +197,7 @@ test("summarizes technical health without inventing quality thresholds", async (
           sampleRate: 44100,
           bitDepth: 16,
           channels: 2,
+          durationSeconds: 12.5,
         },
       },
       {
@@ -210,12 +212,14 @@ test("summarizes technical health without inventing quality thresholds", async (
           sampleRate: 44100,
           bitDepth: 16,
           channels: 2,
+          durationSeconds: 17.75,
         },
       },
     ],
   );
 
   assert.equal(ready.health, "ready");
+  assert.equal(ready.durationSeconds, 30.25);
   assert.deepEqual(ready.issues, []);
 
   const review = summarizeMediaTechnicalRelease(

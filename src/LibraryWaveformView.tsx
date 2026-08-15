@@ -79,9 +79,18 @@ type LibraryWaveformViewProps = {
   releases: LibraryWaveformReleaseScan[];
   playback: PersistentLibraryPlaybackController;
   colorMode: WaveformColorMode;
+  releaseDurationSecondsById: ReadonlyMap<string, number>;
   navigationRequest?: LibraryWaveformNavigationRequest | null;
   onOpenMetadata: (releaseId: string) => void;
 };
+
+function formatReleaseRuntime(seconds: number): string {
+  const wholeSeconds = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(wholeSeconds / 60);
+  const remainder = wholeSeconds % 60;
+
+  return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
 
 function titleCaseSlug(value: string): string {
   return value
@@ -212,6 +221,7 @@ export function LibraryWaveformView({
   releases,
   playback,
   colorMode,
+  releaseDurationSecondsById,
   navigationRequest,
   onOpenMetadata,
 }: LibraryWaveformViewProps) {
@@ -385,6 +395,13 @@ export function LibraryWaveformView({
       )
     : "Library";
   const releaseArtist = selectedRelease?.primaryArtistName?.trim() ?? "";
+  const releaseRuntimeSeconds = selectedRelease
+    ? releaseDurationSecondsById.get(selectedRelease.id)
+    : undefined;
+  const releaseRuntimeLabel =
+    releaseRuntimeSeconds !== undefined
+      ? formatReleaseRuntime(releaseRuntimeSeconds)
+      : null;
   const releaseArtwork = selectedRelease
     ? selectReleaseFrontArtwork(selectedRelease.artworkMasters) ??
       selectPreferredReleaseArtwork(selectedRelease.artworkMasters)
@@ -637,6 +654,7 @@ export function LibraryWaveformView({
             <small>
               {formatReleaseDateLabel(selectedRelease)} · {selectedRelease.tracks.length}{" "}
               {selectedRelease.tracks.length === 1 ? "track" : "tracks"}
+              {releaseRuntimeLabel ? ` · ${releaseRuntimeLabel}` : ""}
             </small>
           </div>
         </aside>

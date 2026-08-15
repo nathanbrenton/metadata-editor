@@ -23,8 +23,12 @@ import {
   acceptedAudioMasterExtensions,
   acceptedVideoMasterExtensions,
 } from "../shared/media-file-spec.js";
+import {
+  scanArtistLibrary,
+} from "./artist-library.js";
 
 import type {
+  ArtistScanResult,
   DiscoveredAsset,
   LibraryScanResult,
   MetadataFileStatus,
@@ -80,6 +84,7 @@ async function readReleaseLibraryIdentity(
   Pick<
     ReleaseScanResult,
     | "releaseTitle"
+    | "primaryArtistId"
     | "primaryArtistName"
     | "releaseDate"
     | "releaseType"
@@ -138,6 +143,8 @@ async function readReleaseLibraryIdentity(
     const releaseTitle = readNonBlankString(
       releaseTable.title,
     );
+    const primaryArtistId =
+      readNonBlankString(primaryArtist?.id);
     const primaryArtistName =
       readNonBlankString(primaryArtist?.name);
     const dates = isRecord(releaseTable.dates)
@@ -153,6 +160,9 @@ async function readReleaseLibraryIdentity(
     return {
       ...(releaseTitle
         ? { releaseTitle }
+        : {}),
+      ...(primaryArtistId
+        ? { primaryArtistId }
         : {}),
       ...(primaryArtistName
         ? { primaryArtistName }
@@ -619,8 +629,23 @@ async function scanRelease(
 
 function buildScannerWarnings(
   releases: ReleaseScanResult[],
+  artists: ArtistScanResult[],
 ): string[] {
   const warnings: string[] = [];
+  const artistIds = new Set(
+    artists.map((artist) => artist.id),
+  );
+
+  for (const release of releases) {
+    if (
+      release.primaryArtistId &&
+      !artistIds.has(release.primaryArtistId)
+    ) {
+      warnings.push(
+        `${release.relativePath}: release references unknown Artist ID ${release.primaryArtistId}`,
+      );
+    }
+  }
 
   for (const release of releases) {
     if (release.tracks.length === 0) {
@@ -766,8 +791,11 @@ export async function scanMediaLibrary(
     path.join(mediaRoot, "releases"),
   );
 
-  const releaseDirectoryNames =
-    await listRealDirectories(releasesRoot);
+  const [releaseDirectoryNames, artistLibrary] =
+    await Promise.all([
+      listRealDirectories(releasesRoot),
+      scanArtistLibrary(mediaRoot),
+    ]);
 
   const releases = await Promise.all(
     releaseDirectoryNames.map((releaseDirectoryName) =>
@@ -789,9 +817,17 @@ export async function scanMediaLibrary(
     // The public audio player must never receive this absolute path.
     mediaRoot,
     releasesRoot,
+    artistsRoot: artistLibrary.artistsRoot,
     scannedAt: new Date().toISOString(),
+    artists: artistLibrary.artists,
     releases,
-    warnings: buildScannerWarnings(releases),
+    warnings: [
+      ...artistLibrary.warnings,
+      ...buildScannerWarnings(
+        releases,
+        artistLibrary.artists,
+      ),
+    ],
   };
 }
 

@@ -37,10 +37,33 @@ export type VideoScanResult = {
   videoMasters: DiscoveredAsset[];
 };
 
+export type ArtistAssetScanResult = {
+  id: string;
+  kind: string;
+  masterPath: string;
+  relativePath: string;
+  exists: boolean;
+  description?: string;
+  sourceFilename?: string;
+  sha256?: string;
+};
+
+export type ArtistScanResult = {
+  id: string;
+  slug: string;
+  displayName: string;
+  sortName?: string;
+  primaryAssetId?: string;
+  relativePath: string;
+  metadataRelativePath: string;
+  assets: ArtistAssetScanResult[];
+};
+
 export type ReleaseScanResult = {
   id: string;
   relativePath: string;
   releaseTitle?: string;
+  primaryArtistId?: string;
   primaryArtistName?: string;
   releaseDate?: string;
   releaseType?: string;
@@ -53,7 +76,9 @@ export type ReleaseScanResult = {
 export type LibraryScanResult = {
   mediaRoot: string;
   releasesRoot: string;
+  artistsRoot: string;
   scannedAt: string;
+  artists: ArtistScanResult[];
   releases: ReleaseScanResult[];
   warnings: string[];
 };

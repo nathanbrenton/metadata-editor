@@ -46,7 +46,11 @@ test("prepared video poster preview is private and poster selection participates
 test("application header uses the supplied image logo without a visible Hiplingo wordmark", () => {
   assert.match(
     appSource,
-    /const hiplingoLogoUrl = new URL\([\s\S]*"\.\/assets\/hiplingo-logo\.png"/,
+    /import \{ hiplingoLogoUrl \} from "@hiplingo\/brand"/,
+  );
+  assert.doesNotMatch(
+    appSource,
+    /\.\/assets\/hiplingo-logo\.png/,
   );
   assert.match(appSource, /src=\{hiplingoLogoUrl\}/);
   assert.doesNotMatch(appSource, />HIPLINGO</);

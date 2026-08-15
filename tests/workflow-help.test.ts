@@ -43,4 +43,8 @@ test("retains detailed feature reference while the rendered guide stays concise"
   assert.match(text, /Field-level provenance chips/i);
   assert.match(text, /audit:file-spec/i);
   assert.match(text, /audit:media-technical/i);
+  assert.match(text, /first-class Artist identities/i);
+  assert.match(text, /release artwork never substitutes for an Artist photo/i);
+  assert.match(text, /copy high-quality photos from ingest-drop/i);
+  assert.match(text, /select one authoritative Primary/i);
 });

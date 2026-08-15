@@ -138,6 +138,7 @@ export type MediaTechnicalIssue = {
 
 export type MediaTechnicalReleaseSummary = {
   releaseId: string;
+  durationSeconds?: number;
   health: MediaTechnicalHealth;
   issues: MediaTechnicalIssue[];
   inventory: MediaTechnicalInventory;
@@ -601,6 +602,26 @@ export function summarizeMediaTechnicalRelease(
     });
   }
 
+  const audioMasters = items.filter(
+    (item) => item.role === "audio-master",
+  );
+  const audioDurations = audioMasters.map(
+    (item) => item.technical?.durationSeconds,
+  );
+  const durationSeconds =
+    audioMasters.length > 0 &&
+    audioDurations.every(
+      (duration): duration is number =>
+        duration !== undefined &&
+        Number.isFinite(duration) &&
+        duration >= 0,
+    )
+      ? audioDurations.reduce(
+          (total, duration) => total + duration,
+          0,
+        )
+      : undefined;
+
   const health: MediaTechnicalHealth =
     issues.some((issue) => issue.severity === "blocked")
       ? "blocked"
@@ -610,6 +631,9 @@ export function summarizeMediaTechnicalRelease(
 
   return {
     releaseId,
+    ...(durationSeconds !== undefined
+      ? { durationSeconds }
+      : {}),
     health,
     issues,
     inventory: buildMediaTechnicalInventory(items),

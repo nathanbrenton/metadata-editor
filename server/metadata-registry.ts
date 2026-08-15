@@ -173,6 +173,27 @@ export const metadataFieldRegistry:
       displayPolicy: "auto",
     },
     {
+      id: "release.primary_artist.id",
+      canonicalName: "release.primary_artist.id",
+      label: "Artist ID",
+      description:
+        "Stable internal reference to the canonical Artist entity for this release.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.primary_artist.id",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Developer / Advanced",
+        order: 20,
+        help:
+          "Canonical Artist relationship used by Library and future publication. Do not substitute a display-name guess for a stable Artist ID.",
+      },
+      displayPolicy: "developer",
+    },
+    {
       id: "release.primary_artist.sort_name",
       canonicalName:
         "release.primary_artist.sort_name",

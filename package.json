@@ -10,6 +10,7 @@
     "build": "tsc --noEmit && vite build",
     "validate:library": "tsx scripts/validate-library.ts",
     "validate:release": "tsx scripts/validate-library.ts --release",
+    "migrate:artists": "tsx scripts/migrate-artists.ts",
     "publish:plan": "tsx scripts/plan-publish.ts",
     "preflight:publish": "tsx scripts/plan-publish.ts --strict",
     "plan:unpublish-release": "tsx scripts/plan-public-release-unpublish.ts",
@@ -33,7 +34,8 @@
     "react-dom": "^19.2.7",
     "smol-toml": "^1.7.0",
     "vite": "^8.1.4",
-    "@hiplingo/media-player": "file:../audio-player/packages/media-player"
+    "@hiplingo/media-player": "file:../audio-player/packages/media-player",
+    "@hiplingo/brand": "file:../audio-player/packages/brand"
   },
   "devDependencies": {
     "@types/node": "^24.10.10",

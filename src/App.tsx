@@ -1,3 +1,4 @@
+import { hiplingoLogoUrl } from "@hiplingo/brand";
 import {
   Fragment,
   lazy,
@@ -361,11 +362,6 @@ const LazySampleClearanceRecordEditor = lazy(async () => {
   };
 });
 
-const hiplingoLogoUrl = new URL(
-  "./assets/hiplingo-logo.png",
-  import.meta.url,
-).href;
-
 type MetadataFileStatus = {
   filename: string;
   relativePath: string;
@@ -423,10 +419,41 @@ type VideoMetadataEditorSnapshot = {
   masterPath: string;
 };
 
+type ArtistAssetScanResult = {
+  id: string;
+  kind: string;
+  masterPath: string;
+  relativePath: string;
+  exists: boolean;
+  description?: string;
+  sourceFilename?: string;
+  sha256?: string;
+};
+
+type ArtistPhotoCandidate = {
+  relativePath: string;
+  filename: string;
+  extension: string;
+  sizeBytes: number;
+  modifiedAt: string;
+};
+
+type ArtistScanResult = {
+  id: string;
+  slug: string;
+  displayName: string;
+  sortName?: string;
+  primaryAssetId?: string;
+  relativePath: string;
+  metadataRelativePath: string;
+  assets: ArtistAssetScanResult[];
+};
+
 type ReleaseScanResult = {
   id: string;
   relativePath: string;
   releaseTitle?: string;
+  primaryArtistId?: string;
   primaryArtistName?: string;
   releaseDate?: string;
   releaseType?: string;
@@ -438,6 +465,7 @@ type ReleaseScanResult = {
 
 type LibraryScanResult = {
   scannedAt: string;
+  artists: ArtistScanResult[];
   releases: ReleaseScanResult[];
   warnings: string[];
 };
@@ -476,6 +504,7 @@ type MediaTechnicalInventory = {
 
 type MediaTechnicalReleaseSummary = {
   releaseId: string;
+  durationSeconds?: number;
   health: MediaTechnicalHealth;
   issues: Array<{
     severity: "review" | "blocked";
@@ -1614,6 +1643,8 @@ export function App() {
     useState<ApplicationView>("library");
   const [libraryReleaseViewMode, setLibraryReleaseViewMode] =
     useState<LibraryReleaseViewMode>("tiles");
+  const [libraryEntityView, setLibraryEntityView] =
+    useState<LibraryEntityView>("releases");
   const libraryPlayback =
     usePersistentLibraryPlayback();
   const [
@@ -2637,24 +2668,44 @@ export function App() {
                     </Suspense>
                   )}
 
-                  <LibraryReleaseBrowser
-                    releases={scan.releases}
-                    onLibraryChanged={refreshLibrary}
-                    onOpenMetadata={(releaseId) =>
-                      void openReleaseDetail(releaseId)
-                    }
-                    showAdminTools={showAdminTools}
-                    onNotify={notify}
-                    technicalAudit={mediaTechnicalAudit}
-                    technicalByRelease={mediaTechnicalByRelease}
-                    playback={libraryPlayback}
-                    waveformColorMode={waveformColorMode}
-                    waveformNavigationRequest={
-                      libraryWaveformNavigationRequest
-                    }
-                    viewMode={libraryReleaseViewMode}
-                    onViewModeChange={setLibraryReleaseViewMode}
+                  <LibraryEntitySwitcher
+                    value={libraryEntityView}
+                    onChange={(nextView) => {
+                      setLibraryEntityView(nextView);
+                      if (nextView === "artists") {
+                        setSelectedReleaseDetail(null);
+                        setDetailError(null);
+                      }
+                    }}
                   />
+
+                  {libraryEntityView === "artists" ? (
+                    <LibraryArtistRoster
+                      artists={scan.artists}
+                      releases={scan.releases}
+                      onLibraryChanged={() => refreshLibrary()}
+                      onNotify={notify}
+                    />
+                  ) : (
+                    <LibraryReleaseBrowser
+                      releases={scan.releases}
+                      onLibraryChanged={refreshLibrary}
+                      onOpenMetadata={(releaseId) =>
+                        void openReleaseDetail(releaseId)
+                      }
+                      showAdminTools={showAdminTools}
+                      onNotify={notify}
+                      technicalAudit={mediaTechnicalAudit}
+                      technicalByRelease={mediaTechnicalByRelease}
+                      playback={libraryPlayback}
+                      waveformColorMode={waveformColorMode}
+                      waveformNavigationRequest={
+                        libraryWaveformNavigationRequest
+                      }
+                      viewMode={libraryReleaseViewMode}
+                      onViewModeChange={setLibraryReleaseViewMode}
+                    />
+                  )}
 
                 </>
               )}
@@ -10284,6 +10335,653 @@ function formatIngestTechnicalValue(
 }
 
 
+type LibraryEntityView = "releases" | "artists";
+
+function LibraryEntitySwitcher({
+  value,
+  onChange,
+}: {
+  value: LibraryEntityView;
+  onChange: (value: LibraryEntityView) => void;
+}) {
+  return (
+    <div
+      className="library-entity-switcher"
+      role="group"
+      aria-label="Library entity"
+    >
+      <button
+        type="button"
+        aria-pressed={value === "releases"}
+        onClick={() => onChange("releases")}
+      >
+        Releases
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "artists"}
+        onClick={() => onChange("artists")}
+      >
+        Artists
+      </button>
+    </div>
+  );
+}
+
+function LibraryArtistRoster({
+  artists,
+  releases,
+  onLibraryChanged,
+  onNotify,
+}: {
+  artists: ArtistScanResult[];
+  releases: ReleaseScanResult[];
+  onLibraryChanged: () => Promise<void>;
+  onNotify: (
+    message: string,
+    tone?: ToastMessage["tone"],
+  ) => void;
+}) {
+  const [selectedArtistId, setSelectedArtistId] =
+    useState<string | null>(null);
+  const [photoPickerOpen, setPhotoPickerOpen] =
+    useState(false);
+  const [photoCandidates, setPhotoCandidates] =
+    useState<ArtistPhotoCandidate[]>([]);
+  const [photoCandidatesLoading, setPhotoCandidatesLoading] =
+    useState(false);
+  const [photoCandidatesError, setPhotoCandidatesError] =
+    useState<string | null>(null);
+  const [artistMutationKey, setArtistMutationKey] =
+    useState<string | null>(null);
+  const [makeImportedPhotoPrimary, setMakeImportedPhotoPrimary] =
+    useState(false);
+
+  const releaseCountByArtist = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const release of releases) {
+      if (!release.primaryArtistId) {
+        continue;
+      }
+      counts.set(
+        release.primaryArtistId,
+        (counts.get(release.primaryArtistId) ?? 0) + 1,
+      );
+    }
+    return counts;
+  }, [releases]);
+
+  const selectedArtist = selectedArtistId
+    ? artists.find((artist) => artist.id === selectedArtistId) ?? null
+    : null;
+
+  const associatedReleases = useMemo(
+    () => selectedArtist
+      ? releases.filter(
+          (release) =>
+            release.primaryArtistId === selectedArtist.id,
+        )
+      : [],
+    [releases, selectedArtist],
+  );
+
+  useEffect(() => {
+    if (
+      selectedArtistId &&
+      !artists.some((artist) => artist.id === selectedArtistId)
+    ) {
+      setSelectedArtistId(null);
+    }
+  }, [artists, selectedArtistId]);
+
+  const closePhotoPicker = () => {
+    setPhotoPickerOpen(false);
+    setPhotoCandidates([]);
+    setPhotoCandidatesError(null);
+  };
+
+  const openPhotoPicker = async () => {
+    if (!selectedArtist) {
+      return;
+    }
+
+    setPhotoPickerOpen(true);
+    setPhotoCandidatesLoading(true);
+    setPhotoCandidatesError(null);
+    setMakeImportedPhotoPrimary(
+      !selectedArtist.primaryAssetId,
+    );
+
+    try {
+      const response = await fetch(
+        "/api/library/artist-photo-candidates",
+      );
+      const payload = (await response.json()) as
+        | { candidates: ArtistPhotoCandidate[] }
+        | { error?: string };
+
+      if (!response.ok || !("candidates" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to load Artist photo candidates.",
+        );
+      }
+
+      setPhotoCandidates(payload.candidates);
+    } catch (candidateError) {
+      setPhotoCandidatesError(
+        candidateError instanceof Error
+          ? candidateError.message
+          : "Unable to load Artist photo candidates.",
+      );
+    } finally {
+      setPhotoCandidatesLoading(false);
+    }
+  };
+
+  const importPhoto = async (
+    candidate: ArtistPhotoCandidate,
+  ) => {
+    if (!selectedArtist) {
+      return;
+    }
+
+    const mutationKey = `import:${candidate.relativePath}`;
+    setArtistMutationKey(mutationKey);
+
+    try {
+      const response = await fetch(
+        "/api/library/import-artist-photo",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            artistId: selectedArtist.id,
+            sourceRelativePath: candidate.relativePath,
+            setPrimary: makeImportedPhotoPrimary,
+          }),
+        },
+      );
+      const payload = (await response.json()) as
+        | { assetId: string; primaryAssetId: string }
+        | { error?: string };
+
+      if (!response.ok || !("assetId" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Artist photo import failed.",
+        );
+      }
+
+      await onLibraryChanged();
+      closePhotoPicker();
+      onNotify(
+        `Added ${candidate.filename} to ${selectedArtist.displayName}`,
+        "success",
+      );
+    } catch (importError) {
+      onNotify(
+        importError instanceof Error
+          ? importError.message
+          : "Artist photo import failed.",
+        "error",
+      );
+    } finally {
+      setArtistMutationKey(null);
+    }
+  };
+
+  const choosePrimaryPhoto = async (
+    asset: ArtistAssetScanResult,
+  ) => {
+    if (!selectedArtist) {
+      return;
+    }
+
+    const mutationKey = `primary:${asset.id}`;
+    setArtistMutationKey(mutationKey);
+
+    try {
+      const response = await fetch(
+        "/api/library/set-primary-artist-photo",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            artistId: selectedArtist.id,
+            assetId: asset.id,
+          }),
+        },
+      );
+      const payload = (await response.json()) as
+        | { primaryAssetId: string }
+        | { error?: string };
+
+      if (!response.ok || !("primaryAssetId" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to change the primary Artist photo.",
+        );
+      }
+
+      await onLibraryChanged();
+      onNotify(
+        `Primary Artist photo updated for ${selectedArtist.displayName}`,
+        "success",
+      );
+    } catch (primaryError) {
+      onNotify(
+        primaryError instanceof Error
+          ? primaryError.message
+          : "Unable to change the primary Artist photo.",
+        "error",
+      );
+    } finally {
+      setArtistMutationKey(null);
+    }
+  };
+
+  const removePhoto = async (
+    asset: ArtistAssetScanResult,
+  ) => {
+    if (!selectedArtist) {
+      return;
+    }
+
+    const label =
+      asset.sourceFilename ?? asset.id;
+    const removingPrimary =
+      asset.id === selectedArtist.primaryAssetId;
+    const reviewed = window.confirm(
+      `Remove ${label} from ${selectedArtist.displayName}?\n\n` +
+        (removingPrimary
+          ? "This is the Primary Artist photo. Removing it will leave the Artist with no Primary photo until another one is selected or added.\n\n"
+          : "") +
+        "The canonical source will be archived inside the private Artist Library for recovery.",
+    );
+    if (!reviewed) {
+      return;
+    }
+
+    const mutationKey = `remove:${asset.id}`;
+    setArtistMutationKey(mutationKey);
+
+    try {
+      const response = await fetch(
+        "/api/library/remove-artist-photo",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            artistId: selectedArtist.id,
+            assetId: asset.id,
+          }),
+        },
+      );
+      const payload = (await response.json()) as
+        | { removedAssetId: string }
+        | { error?: string };
+
+      if (!response.ok || !("removedAssetId" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to remove the Artist photo.",
+        );
+      }
+
+      await onLibraryChanged();
+      onNotify(
+        `Removed ${label} from ${selectedArtist.displayName}`,
+        "success",
+      );
+    } catch (removeError) {
+      onNotify(
+        removeError instanceof Error
+          ? removeError.message
+          : "Unable to remove the Artist photo.",
+        "error",
+      );
+    } finally {
+      setArtistMutationKey(null);
+    }
+  };
+
+  if (selectedArtist) {
+    const primaryAsset = selectedArtist.primaryAssetId
+      ? selectedArtist.assets.find(
+          (asset) => asset.id === selectedArtist.primaryAssetId,
+        )
+      : undefined;
+
+    return (
+      <section className="library-artist-browser library-artist-detail">
+        <header className="library-artist-browser-toolbar">
+          <div>
+            <button
+              type="button"
+              className="secondary-button library-artist-back-button"
+              onClick={() => {
+                closePhotoPicker();
+                setSelectedArtistId(null);
+              }}
+            >
+              ← All Artists
+            </button>
+            <strong>{selectedArtist.displayName}</strong>
+          </div>
+          <small>
+            {selectedArtist.assets.length} photo{selectedArtist.assets.length === 1 ? "" : "s"}
+            {" · "}
+            {associatedReleases.length} release{associatedReleases.length === 1 ? "" : "s"}
+          </small>
+        </header>
+
+        <section className="library-artist-detail-grid">
+          <div className="library-artist-primary-panel">
+            <h3>Primary Artist Photo</h3>
+            <div className="library-artist-primary-photo">
+              {primaryAsset?.exists ? (
+                <img
+                  src={artworkPreviewUrl(primaryAsset.relativePath)}
+                  alt={`Primary Artist photo for ${selectedArtist.displayName}`}
+                />
+              ) : (
+                <img
+                  className="hiplingo-artwork-fallback"
+                  src={hiplingoLogoUrl}
+                  alt=""
+                  aria-hidden="true"
+                />
+              )}
+            </div>
+            <div className="library-artist-identity-block">
+              <strong>{selectedArtist.displayName}</strong>
+              <code>{selectedArtist.id}</code>
+              <small>{selectedArtist.slug}</small>
+            </div>
+          </div>
+
+          <div className="library-artist-assets-panel">
+            <header>
+              <div>
+                <h3>Artist Photos</h3>
+                <p>
+                  Artist-scoped canonical sources. Click an alternate photo to make it Primary.
+                  Remove archives the private source for recovery and clears Primary when needed.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={artistMutationKey !== null}
+                onClick={() => void openPhotoPicker()}
+              >
+                Add Photo
+              </button>
+            </header>
+
+            {selectedArtist.assets.length === 0 ? (
+              <p className="library-artist-assets-empty">
+                No Artist photos have been imported yet.
+              </p>
+            ) : (
+              <div className="library-artist-asset-grid">
+                {selectedArtist.assets.map((asset) => {
+                  const isPrimary = asset.id === selectedArtist.primaryAssetId;
+                  const primaryMutationKey = `primary:${asset.id}`;
+                  const removeMutationKey = `remove:${asset.id}`;
+                  const assetLabel =
+                    asset.sourceFilename ?? asset.id;
+
+                  return (
+                    <article className="library-artist-asset-card" key={asset.id}>
+                      {asset.exists && !isPrimary ? (
+                        <button
+                          type="button"
+                          className="library-artist-asset-preview library-artist-asset-preview-button"
+                          disabled={artistMutationKey !== null}
+                          aria-label={`Make ${assetLabel} the Primary Artist photo for ${selectedArtist.displayName}`}
+                          onClick={() => void choosePrimaryPhoto(asset)}
+                        >
+                          <img
+                            src={artworkPreviewUrl(asset.relativePath)}
+                            alt={assetLabel}
+                            loading="lazy"
+                          />
+                        </button>
+                      ) : (
+                        <div className="library-artist-asset-preview">
+                          {asset.exists ? (
+                            <img
+                              src={artworkPreviewUrl(asset.relativePath)}
+                              alt={isPrimary
+                                ? `Primary Artist photo for ${selectedArtist.displayName}`
+                                : assetLabel}
+                              loading="lazy"
+                            />
+                          ) : (
+                            <span>Source missing</span>
+                          )}
+                        </div>
+                      )}
+                      <div className="library-artist-asset-copy">
+                        <div>
+                          <strong>{asset.id}</strong>
+                          {isPrimary && <span className="badge">Primary</span>}
+                        </div>
+                        <small>{assetLabel}</small>
+                        <div className="library-artist-asset-actions">
+                          <small>
+                            {isPrimary
+                              ? "Primary Artist photo"
+                              : artistMutationKey === primaryMutationKey
+                                ? "Setting Primary…"
+                                : "Click photo to make Primary"}
+                          </small>
+                          <button
+                            type="button"
+                            className="library-artist-asset-remove-button"
+                            disabled={artistMutationKey !== null || !asset.exists}
+                            onClick={() => void removePhoto(asset)}
+                          >
+                            {artistMutationKey === removeMutationKey
+                              ? "Removing…"
+                              : "Remove"}
+                          </button>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+
+            {photoPickerOpen && (
+              <section className="library-artist-photo-picker">
+                <header>
+                  <div>
+                    <strong>Add Artist Photo</strong>
+                    <small>Choose an image currently in ingest-drop.</small>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={closePhotoPicker}
+                    disabled={artistMutationKey !== null}
+                  >
+                    Close
+                  </button>
+                </header>
+
+                <label className="library-artist-primary-toggle">
+                  <input
+                    type="checkbox"
+                    checked={makeImportedPhotoPrimary}
+                    disabled={!selectedArtist.primaryAssetId}
+                    onChange={(event) =>
+                      setMakeImportedPhotoPrimary(event.target.checked)
+                    }
+                  />
+                  {selectedArtist.primaryAssetId
+                    ? "Make imported photo Primary"
+                    : "First Artist photo becomes Primary"}
+                </label>
+                <p className="library-artist-photo-picker-note">
+                  The high-quality source is copied into the private Artist Library. The ingest-drop file is left untouched.
+                </p>
+
+                {photoCandidatesLoading ? (
+                  <p className="message">Scanning ingest-drop images…</p>
+                ) : photoCandidatesError ? (
+                  <p className="message error">{photoCandidatesError}</p>
+                ) : photoCandidates.length === 0 ? (
+                  <p className="message">No previewable images are available in ingest-drop.</p>
+                ) : (
+                  <div className="library-artist-photo-candidate-grid">
+                    {photoCandidates.map((candidate) => {
+                      const mutationKey = `import:${candidate.relativePath}`;
+                      return (
+                        <article
+                          className="library-artist-photo-candidate"
+                          key={candidate.relativePath}
+                        >
+                          <button
+                            type="button"
+                            className="library-artist-photo-candidate-image-button"
+                            disabled={artistMutationKey !== null}
+                            aria-label={`Add ${candidate.filename} to ${selectedArtist.displayName}`}
+                            onClick={() => void importPhoto(candidate)}
+                          >
+                            <img
+                              src={buildIngestArtworkPreviewUrl(
+                                candidate.relativePath,
+                                candidate.modifiedAt,
+                              )}
+                              alt={candidate.filename}
+                              loading="lazy"
+                            />
+                          </button>
+                          <div>
+                            <strong>{candidate.filename}</strong>
+                            <small>{candidate.relativePath}</small>
+                            <span>{formatByteSize(candidate.sizeBytes)}</span>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+        </section>
+
+        <section className="library-artist-associated-releases">
+          <h3>Associated Releases</h3>
+          {associatedReleases.length === 0 ? (
+            <p>No releases currently reference this Artist.</p>
+          ) : (
+            <ul>
+              {associatedReleases.map((release) => (
+                <li key={release.id}>
+                  <strong>
+                    {resolveReleaseDisplayTitle(
+                      release.releaseTitle,
+                      formatReleaseTitle(release.id),
+                    )}
+                  </strong>
+                  <small>{release.releaseDate?.slice(0, 10) ?? release.id.slice(0, 10)}</small>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </section>
+    );
+  }
+
+  return (
+    <section className="library-artist-browser">
+      <header className="library-artist-browser-toolbar">
+        <div>
+          <strong>Library artists</strong>
+          <small>
+            {artists.length} {artists.length === 1 ? "artist" : "artists"}
+          </small>
+        </div>
+        <small>Canonical Artist identities · private Library</small>
+      </header>
+
+      {artists.length === 0 ? (
+        <div className="library-artist-empty-state">
+          <strong>No canonical Artists yet</strong>
+          <p>
+            Run the reviewed Artist migration before assigning photos.
+            Release artwork is intentionally not used as an Artist-photo fallback.
+          </p>
+        </div>
+      ) : (
+        <section
+          className="library-artist-roster"
+          aria-label="Library artists"
+        >
+          {artists.map((artist) => {
+            const primaryAsset = artist.primaryAssetId
+              ? artist.assets.find(
+                  (asset) => asset.id === artist.primaryAssetId,
+                )
+              : undefined;
+            const associatedReleaseCount =
+              releaseCountByArtist.get(artist.id) ?? 0;
+
+            return (
+              <button
+                type="button"
+                className="library-artist-card"
+                key={artist.id}
+                onClick={() => setSelectedArtistId(artist.id)}
+              >
+                <div className="library-artist-photo-placeholder">
+                  {primaryAsset?.exists ? (
+                    <img
+                      src={artworkPreviewUrl(primaryAsset.relativePath)}
+                      alt=""
+                      loading="lazy"
+                    />
+                  ) : (
+                    <img
+                      className="hiplingo-artwork-fallback"
+                      src={hiplingoLogoUrl}
+                      alt=""
+                      aria-hidden="true"
+                    />
+                  )}
+                </div>
+                <div className="library-artist-card-copy">
+                  <strong>{artist.displayName}</strong>
+                  <code>{artist.id}</code>
+                  <small>{artist.slug}</small>
+                  <span>Associated releases: {associatedReleaseCount}</span>
+                </div>
+              </button>
+            );
+          })}
+        </section>
+      )}
+    </section>
+  );
+}
+
 type LibraryReleaseViewMode =
   | "rows"
   | "cards"
@@ -10622,6 +11320,13 @@ function LibraryReleaseBrowser({
           releases={sortedReleases}
           playback={playback}
           colorMode={waveformColorMode}
+          releaseDurationSecondsById={new Map(
+            [...technicalByRelease].flatMap(([releaseId, summary]) =>
+              summary.durationSeconds !== undefined
+                ? [[releaseId, summary.durationSeconds] as const]
+                : [],
+            ),
+          )}
           navigationRequest={waveformNavigationRequest}
           onOpenMetadata={onOpenMetadata}
         />
@@ -11093,6 +11798,10 @@ function ReleaseCard({
     );
   const releaseArtistName =
     release.primaryArtistName?.trim() ?? "";
+  const releaseRuntimeLabel =
+    technicalSummary?.durationSeconds !== undefined
+      ? formatDuration(technicalSummary.durationSeconds)
+      : null;
 
   const audioMasters =
     release.tracks.flatMap(
@@ -11132,10 +11841,12 @@ function ReleaseCard({
                 loading="lazy"
               />
             ) : (
-              <>
-                <strong>No artwork</strong>
-                <small>Release</small>
-              </>
+              <img
+                className="hiplingo-artwork-fallback"
+                src={hiplingoLogoUrl}
+                alt=""
+                aria-hidden="true"
+              />
             )}
           </span>
 
@@ -11170,6 +11881,14 @@ function ReleaseCard({
                     : "videos"}
                 </>
               )}
+              {releaseRuntimeLabel && (
+                <>
+                  {" · "}
+                  <span title="Total release run time">
+                    {releaseRuntimeLabel}
+                  </span>
+                </>
+              )}
             </span>
           </span>
         </button>
@@ -11197,6 +11916,14 @@ function ReleaseCard({
                 {" · "}
                 {release.videos.length}{" "}
                 {release.videos.length === 1 ? "video" : "videos"}
+              </>
+            )}
+            {releaseRuntimeLabel && (
+              <>
+                {" · "}
+                <span title="Total release run time">
+                  {releaseRuntimeLabel}
+                </span>
               </>
             )}
           </span>
@@ -20266,6 +20993,10 @@ function ReleaseMetadataDetailView({
       authoredReleaseTitle,
       inferredReleaseTitle,
     );
+  const releaseRuntimeLabel =
+    technicalSummary?.durationSeconds !== undefined
+      ? formatDuration(technicalSummary.durationSeconds)
+      : null;
   const authoredReleaseDate = releaseTitleDocument
     ? readDocumentDraftString(
         releaseTitleDocument,
@@ -21001,7 +21732,12 @@ function ReleaseMetadataDetailView({
                 alt=""
               />
             ) : (
-              <strong>No artwork</strong>
+              <img
+                className="hiplingo-artwork-fallback"
+                src={hiplingoLogoUrl}
+                alt=""
+                aria-hidden="true"
+              />
             )}
           </span>
 
@@ -22446,6 +23182,11 @@ function ReleaseMetadataDetailView({
           <span className="document-nav-label">
             <strong>Release</strong>
             <small>{releaseDisplayTitle}</small>
+            {releaseRuntimeLabel && (
+              <small className="release-navigation-runtime">
+                Run time · {releaseRuntimeLabel}
+              </small>
+            )}
           </span>
 
           {!libraryHealthLoading &&

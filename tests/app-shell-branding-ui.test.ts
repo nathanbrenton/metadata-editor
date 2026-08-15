@@ -22,7 +22,11 @@ test("application header uses the uploaded Hiplingo image as the global Library 
   assert.match(appSource, /className="hiplingo-logo"/);
   assert.match(
     appSource,
-    /const hiplingoLogoUrl = new URL\([\s\S]*"\.\/assets\/hiplingo-logo\.png"/,
+    /import \{ hiplingoLogoUrl \} from "@hiplingo\/brand"/,
+  );
+  assert.doesNotMatch(
+    appSource,
+    /\.\/assets\/hiplingo-logo\.png/,
   );
   assert.match(appSource, /src=\{hiplingoLogoUrl\}/);
   assert.doesNotMatch(appSource, /hiplingo-wordmark/);
