@@ -14,6 +14,10 @@ import {
 import {
   listPublicCatalogMembership,
 } from "./publication-membership.js";
+import {
+  buildArtistPublicationPlan,
+  type ArtistPublicationPlan,
+} from "./artist-publication.js";
 
 export type PublishFleetRelease = {
   releaseId: string;
@@ -54,6 +58,7 @@ export type PublishFleetSummary = {
     warningCount: number;
     needsPreparationCount: number;
   };
+  artists: ArtistPublicationPlan;
   deployment: PublishedMediaDeploymentAudit;
 };
 
@@ -177,6 +182,12 @@ export async function buildPublishFleetSummary(
     ),
   );
 
+  const artists = await buildArtistPublicationPlan(
+    mediaRoot,
+    publishRoot,
+    { ffmpegCapabilities },
+  );
+
   return {
     schema: {
       name: "metadata-editor-publish-fleet",
@@ -214,6 +225,7 @@ export async function buildPublishFleetSummary(
         (release) => release.needsPreparation,
       ).length,
     },
+    artists,
     deployment: await auditPublishedMediaDeployment(
       publishRoot,
       generatedAt,

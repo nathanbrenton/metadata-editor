@@ -848,3 +848,19 @@ metadata-editor imports `hiplingoLogoUrl` from `@hiplingo/brand`; it does not
 keep a second logo source file. Missing Artist or release artwork may display
 the shared logo as neutral UI chrome, but the logo is never written into
 `artist.toml`, `release.toml`, or public media metadata as authored artwork.
+### Artist Web Package
+
+Artist entities have a separate complete-snapshot publication path inside the existing Web Package lifecycle:
+
+```text
+published-media/
+├── artists.json
+├── artist-publication-manifest.json
+└── artists/
+    └── <artist-slug>/
+        ├── artist.json
+        └── assets/
+            └── <asset-id>.webp
+```
+
+metadata-editor converts canonical private Artist-photo sources to sanitized WebP derivatives with FFmpeg `libwebp`, maximum 1920×1080, preserved aspect ratio, no crop, no upscale, and stripped metadata. The public JSON contains stable Artist identity plus public photo hrefs only—never `master_path`, ingest filenames, canonical source hashes, TOML, or private filesystem paths. The complete Artist snapshot is staged, verified, and promoted as a unit. Therefore a removed Artist photo cannot survive as stale public JSON or an orphan WebP after the next Artist Web Package update. Artists with no Primary photo omit the public primary-photo field; the shared Hiplingo logo remains a consumer-side UI fallback rather than authored media. Release relationships are derived downstream from published release `primary_artist.id` metadata instead of being duplicated into Artist records. Hiplingo remains a read-only consumer; this phase does not change audio-player application code.

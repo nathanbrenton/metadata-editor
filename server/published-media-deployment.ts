@@ -17,6 +17,9 @@ import {
   verifyPublishedPackageIntegrity,
 } from "./publish-operations.js";
 import {
+  verifyPublishedArtistSnapshot,
+} from "./artist-publication.js";
+import {
   assertPathWithinRoot,
 } from "./media-root.js";
 
@@ -108,10 +111,17 @@ export type PublishedMediaDeploymentAudit = {
 const catalogFilename = "catalog.json";
 const deploymentManifestFilename = "deployment-manifest.json";
 const releasesDirectoryName = "releases";
+const artistsDirectoryName = "artists";
+const artistCatalogFilename = "artists.json";
+const artistManifestFilename =
+  "artist-publication-manifest.json";
 const allowedRootNames = new Set([
   catalogFilename,
   deploymentManifestFilename,
   releasesDirectoryName,
+  artistsDirectoryName,
+  artistCatalogFilename,
+  artistManifestFilename,
 ]);
 
 const forbiddenPublicBasenames = new Set([
@@ -610,7 +620,7 @@ export async function auditPublishedMediaDeployment(
         severity: "blocked",
         relativePath: entry.name,
         message:
-          "Published-media contains an unexpected root entry. Deployment output must contain only catalog.json, deployment-manifest.json, and releases/.",
+          "Published-media contains an unexpected root entry. Deployment output may contain only release-package files plus the verified Artist Web Package.",
       });
     }
   }
@@ -869,6 +879,23 @@ export async function auditPublishedMediaDeployment(
         integrity.reason,
       ),
     );
+  }
+
+  const artistVerification =
+    await verifyPublishedArtistSnapshot(
+      canonicalPublishRoot,
+    );
+  if (
+    artistVerification.exists &&
+    !artistVerification.ok
+  ) {
+    issues.push({
+      code: "artist-package-integrity-failed",
+      severity: "blocked",
+      relativePath: artistsDirectoryName,
+      message:
+        `Artist Web Package failed integrity verification: ${artistVerification.reason}`,
+    });
   }
 
   let candidateManifest: PublishedMediaDeploymentManifest | undefined;

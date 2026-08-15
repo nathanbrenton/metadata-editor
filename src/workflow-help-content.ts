@@ -422,6 +422,11 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
     answer:
       "The persistent player footer and Hiplingo both consume the same shared speaker-button and vertical 0–100 volume interaction, including the same perceptual volume curve. The footer artwork itself is the temporary explicit shortcut: when the active preview belongs to a Library release, clicking its artwork returns to Library and opens that release in the single-release Waveform view. Source previews that do not identify a Library release leave the artwork non-interactive. The footer now uses the same shared player-shell controller as Hiplingo for transport and volume, and both hosts use the same persistent media-element volume state and perceptual gain behavior; metadata-editor continues to own private Library source resolution.",
   },
+  {
+    question: "How are Artist photos added to or removed from the Web Package?",
+    answer:
+      "Artist publication is a separate complete snapshot inside the Web Package lifecycle. Add Artists to Web Package or Update Artist Web Package writes only sanitized artists.json, per-Artist artist.json, optimized WebP photo derivatives, and artist-publication-manifest.json. Canonical Artist sources remain private. WebP generation preserves aspect ratio, never crops, never upscales beyond 1920×1080, strips metadata, and requires FFmpeg libwebp with no silent PNG fallback. Removing a canonical Artist photo cleans artist.toml immediately; the next Artist Web Package update replaces the complete public Artist snapshot, removing its JSON reference and stale WebP. Artists with no Primary photo publish no fake artwork reference, so consuming apps use the shared Hiplingo brand fallback as UI chrome. Release relationships remain derived from published release primary_artist.id values rather than duplicated into Artist metadata.",
+  },
 ] as const;
 
 export const workflowTroubleshootingItems: readonly WorkflowTroubleshootingItem[] = [

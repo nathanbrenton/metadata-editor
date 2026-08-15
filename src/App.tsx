@@ -39,9 +39,8 @@ import {
 import { WaveformColorMenuCard } from "./WaveformColorMenuCard.js";
 import { buildLibraryWaveformUrl } from "./library-waveform.js";
 
-import {
-  LibraryWaveformView,
-  type LibraryWaveformNavigationRequest,
+import type {
+  LibraryWaveformNavigationRequest,
 } from "./LibraryWaveformView.js";
 
 import {
@@ -306,9 +305,6 @@ import {
   type IngestTargetReleaseMode,
 } from "./ingest-target-release.js";
 
-import {
-  StagingLibraryBuildWorkspace,
-} from "./StagingLibraryBuildWorkspace.js";
 
 // Defer secondary workflows until they are opened so the initial editor
 // bundle remains smaller and faster to parse.
@@ -359,6 +355,26 @@ const LazySampleClearanceRecordEditor = lazy(async () => {
 
   return {
     default: module.SampleClearanceRecordEditor,
+  };
+});
+
+const LibraryWaveformView = lazy(async () => {
+  const module = await import(
+    "./LibraryWaveformView.js"
+  );
+
+  return {
+    default: module.LibraryWaveformView,
+  };
+});
+
+const StagingLibraryBuildWorkspace = lazy(async () => {
+  const module = await import(
+    "./StagingLibraryBuildWorkspace.js"
+  );
+
+  return {
+    default: module.StagingLibraryBuildWorkspace,
   };
 });
 
@@ -950,6 +966,43 @@ type PublishFleetRelease = {
   waveformNeedsPreparation: boolean;
 };
 
+type ArtistPublicationPlan = {
+  generatedAt: string;
+  readOnly: true;
+  writesEnabled: false;
+  status: "ready" | "blocked";
+  state:
+    | "not-published"
+    | "up-to-date"
+    | "update-available"
+    | "blocked";
+  planFingerprint: string;
+  sourceContentFingerprint: string;
+  issues: Array<{
+    code: string;
+    severity: "warning" | "blocked";
+    artistId?: string;
+    assetId?: string;
+    message: string;
+  }>;
+  summary: {
+    artistCount: number;
+    photoCount: number;
+    primaryPhotoCount: number;
+    blockedCount: number;
+    warningCount: number;
+  };
+};
+
+type ArtistPublicationReceipt = {
+  mode: "build" | "update";
+  artistCount: number;
+  photoCount: number;
+  resourceCount: number;
+  completedAt: string;
+  sourceContentFingerprint: string;
+};
+
 type PublishFleetSummary = {
   generatedAt: string;
   releases: PublishFleetRelease[];
@@ -965,6 +1018,7 @@ type PublishFleetSummary = {
     warningCount: number;
     needsPreparationCount: number;
   };
+  artists: ArtistPublicationPlan;
   deployment: PublishedMediaDeploymentAudit;
 };
 
@@ -5181,15 +5235,19 @@ function StagingWorkspace({
 
   if (selectedBuildRelease) {
     return (
-      <StagingLibraryBuildWorkspace
-        release={selectedBuildRelease}
-        onBack={() => setSelectedBuildReleaseId(null)}
-        onOpenLibrary={() =>
-          onOpenRelease(selectedBuildRelease.id)
-        }
-        onLibraryChanged={onLibraryChanged}
-        onNotify={onNotify}
-      />
+      <Suspense
+        fallback={<p className="message">Loading Staging build workspace…</p>}
+      >
+        <StagingLibraryBuildWorkspace
+          release={selectedBuildRelease}
+          onBack={() => setSelectedBuildReleaseId(null)}
+          onOpenLibrary={() =>
+            onOpenRelease(selectedBuildRelease.id)
+          }
+          onLibraryChanged={onLibraryChanged}
+          onNotify={onNotify}
+        />
+      </Suspense>
     );
   }
 
@@ -6032,6 +6090,8 @@ function PublishWorkspace({
     useState(false);
   const [publishFleetError, setPublishFleetError] =
     useState<string | null>(null);
+  const [artistPublicationLoading, setArtistPublicationLoading] =
+    useState(false);
   const [deploymentManifestLoading, setDeploymentManifestLoading] =
     useState(false);
   const [deploymentTargetStatus, setDeploymentTargetStatus] =
@@ -6096,6 +6156,79 @@ function PublishWorkspace({
       setPublishFleetLoading(false);
     }
   }, []);
+
+  const publishArtistSnapshot = useCallback(async () => {
+    const plan = publishFleet?.artists;
+    if (
+      !plan ||
+      plan.status === "blocked" ||
+      plan.state === "up-to-date"
+    ) {
+      return;
+    }
+
+    const verb =
+      plan.state === "not-published"
+        ? "Add"
+        : "Update";
+    const reviewed = window.confirm(
+      `${verb} the complete Artist Web Package?\n\n` +
+        `${plan.summary.artistCount} Artists · ${plan.summary.photoCount} photos\n\n` +
+        "This rebuilds the entire sanitized Artist snapshot so removed photos cannot leave stale JSON or WebP files. Canonical Library sources are never modified.",
+    );
+    if (!reviewed) {
+      return;
+    }
+
+    setArtistPublicationLoading(true);
+    setPublishFleetError(null);
+
+    try {
+      const response = await fetch(
+        "/api/publish/artists-build",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            planFingerprint:
+              plan.planFingerprint,
+            planGeneratedAt:
+              plan.generatedAt,
+          }),
+        },
+      );
+      const payload = await response.json() as
+        | ArtistPublicationReceipt
+        | { error?: string };
+
+      if (
+        !response.ok ||
+        !("resourceCount" in payload)
+      ) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to update the Artist Web Package.",
+        );
+      }
+
+      await loadPublishFleet();
+      onNotify(
+        `Artist Web Package ${payload.mode === "build" ? "added" : "updated"} · ${payload.artistCount} Artists · ${payload.photoCount} photos`,
+        "success",
+      );
+    } catch (artistPublishError) {
+      setPublishFleetError(
+        artistPublishError instanceof Error
+          ? artistPublishError.message
+          : "Unable to update the Artist Web Package.",
+      );
+    } finally {
+      setArtistPublicationLoading(false);
+    }
+  }, [loadPublishFleet, onNotify, publishFleet?.artists]);
 
   const refreshDeploymentManifest = useCallback(async () => {
     setDeploymentManifestLoading(true);
@@ -7375,6 +7508,69 @@ function PublishWorkspace({
                 </>
               )}
             </div>
+
+            <section
+              className={`publish-artist-web-package ${publishFleet.artists.status === "blocked" ? "blocked" : publishFleet.artists.state === "update-available" ? "warning" : "current"}`}
+              aria-label="Artist Web Package"
+            >
+              <div className="publish-artist-web-package-copy">
+                <span className="publish-deployment-kicker">Artists</span>
+                <strong>
+                  {publishFleet.artists.summary.artistCount} Artists · {publishFleet.artists.summary.photoCount} photos
+                </strong>
+                <small>
+                  {publishFleet.artists.state === "up-to-date"
+                    ? "Sanitized Artist JSON and WebP photos match the canonical Library."
+                    : publishFleet.artists.state === "not-published"
+                      ? "Artist identities and photos have not been added to the Web Package yet."
+                      : publishFleet.artists.state === "blocked"
+                        ? publishFleet.artists.issues.find((issue) => issue.severity === "blocked")?.message ?? "Artist publication is blocked."
+                        : "Canonical Artist changes are ready to replace the complete Artist Web Package snapshot."}
+                </small>
+              </div>
+              <div className="publish-artist-web-package-actions">
+                <span
+                  className={`badge ${
+                    publishFleet.artists.state === "up-to-date"
+                      ? "success"
+                      : publishFleet.artists.state === "blocked"
+                        ? "error"
+                        : "warning"
+                  }`}
+                >
+                  {publishFleet.artists.state === "up-to-date"
+                    ? "Included · current"
+                    : publishFleet.artists.state === "not-published"
+                      ? "Not included"
+                      : publishFleet.artists.state === "blocked"
+                        ? "Blocked"
+                        : "Update available"}
+                </span>
+                {mode === "public-package" && (
+                  <button
+                    type="button"
+                    disabled={
+                      artistPublicationLoading ||
+                      publishFleet.artists.status === "blocked" ||
+                      publishFleet.artists.state === "up-to-date" ||
+                      publishLoading ||
+                      prepareLoading ||
+                      batchPrepareLoading
+                    }
+                    onClick={() => void publishArtistSnapshot()}
+                    title="Rebuild the complete sanitized Artist snapshot. Removed canonical photos disappear from public JSON and WebP output on this update."
+                  >
+                    {artistPublicationLoading
+                      ? "Updating Artists…"
+                      : publishFleet.artists.state === "not-published"
+                        ? "Add Artists to Web Package"
+                        : publishFleet.artists.state === "up-to-date"
+                          ? "Artists up to date"
+                          : "Update Artist Web Package"}
+                  </button>
+                )}
+              </div>
+            </section>
 
             {mode === "public-package" && (
               <p className="publish-public-set-note">
@@ -11316,20 +11512,24 @@ function LibraryReleaseBrowser({
       </header>
 
       {viewMode === "waveform" ? (
-        <LibraryWaveformView
-          releases={sortedReleases}
-          playback={playback}
-          colorMode={waveformColorMode}
-          releaseDurationSecondsById={new Map(
-            [...technicalByRelease].flatMap(([releaseId, summary]) =>
-              summary.durationSeconds !== undefined
-                ? [[releaseId, summary.durationSeconds] as const]
-                : [],
-            ),
-          )}
-          navigationRequest={waveformNavigationRequest}
-          onOpenMetadata={onOpenMetadata}
-        />
+        <Suspense
+          fallback={<p className="message">Loading Waveform view…</p>}
+        >
+          <LibraryWaveformView
+            releases={sortedReleases}
+            playback={playback}
+            colorMode={waveformColorMode}
+            releaseDurationSecondsById={new Map(
+              [...technicalByRelease].flatMap(([releaseId, summary]) =>
+                summary.durationSeconds !== undefined
+                  ? [[releaseId, summary.durationSeconds] as const]
+                  : [],
+              ),
+            )}
+            navigationRequest={waveformNavigationRequest}
+            onOpenMetadata={onOpenMetadata}
+          />
+        </Suspense>
       ) : (
         <section
           className={`release-list library-release-list library-release-list--${viewMode}`}

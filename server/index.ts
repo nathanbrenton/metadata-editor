@@ -168,6 +168,10 @@ import {
   buildPublishFleetSummary,
 } from "./publish-fleet.js";
 import {
+  buildArtistPublicationPlan,
+  publishArtistPackage,
+} from "./artist-publication.js";
+import {
   auditPublishedMediaDeployment,
   writePublishedMediaDeploymentManifest,
 } from "./published-media-deployment.js";
@@ -5229,6 +5233,105 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown publish-fleet error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "GET" &&
+      requestUrl.pathname === "/api/publish/artists-plan"
+    ) {
+      try {
+        const [mediaRoot, publishRoot] =
+          await Promise.all([
+            resolveMediaRoot(),
+            resolvePublishRoot(),
+          ]);
+        sendJson(
+          response,
+          200,
+          await buildArtistPublicationPlan(
+            mediaRoot,
+            publishRoot,
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 500, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown Artist publication-plan error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname === "/api/publish/artists-build"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+        if (
+          typeof body !== "object" ||
+          body === null
+        ) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const planFingerprint =
+          "planFingerprint" in body &&
+          typeof body.planFingerprint === "string"
+            ? body.planFingerprint
+            : "";
+        const planGeneratedAt =
+          "planGeneratedAt" in body &&
+          typeof body.planGeneratedAt === "string"
+            ? body.planGeneratedAt
+            : "";
+
+        if (
+          !planFingerprint ||
+          !planGeneratedAt
+        ) {
+          sendJson(response, 400, {
+            error:
+              "planFingerprint and planGeneratedAt are required",
+          });
+          return;
+        }
+
+        const [mediaRoot, publishRoot] =
+          await Promise.all([
+            resolveMediaRoot(),
+            resolvePublishRoot(),
+          ]);
+
+        sendJson(
+          response,
+          200,
+          await publishArtistPackage(
+            mediaRoot,
+            publishRoot,
+            {
+              expectedPlanFingerprint:
+                planFingerprint,
+              planGeneratedAt,
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown Artist Web Package error",
         });
       }
 

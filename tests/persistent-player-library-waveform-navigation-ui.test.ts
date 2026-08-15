@@ -47,7 +47,7 @@ test("footer artwork opens the current release Waveform view", () => {
 test("footer shortcut returns to Library Waveform view for the active release", () => {
   assert.match(
     appSource,
-    /type LibraryWaveformNavigationRequest/,
+    /import type \{[\s\S]*LibraryWaveformNavigationRequest[\s\S]*from "\.\/LibraryWaveformView\.js"/,
   );
   assert.match(
     appSource,

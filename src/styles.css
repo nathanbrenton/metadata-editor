@@ -16195,3 +16195,60 @@ main:has(.persistent-library-player) {
   object-fit: contain;
   opacity: 0.58;
 }
+/* First-class Artist Web Package snapshot */
+.publish-artist-web-package {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  border: 1px solid #34414a;
+  border-radius: 0.42rem;
+  padding: 0.62rem 0.7rem;
+  background: #0d1317;
+}
+
+.publish-artist-web-package.warning {
+  border-color: #725f35;
+  background: #19160f;
+}
+
+.publish-artist-web-package.blocked {
+  border-color: #6d3c3c;
+  background: #191112;
+}
+
+.publish-artist-web-package-copy {
+  display: grid;
+  gap: 0.12rem;
+  min-width: 0;
+}
+
+.publish-artist-web-package-copy strong {
+  color: #d9e1e6;
+  font-size: 0.82rem;
+}
+
+.publish-artist-web-package-copy small {
+  color: #98a6af;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.publish-artist-web-package-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 820px) {
+  .publish-artist-web-package {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .publish-artist-web-package-actions {
+    justify-content: flex-start;
+  }
+}
