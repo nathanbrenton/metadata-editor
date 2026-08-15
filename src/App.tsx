@@ -7481,18 +7481,53 @@ function PublishWorkspace({
             >
               {deploymentBadge.label}
             </span>
+
+            {mode === "public-package" && (
+              <button
+                type="button"
+                className={
+                  deploymentAudit?.deploymentManifest.current
+                    ? undefined
+                    : "primary-button"
+                }
+                disabled={
+                  deploymentManifestLoading ||
+                  publishFleetLoading ||
+                  publishLoading ||
+                  prepareLoading ||
+                  batchPrepareLoading ||
+                  !deploymentAudit ||
+                  deploymentAudit.summary.blockedCount > 0 ||
+                  deploymentAudit.deploymentManifest.current
+                }
+                onClick={() => void refreshDeploymentManifest()}
+                title={
+                  deploymentAudit?.deploymentManifest.current
+                    ? "The local Web Package index matches the current sanitized package."
+                    : "Create or refresh the local package index used for safe Live comparison. This changes only published-media and never deploys."
+                }
+              >
+                {deploymentManifestLoading
+                  ? "Refreshing package index…"
+                  : deploymentAudit?.deploymentManifest.current
+                    ? "Package index current"
+                    : deploymentAudit?.deploymentManifest.exists
+                      ? "Refresh package index"
+                      : "Create package index"}
+              </button>
+            )}
+
             <button
               type="button"
               disabled={publishFleetLoading}
               onClick={() => void loadPublishFleet()}
             >
               {publishFleetLoading
-                ? "Refreshing…"
+                ? "Rechecking…"
                 : mode === "production"
                   ? "Refresh Web Package"
-                  : "Refresh status"}
+                  : "Recheck status"}
             </button>
-
           </div>
         </header>
 
@@ -7676,28 +7711,6 @@ function PublishWorkspace({
             {mode === "public-package" && (
               <details className="publish-package-details">
                 <summary>Package details</summary>
-                <div className="publish-package-details-actions">
-                  <button
-                    type="button"
-                    disabled={
-                      deploymentManifestLoading ||
-                      publishFleetLoading ||
-                      publishLoading ||
-                      prepareLoading ||
-                      batchPrepareLoading ||
-                      !deploymentAudit ||
-                      deploymentAudit.summary.blockedCount > 0
-                    }
-                    onClick={() => void refreshDeploymentManifest()}
-                    title="Refresh the internal package index used for safe Live comparison. This changes only published-media and never deploys."
-                  >
-                    {deploymentManifestLoading
-                      ? "Refreshing package index…"
-                      : deploymentAudit?.deploymentManifest.current
-                        ? "Refresh package index"
-                        : "Create package index"}
-                  </button>
-                </div>
                 <div className="publish-deployment-integrity-line">
                   <strong>
                     {deploymentAudit?.summary.readyReleaseCount ?? 0}/

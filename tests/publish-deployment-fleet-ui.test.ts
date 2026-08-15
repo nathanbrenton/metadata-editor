@@ -47,11 +47,23 @@ test(
     );
     assert.match(
       appSource,
-      /Refresh status/,
+      /Recheck status/,
     );
     assert.match(
       appSource,
       /Create package index/,
+    );
+    assert.match(
+      appSource,
+      /Refresh package index/,
+    );
+    assert.match(
+      appSource,
+      /Package index current/,
+    );
+    assert.match(
+      appSource,
+      /deploymentAudit\.deploymentManifest\.current/,
     );
     assert.match(
       appSource,
@@ -60,6 +72,11 @@ test(
     assert.match(
       appSource,
       /\/api\/publish\/deployment-manifest/,
+    );
+    assert.ok(
+      appSource.indexOf("Refresh package index") <
+        appSource.indexOf('<details className="publish-package-details">'),
+      "package-index action should be visible before collapsible Package details",
     );
   },
 );
