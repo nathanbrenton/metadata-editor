@@ -307,6 +307,73 @@ async function writeArtistDocument(
   );
 }
 
+export async function saveArtistBio(
+  mediaRoot: string,
+  input: {
+    artistId: string;
+    bio: string;
+  },
+): Promise<{
+  artistId: string;
+  bio: string;
+  changed: boolean;
+  backupRelativePath?: string;
+}> {
+  const normalizedBio = input.bio
+    .replace(/\r\n?/g, "\n")
+    .trim();
+
+  if (normalizedBio.length > 2400) {
+    throw new Error(
+      "Artist bio must be 2400 characters or fewer.",
+    );
+  }
+
+  const {
+    canonicalMediaRoot,
+    artistDirectory,
+    metadataPath,
+  } = await resolveArtistMetadataPath(
+    mediaRoot,
+    input.artistId,
+  );
+  const document =
+    await readArtistDocument(metadataPath);
+  const artistTable =
+    document.artist as Record<string, unknown>;
+  const previousBio =
+    readNonBlankString(artistTable.bio) ?? "";
+
+  if (previousBio === normalizedBio) {
+    return {
+      artistId: input.artistId,
+      bio: normalizedBio,
+      changed: false,
+    };
+  }
+
+  if (normalizedBio) {
+    artistTable.bio = normalizedBio;
+  } else {
+    delete artistTable.bio;
+  }
+
+  const backupRelativePath =
+    await writeArtistDocument(
+      canonicalMediaRoot,
+      artistDirectory,
+      metadataPath,
+      document,
+    );
+
+  return {
+    artistId: input.artistId,
+    bio: normalizedBio,
+    changed: true,
+    backupRelativePath,
+  };
+}
+
 function readArtistAssets(
   artistTable: Record<string, unknown>,
 ): Array<Record<string, unknown>> {

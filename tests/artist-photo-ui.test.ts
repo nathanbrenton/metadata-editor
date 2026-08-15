@@ -22,6 +22,9 @@ const styleSource = await readFile(
 test("Library Artist detail assigns ingest-drop photos without reusing release artwork", () => {
   assert.match(appSource, /Primary Artist Photo/);
   assert.match(appSource, /Artist Photos/);
+  assert.match(appSource, /Artist Bio \/ Info/);
+  assert.match(appSource, /Save Artist bio/);
+  assert.match(appSource, /\/api\/library\/save-artist-bio/);
   assert.match(appSource, />\s*Add Photo\s*</);
   assert.match(appSource, /Make imported photo Primary/);
   assert.match(appSource, /First Artist photo becomes Primary/);
@@ -80,10 +83,12 @@ test("Library Artist detail assigns ingest-drop photos without reusing release a
 });
 
 test("Artist-photo API keeps source implementation private to metadata-editor", () => {
+  assert.match(serverSource, /\/api\/library\/save-artist-bio/);
   assert.match(serverSource, /\/api\/library\/artist-photo-candidates/);
   assert.match(serverSource, /\/api\/library\/import-artist-photo/);
   assert.match(serverSource, /\/api\/library\/set-primary-artist-photo/);
   assert.match(serverSource, /\/api\/library\/remove-artist-photo/);
+  assert.match(assetSource, /saveArtistBio/);
   assert.match(assetSource, /metadata-backups/);
   assert.match(assetSource, /source_filename/);
   assert.match(assetSource, /sha256/);

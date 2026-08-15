@@ -151,6 +151,9 @@ async function scanArtist(
     const primaryAssetId = readNonBlankString(
       artistTable.primary_asset_id,
     );
+    const bio = readNonBlankString(
+      artistTable.bio,
+    );
 
     if (!id || !slug || !displayName) {
       throw new Error(
@@ -249,6 +252,7 @@ async function scanArtist(
         slug,
         displayName,
         ...(sortName ? { sortName } : {}),
+        ...(bio ? { bio } : {}),
         ...(primaryAssetId ? { primaryAssetId } : {}),
         relativePath: toLibraryRelativePath(
           canonicalMediaRoot,

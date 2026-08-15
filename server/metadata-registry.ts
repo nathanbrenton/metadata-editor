@@ -94,6 +94,40 @@ export const metadataFieldRegistry:
       displayPolicy: "always",
     },
     {
+      id: "release.description",
+      canonicalName: "release.description",
+      label: "Release Description",
+      description:
+        "Short public-facing description or information summary for this album, EP, single, or other release.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.description",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      editor: {
+        control: "multiline",
+        options: [],
+        rows: 6,
+        maxLength: 2400,
+        placeholder:
+          "Describe what this release is, its sound or idea, and one meaningful recording or creative detail.",
+        help:
+          "Suggested length: about 50–120 words. This text is public when the release is included in the Web Package.",
+      },
+      presentation: {
+        group: "Text and Notes",
+        order: 5,
+        examples: [
+          "A concise public summary of the release, its musical identity, central idea, and recording context.",
+        ],
+        help:
+          "Use for a short public album/EP/single description. Keep private production notes in the production-notes document instead.",
+      },
+      displayPolicy: "auto",
+    },
+    {
       id: "release.identifiers.upc",
       canonicalName:
         "release.identifiers.upc",

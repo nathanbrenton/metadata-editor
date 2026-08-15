@@ -33,6 +33,7 @@ test("scans first-class Artist identities separately from release artwork", asyn
         'slug = "nathan-brenton"',
         'display_name = "Nathan Brenton"',
         'sort_name = "Brenton, Nathan"',
+        'bio = "Independent artist and producer focused on electronic and recorded work."',
         'primary_asset_id = ""',
         "assets = []",
         "",
@@ -57,6 +58,10 @@ test("scans first-class Artist identities separately from release artwork", asyn
     assert.equal(result.artists[0]?.id, "artist_nathan_brenton");
     assert.equal(result.artists[0]?.slug, "nathan-brenton");
     assert.equal(result.artists[0]?.displayName, "Nathan Brenton");
+    assert.equal(
+      result.artists[0]?.bio,
+      "Independent artist and producer focused on electronic and recorded work.",
+    );
     assert.deepEqual(result.artists[0]?.assets, []);
     assert.equal(result.releases[0]?.primaryArtistId, "artist_nathan_brenton");
     assert.equal(

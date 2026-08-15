@@ -38,6 +38,7 @@ import {
   importArtistPhoto,
   listArtistPhotoCandidates,
   removeArtistPhoto,
+  saveArtistBio,
   setPrimaryArtistPhoto,
 } from "./artist-assets.js";
 import { buildMetadataExportPlan } from "./export-plan.js";
@@ -2113,6 +2114,59 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Video preview not found",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/library/save-artist-bio"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          Array.isArray(body)
+        ) {
+          throw new Error(
+            "Artist bio body must be an object",
+          );
+        }
+
+        const record =
+          body as Record<string, unknown>;
+        if (
+          typeof record.artistId !== "string" ||
+          typeof record.bio !== "string"
+        ) {
+          throw new Error(
+            "Saving an Artist bio requires artistId and bio",
+          );
+        }
+
+        const mediaRoot =
+          await resolveMediaRoot();
+        sendJson(
+          response,
+          200,
+          await saveArtistBio(
+            mediaRoot,
+            {
+              artistId: record.artistId,
+              bio: record.bio,
+            },
+          ),
+        );
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unable to save Artist bio",
         });
       }
 

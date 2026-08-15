@@ -16356,3 +16356,54 @@ main:has(.persistent-library-player) {
 .publish-visibility-review {
   border-color: rgba(174, 92, 92, 0.7);
 }
+
+/* =========================================================
+   PT5 Artist bio + public-description editor
+   ========================================================= */
+
+.library-artist-bio-editor {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid #30333a;
+  border-radius: 12px;
+  background: #15171b;
+}
+
+.library-artist-bio-editor header h3,
+.library-artist-bio-editor header p {
+  margin: 0;
+}
+
+.library-artist-bio-editor header p {
+  margin-top: 5px;
+  color: #9da3ab;
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.library-artist-bio-editor textarea,
+.metadata-multiline-field textarea {
+  width: 100%;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.library-artist-bio-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.library-artist-bio-editor__actions small,
+.metadata-multiline-help {
+  color: #8f969f;
+  font-size: 0.74rem;
+}
+
+.metadata-multiline-field {
+  display: grid;
+  gap: 7px;
+}

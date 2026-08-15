@@ -468,6 +468,7 @@ type ArtistScanResult = {
   slug: string;
   displayName: string;
   sortName?: string;
+  bio?: string;
   primaryAssetId?: string;
   relativePath: string;
   metadataRelativePath: string;
@@ -1326,10 +1327,14 @@ type MetadataFieldDefinition = {
   };
 
   editor?: {
-    control: "select-or-custom";
+    control: "select-or-custom" | "multiline";
     options: string[];
     customLabel?: string;
     customPlaceholder?: string;
+    rows?: number;
+    maxLength?: number;
+    placeholder?: string;
+    help?: string;
   };
 
   displayPolicy: string;
@@ -10738,6 +10743,10 @@ function LibraryArtistRoster({
     useState<string | null>(null);
   const [makeImportedPhotoPrimary, setMakeImportedPhotoPrimary] =
     useState(false);
+  const [artistBioDraft, setArtistBioDraft] =
+    useState("");
+  const [artistBioSaving, setArtistBioSaving] =
+    useState(false);
 
   const releaseCountByArtist = useMemo(() => {
     const counts = new Map<string, number>();
@@ -10775,6 +10784,74 @@ function LibraryArtistRoster({
       setSelectedArtistId(null);
     }
   }, [artists, selectedArtistId]);
+
+  useEffect(() => {
+    setArtistBioDraft(
+      selectedArtist?.bio ?? "",
+    );
+  }, [
+    selectedArtist?.bio,
+    selectedArtist?.id,
+  ]);
+
+  const saveBio = async () => {
+    if (!selectedArtist) {
+      return;
+    }
+
+    setArtistBioSaving(true);
+
+    try {
+      const response = await fetch(
+        "/api/library/save-artist-bio",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            artistId: selectedArtist.id,
+            bio: artistBioDraft,
+          }),
+        },
+      );
+      const payload = (await response.json()) as
+        | {
+            artistId: string;
+            bio: string;
+            changed: boolean;
+          }
+        | { error?: string };
+
+      if (
+        !response.ok ||
+        !("artistId" in payload)
+      ) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to save Artist bio.",
+        );
+      }
+
+      await onLibraryChanged();
+      onNotify(
+        payload.changed
+          ? `Artist bio updated for ${selectedArtist.displayName}`
+          : `Artist bio already current for ${selectedArtist.displayName}`,
+        "success",
+      );
+    } catch (bioError) {
+      onNotify(
+        bioError instanceof Error
+          ? bioError.message
+          : "Unable to save Artist bio.",
+        "error",
+      );
+    } finally {
+      setArtistBioSaving(false);
+    }
+  };
 
   const closePhotoPicker = () => {
     setPhotoPickerOpen(false);
@@ -11225,6 +11302,58 @@ function LibraryArtistRoster({
                 )}
               </section>
             )}
+          </div>
+        </section>
+
+        <section className="library-artist-bio-editor">
+          <header>
+            <div>
+              <h3>Artist Bio / Info</h3>
+              <p>
+                Short public-facing Artist context. Suggested length: about
+                40–100 words. Leave blank to publish no bio section.
+              </p>
+            </div>
+          </header>
+
+          <textarea
+            rows={7}
+            maxLength={2400}
+            value={artistBioDraft}
+            disabled={artistBioSaving}
+            placeholder="Who is the Artist, what do they sound or work like, and what is one meaningful context or career anchor?"
+            spellCheck="true"
+            onChange={(event) =>
+              setArtistBioDraft(
+                event.target.value,
+              )
+            }
+          />
+
+          <div className="library-artist-bio-editor__actions">
+            <small>
+              {
+                artistBioDraft.trim()
+                  ? artistBioDraft.trim().split(/\s+/).length
+                  : 0
+              } words
+              {" · "}
+              {artistBioDraft.length}/2400 characters
+            </small>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={
+                artistBioSaving ||
+                artistBioDraft.trim() ===
+                  (selectedArtist.bio ?? "").trim()
+              }
+              onClick={() => void saveBio()}
+            >
+              {artistBioSaving
+                ? "Saving bio…"
+                : "Save Artist bio"}
+            </button>
           </div>
         </section>
 
@@ -25991,6 +26120,53 @@ function MetadataValueCell({
         {changed && (
           <span className="changed-indicator">
             Track override
+          </span>
+        )}
+      </label>
+    );
+  }
+
+  const multilineEditor =
+    field?.editor?.control === "multiline"
+      ? field.editor
+      : null;
+
+  if (
+    typeof currentValue === "string" &&
+    multilineEditor
+  ) {
+    const wordCount =
+      currentValue.trim()
+        ? currentValue.trim().split(/\s+/).length
+        : 0;
+
+    return (
+      <label className="metadata-editor-field metadata-multiline-field">
+        <textarea
+          rows={multilineEditor.rows ?? 6}
+          maxLength={multilineEditor.maxLength}
+          value={currentValue}
+          placeholder={multilineEditor.placeholder}
+          spellCheck="true"
+          onChange={(event) =>
+            onDraftValueChange(
+              document,
+              row.path,
+              originalValue,
+              event.target.value,
+            )
+          }
+        />
+
+        <span className="metadata-multiline-help">
+          {multilineEditor.help ?? "Multiline text"}
+          {" · "}
+          {wordCount} {wordCount === 1 ? "word" : "words"}
+        </span>
+
+        {changed && (
+          <span className="changed-indicator">
+            Modified
           </span>
         )}
       </label>

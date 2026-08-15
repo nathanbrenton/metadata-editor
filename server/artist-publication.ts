@@ -97,6 +97,7 @@ export type ArtistPublicationArtistPlan = {
   slug: string;
   displayName: string;
   sortName?: string;
+  bio?: string;
   primaryAssetId?: string;
   requiredByReleaseIds: string[];
   documentRelativePath: string;
@@ -877,6 +878,9 @@ export async function buildArtistPublicationPlan(
       ...(artist.sortName
         ? { sortName: artist.sortName }
         : {}),
+      ...(artist.bio
+        ? { bio: artist.bio }
+        : {}),
       ...(artist.primaryAssetId
         ? { primaryAssetId: artist.primaryAssetId }
         : {}),
@@ -925,6 +929,7 @@ export async function buildArtistPublicationPlan(
       slug: artist.slug,
       displayName: artist.displayName,
       sortName: artist.sortName ?? null,
+      bio: artist.bio ?? null,
       primaryAssetId: artist.primaryAssetId ?? null,
       assets: artist.assets.map((asset) => ({
         id: asset.id,
@@ -1080,6 +1085,9 @@ function publicArtistDocument(
     displayName: artist.displayName,
     ...(artist.sortName
       ? { sortName: artist.sortName }
+      : {}),
+    ...(artist.bio
+      ? { bio: artist.bio }
       : {}),
     ...(primary
       ? {

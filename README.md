@@ -870,3 +870,22 @@ Artist Web Package membership is derived from the release public set rather than
 ### Public visibility defaults
 
 Release visibility is explicit and private-by-default. A Library release does not enter `catalog.json` merely because it exists in Library or because private/web derivatives have been prepared. In Web Package, the release-level visibility slider is **OFF = Private / Local** and **ON = Public**. Switching ON opens **Review before making public** and requires the existing guarded publication path before membership changes. Switching OFF opens **Review before making private** and uses the guarded catalog-removal path while preserving canonical Library masters, metadata, and private derivatives. **Public** means present in the local sanitized Web Package and eligible for a future Live deployment; only the separate **Live** stage represents what visitors can actually access.
+
+## Public Artist bios and release descriptions
+
+Short public text remains canonical metadata owned by metadata-editor:
+
+- Artist bio is stored privately in `artists/<slug>/artist.toml` as
+  `artist.bio`.
+- Release description is stored in the release's `release.toml` as
+  `release.description`.
+- Both fields are optional and do not block publication.
+- Artist publication copies `artist.bio` into sanitized `artist.json`.
+- Release publication copies `release.description` into sanitized
+  `release.json.metadata.description`.
+- Private media paths and private production notes are not part of these
+  public fields.
+
+The Library → Artists detail view contains the Artist Bio / Info editor.
+Release Description is a registered multiline field under Text and Notes in
+the release metadata editor.

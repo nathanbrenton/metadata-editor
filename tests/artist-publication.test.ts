@@ -95,6 +95,7 @@ async function writeArtist(
           'slug = "nathan-brenton"',
           'display_name = "Nathan Brenton"',
           'sort_name = "Brenton, Nathan"',
+          'bio = "Nathan Brenton is an independent artist and producer."',
           'primary_asset_id = "asset-001"',
           "",
           "[[artist.assets]]",
@@ -115,6 +116,7 @@ async function writeArtist(
           'slug = "nathan-brenton"',
           'display_name = "Nathan Brenton"',
           'sort_name = "Brenton, Nathan"',
+          'bio = "Nathan Brenton is an independent artist and producer."',
           "assets = []",
           "",
         ].join("\n"),
@@ -336,6 +338,10 @@ test("publishes and atomically refreshes the complete Artist snapshot without st
   assert.match(
     serialized,
     /asset-001\.webp/,
+  );
+  assert.equal(
+    publicArtist.bio,
+    "Nathan Brenton is an independent artist and producer.",
   );
   assert.doesNotMatch(
     serialized,

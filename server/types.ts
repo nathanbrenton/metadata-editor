@@ -53,6 +53,7 @@ export type ArtistScanResult = {
   slug: string;
   displayName: string;
   sortName?: string;
+  bio?: string;
   primaryAssetId?: string;
   relativePath: string;
   metadataRelativePath: string;
@@ -509,10 +510,14 @@ export type MetadataFieldDefinition = {
   };
 
   editor?: {
-    control: "select-or-custom";
+    control: "select-or-custom" | "multiline";
     options: string[];
     customLabel?: string;
     customPlaceholder?: string;
+    rows?: number;
+    maxLength?: number;
+    placeholder?: string;
+    help?: string;
   };
 
   displayPolicy:
