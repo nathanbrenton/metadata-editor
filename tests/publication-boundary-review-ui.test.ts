@@ -47,8 +47,8 @@ test("publication review separates preparation selection from membership and kee
   assert.match(app, /aria-label="No preparation needed"/);
   assert.match(app, /return \{ label: "Current", tone: "success" \}/);
   assert.match(app, /deploymentSyncPlan\?\.status === "changes"[\s\S]*?"Changes ready"/);
-  assert.match(app, /mode === "production"[\s\S]*?"Refresh Web Package"/);
+  assert.match(app, /mode === "production"[\s\S]*?"Recheck Web Package"/);
   assert.doesNotMatch(app, /summary\.changeCount\} file changes/);
   assert.match(help, /A labeled Media prep column appears only when/);
-  assert.match(help, /Refresh Web Package in Live/);
+  assert.match(help, /Recheck Web Package in Live/);
 });

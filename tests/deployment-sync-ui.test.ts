@@ -31,10 +31,21 @@ const helpSource = await readFile(
 test(
   "Live exposes a simplified read-only comparison with deployment details available on demand",
   () => {
-    assert.match(appSource, /Live connection/);
+    assert.match(appSource, /Live status/);
+    assert.match(appSource, /Live target/);
     assert.match(appSource, /"Check Live"/);
+    assert.match(
+      appSource,
+      /className="primary"[\s\S]*?loadDeploymentSyncPlan\(\)[\s\S]*?"Check Live"/,
+    );
+    assert.match(appSource, /Recheck Web Package/);
     assert.match(appSource, /changes ready/);
     assert.match(appSource, /Live is up to date/);
+    assert.ok(
+      appSource.indexOf('"Check Live"') <
+        appSource.indexOf('className="publish-host-boundary"'),
+      "Check Live should be elevated into the always-visible Live status header",
+    );
     assert.match(
       appSource,
       /\/api\/publish\/deployment-sync-plan/,

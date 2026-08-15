@@ -7349,12 +7349,12 @@ function PublishWorkspace({
           </p>
           <h2>
             {mode === "production"
-              ? "Included Web Package → Live"
+              ? "Web Package → Live"
               : "Choose releases for the Web Package"}
           </h2>
           <p>
             {mode === "production"
-              ? "Live compares the same releases currently marked Included in Web Package. Not included Library releases are never sent; if previously Live content leaves the Web Package, Check Live surfaces that removal before deployment."
+              ? "Compare the current Web Package with Hiplingo before deployment. Check Live is read-only and shows additions, updates, and removals without changing the server."
               : "Only releases marked Included are part of the exact Web Package that a future Live deployment will publish. Not included releases remain private in Library."}
           </p>
         </div>
@@ -7373,7 +7373,7 @@ function PublishWorkspace({
               </>
             ) : (
               <span className="badge preview publish-read-only-status" role="status">
-                Comparison is read-only
+                Live comparison · read-only
               </span>
             )}
           </div>
@@ -7465,12 +7465,12 @@ function PublishWorkspace({
         <header className="publish-deployment-overview-header">
           <div>
             <span className="publish-deployment-kicker">
-              {mode === "production" ? "Web Package → Live" : "Web Package"}
+              {mode === "production" ? "Live" : "Web Package"}
             </span>
-            <h3>{mode === "production" ? "Web Package → Live" : "Web Package status"}</h3>
+            <h3>{mode === "production" ? "Live status" : "Web Package status"}</h3>
             <p>
               {mode === "production"
-                ? "Refresh the Web Package status, then compare it read-only with what is live on Hiplingo."
+                ? "See what is Live now, what would change, and what would leave Live before any deployment."
                 : "See which releases are prepared for the web and which still need attention."}
             </p>
           </div>
@@ -7517,6 +7517,25 @@ function PublishWorkspace({
               </button>
             )}
 
+            {mode === "production" && (
+              <button
+                type="button"
+                className="primary"
+                disabled={
+                  deploymentTargetLoading ||
+                  deploymentSyncPlanLoading ||
+                  !deploymentTargetStatus?.configured ||
+                  !deploymentAudit?.deploymentManifest.current
+                }
+                onClick={() => void loadDeploymentSyncPlan()}
+                title="Compare the current Web Package with the configured Live target. This is checksum-based and read-only."
+              >
+                {deploymentSyncPlanLoading
+                  ? "Checking Live…"
+                  : "Check Live"}
+              </button>
+            )}
+
             <button
               type="button"
               disabled={publishFleetLoading}
@@ -7525,7 +7544,7 @@ function PublishWorkspace({
               {publishFleetLoading
                 ? "Rechecking…"
                 : mode === "production"
-                  ? "Refresh Web Package"
+                  ? "Recheck Web Package"
                   : "Recheck status"}
             </button>
           </div>
@@ -7537,7 +7556,7 @@ function PublishWorkspace({
               {mode === "production" ? (
                 <>
                   <div>
-                    <span>Included</span>
+                    <span>Web Package</span>
                     <strong>{publishFleet.summary.publicCatalogCount} releases</strong>
                   </div>
                   <div>
@@ -7553,7 +7572,7 @@ function PublishWorkspace({
                     </strong>
                   </div>
                   <div>
-                    <span>Included changes</span>
+                    <span>Changes</span>
                     <strong>
                       {liveReleaseChangeCount === null
                         ? "—"
@@ -7665,7 +7684,7 @@ function PublishWorkspace({
 
             {mode === "production" && (
               <p className="publish-live-set-note">
-                <strong>Included set:</strong> this is the same {publishFleet.summary.publicCatalogCount}-release set shown under <strong>Web Package → Included</strong>. Only these releases are sent to Live. Check Live also reports removals when content that was previously Live has been removed from the Web Package.
+                <strong>Source:</strong> Live is compared against the same {publishFleet.summary.publicCatalogCount}-release Included set from <strong>Web Package</strong>. Releases outside that set are never sent Live; previously Live releases removed from it appear under <strong>Leaving Live</strong>.
               </p>
             )}
 
@@ -7811,8 +7830,8 @@ function PublishWorkspace({
             <div className="publish-host-boundary">
               <div className="publish-host-boundary-heading">
                 <div>
-                  <span className="publish-deployment-kicker">Live connection</span>
-                  <strong>{deploymentTargetStatus?.profile.label ?? "Live target"}</strong>
+                  <span className="publish-deployment-kicker">Live target</span>
+                  <strong>{deploymentTargetStatus?.profile.label ?? "Deployment target"}</strong>
                 </div>
                 <div className="publish-host-boundary-actions">
                   <span
@@ -7834,23 +7853,6 @@ function PublishWorkspace({
                           ? "Changes ready"
                           : "Ready to check"}
                   </span>
-                  <button
-                    type="button"
-                    disabled={
-                      deploymentTargetLoading ||
-                      deploymentSyncPlanLoading ||
-                      !deploymentTargetStatus?.configured ||
-                      !deploymentAudit?.deploymentManifest.current
-                    }
-                    onClick={() => void loadDeploymentSyncPlan()}
-                    title="Run a checksum-based rsync dry-run against the configured local or SSH target. This comparison is read-only."
-                  >
-                    {deploymentSyncPlanLoading
-                      ? "Checking Live…"
-                      : mode === "production"
-                        ? "Check Live"
-                        : "Check Live"}
-                  </button>
                 </div>
               </div>
 

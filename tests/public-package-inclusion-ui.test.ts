@@ -44,7 +44,7 @@ test("Live mirrors the Included Web Package set and emphasizes only Live-state d
     /mode === "production"[\s\S]*publicationState !== "not-published"/,
   );
   assert.match(app, /Included Web Package → Live/);
-  assert.match(app, /same \{publishFleet\.summary\.publicCatalogCount\}-release set shown under/);
+  assert.match(app, /same \{publishFleet\.summary\.publicCatalogCount\}-release Included set from/);
   assert.match(app, /<th scope="col">Included Web Package<\/th>/);
   assert.match(app, /<span className="badge success">Included<\/span>[\s\S]*<small>\{webPackageStatus\.label\}<\/small>/);
   assert.match(app, /\$\{workspaceReleases\.length\} included releases/);

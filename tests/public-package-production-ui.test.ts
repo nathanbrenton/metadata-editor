@@ -18,7 +18,7 @@ test("separates Library, Web Package, and Live in navigation", () => {
 test("Web Package and Live reuse the guarded publication workspace with different modes", () => {
   assert.match(appSource, /mode=\{applicationView === "production" \? "production" : "public-package"\}/);
   assert.match(appSource, /Only releases marked Included are part of the exact Web Package/i);
-  assert.match(appSource, /Live compares the same releases currently marked Included in Web Package/i);
+  assert.match(appSource, /Compare the current Web Package with Hiplingo before deployment/i);
   assert.match(appSource, /loadDeploymentTargetStatus\("production"\)/);
   assert.match(appSource, /hiplingo-prod:\/var\/www\/hiplingo\.com\/published-media/);
 });
