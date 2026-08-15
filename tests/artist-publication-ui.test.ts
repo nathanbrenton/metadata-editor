@@ -58,15 +58,47 @@ test("Web Package exposes a first-class complete Artist snapshot", () => {
   );
   assert.match(
     app,
-    /Add Artists to Web Package/,
+    /Prepare Artist Snapshot/,
   );
   assert.match(
     app,
-    /Update Artist Web Package/,
+    /Prepare Artist Updates/,
   );
   assert.match(
     app,
     /\/api\/publish\/artists-build/,
+  );
+  assert.match(
+    app,
+    /Artists · selection follows releases/,
+  );
+  assert.match(
+    app,
+    /includedReleaseCount/,
+  );
+  assert.match(
+    app,
+    /Artist inclusion follows the Public release set automatically/,
+  );
+  assert.doesNotMatch(
+    app,
+    /Add Artists to Web Package/,
+  );
+  assert.match(
+    publication,
+    /listPublicCatalogMembership/,
+  );
+  assert.match(
+    publication,
+    /scanMediaLibrary/,
+  );
+  assert.match(
+    publication,
+    /published-only-release-primary-artist-id-unresolved/,
+  );
+  assert.match(
+    publication,
+    /release\.primary_artist\.id/,
   );
   assert.match(
     server,

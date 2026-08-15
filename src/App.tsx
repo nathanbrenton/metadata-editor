@@ -36,7 +36,6 @@ import {
   WAVEFORM_COLOR_OPTIONS,
   type WaveformColorMode,
 } from "./media-waveform.js";
-import { WaveformColorMenuCard } from "./WaveformColorMenuCard.js";
 import { buildLibraryWaveformUrl } from "./library-waveform.js";
 
 import type {
@@ -355,6 +354,16 @@ const LazySampleClearanceRecordEditor = lazy(async () => {
 
   return {
     default: module.SampleClearanceRecordEditor,
+  };
+});
+
+const LazyWaveformColorMenuCard = lazy(async () => {
+  const module = await import(
+    "./WaveformColorMenuCard.js"
+  );
+
+  return {
+    default: module.WaveformColorMenuCard,
   };
 });
 
@@ -987,6 +996,7 @@ type ArtistPublicationPlan = {
   }>;
   summary: {
     artistCount: number;
+    includedReleaseCount: number;
     photoCount: number;
     primaryPhotoCount: number;
     blockedCount: number;
@@ -2546,11 +2556,21 @@ export function App() {
                 </p>
               </section>
 
-              <WaveformColorMenuCard
-                playback={libraryPlayback}
-                colorMode={waveformColorMode}
-                onColorModeChange={chooseWaveformColorMode}
-              />
+              <Suspense
+                fallback={
+                  <section className="menu-card">
+                    <p className="menu-meta">
+                      Loading waveform controls…
+                    </p>
+                  </section>
+                }
+              >
+                <LazyWaveformColorMenuCard
+                  playback={libraryPlayback}
+                  colorMode={waveformColorMode}
+                  onColorModeChange={chooseWaveformColorMode}
+                />
+              </Suspense>
 
               <section className="menu-card">
                 <h2>Admin</h2>
@@ -5959,7 +5979,7 @@ function publishNextStepLabel(
 
   return publicReleaseAlreadyExists(plan)
     ? "Update Web Package"
-    : "Add to Web Package";
+    : "Make Public";
 }
 
 function latestPublishOperationForRelease(
@@ -6031,6 +6051,11 @@ function unresolvedPublishOperationForRelease(
     : null;
 }
 
+type PublishPlanReviewIntent =
+  | "package"
+  | "make-public"
+  | "make-private";
+
 function PublishWorkspace({
   mode,
   releases,
@@ -6060,6 +6085,8 @@ function PublishWorkspace({
 }) {
   const [selectedPlan, setSelectedPlan] =
     useState<PublishPlan | null>(null);
+  const [selectedPlanIntent, setSelectedPlanIntent] =
+    useState<PublishPlanReviewIntent>("package");
   const [planLoadingReleaseId, setPlanLoadingReleaseId] =
     useState<string | null>(null);
   const [planError, setPlanError] =
@@ -6113,7 +6140,7 @@ function PublishWorkspace({
   const [sortMode, setSortMode] =
     useState<LibraryReleaseSortMode>("date-desc");
   const [webPackageFilter, setWebPackageFilter] =
-    useState<"included" | "not-included" | "all">("included");
+    useState<"included" | "not-included" | "all">("all");
   const sortedReleases = useMemo(
     () => sortLibraryReleases(releases, sortMode),
     [releases, sortMode],
@@ -6167,14 +6194,10 @@ function PublishWorkspace({
       return;
     }
 
-    const verb =
-      plan.state === "not-published"
-        ? "Add"
-        : "Update";
     const reviewed = window.confirm(
-      `${verb} the complete Artist Web Package?\n\n` +
-        `${plan.summary.artistCount} Artists · ${plan.summary.photoCount} photos\n\n` +
-        "This rebuilds the entire sanitized Artist snapshot so removed photos cannot leave stale JSON or WebP files. Canonical Library sources are never modified.",
+      "Prepare the Artist snapshot for the current public release set?\n\n" +
+        `${plan.summary.artistCount} required Artists · ${plan.summary.photoCount} photos · ${plan.summary.includedReleaseCount} Included releases\n\n` +
+        "Artist inclusion is derived automatically from Included releases through release.primary_artist.id. This rebuilds only the sanitized Artist snapshot; canonical Library sources are never modified.",
     );
     if (!reviewed) {
       return;
@@ -6216,7 +6239,7 @@ function PublishWorkspace({
 
       await loadPublishFleet();
       onNotify(
-        `Artist Web Package ${payload.mode === "build" ? "added" : "updated"} · ${payload.artistCount} Artists · ${payload.photoCount} photos`,
+        `Artist snapshot ${payload.mode === "build" ? "prepared" : "updated"} · ${payload.artistCount} Artists · ${payload.photoCount} photos`,
         "success",
       );
     } catch (artistPublishError) {
@@ -6556,6 +6579,7 @@ function PublishWorkspace({
   useEffect(() => {
     if (mode === "production") {
       setSelectedPlan(null);
+      setSelectedPlanIntent("package");
       setPlanError(null);
     }
   }, [mode]);
@@ -6593,6 +6617,15 @@ function PublishWorkspace({
       setPlanLoadingReleaseId(null);
     }
   }, []);
+
+  const openPublishPlan = useCallback((
+    releaseId: string,
+    intent: PublishPlanReviewIntent,
+  ) => {
+    setSelectedPlanIntent(intent);
+    setSelectedPlan(null);
+    void loadPublishPlan(releaseId);
+  }, [loadPublishPlan]);
 
   const recoverOperation = useCallback(async (
     operation: PublishOperationSummary,
@@ -6990,8 +7023,13 @@ function PublishWorkspace({
       await loadPublishPlan(plan.releaseId);
       await loadPublishOperations();
       await Promise.resolve(onRefresh());
+      if (selectedPlanIntent === "make-public") {
+        setSelectedPlanIntent("package");
+      }
       onNotify(
-        `Web Package ${payload.mode === "update" ? "updated" : "added"} successfully.`,
+        payload.mode === "update"
+          ? "Web Package updated successfully."
+          : "Release is now Public in the Web Package.",
         "success",
       );
     } catch (publishError) {
@@ -7008,11 +7046,13 @@ function PublishWorkspace({
     loadPublishPlan,
     onNotify,
     onRefresh,
+    selectedPlanIntent,
   ]);
 
   const unpublishRelease = useCallback(async (
     releaseId: string,
     displayTitle?: string,
+    requireBrowserConfirmation = true,
   ) => {
     setUnpublishLoadingReleaseId(releaseId);
     setPlanError(null);
@@ -7050,14 +7090,16 @@ function PublishWorkspace({
         displayTitle ??
         planPayload.catalogEntry?.title ??
         releaseId;
-      const reviewed = window.confirm(
-        `Remove “${label}” from the Web Package?\n\n` +
-        `${planPayload.publicFiles.fileCount} public files · ${formatByteSize(planPayload.publicFiles.totalBytes)}\n` +
-        `Public path: ${planPayload.destinationReleaseRelativePath}\n\n` +
-        "This removes only the sanitized Web Package release and catalog membership. " +
-        "The canonical Library release and masters are not deleted.\n\n" +
-        "Afterward, refresh the package index and review the resulting Live removal.",
-      );
+      const reviewed =
+        !requireBrowserConfirmation ||
+        window.confirm(
+          `Make “${label}” Private / Local?\n\n` +
+          `${planPayload.publicFiles.fileCount} public files · ${formatByteSize(planPayload.publicFiles.totalBytes)}\n` +
+          `Public path: ${planPayload.destinationReleaseRelativePath}\n\n` +
+          "Only the sanitized Web Package copy and public catalog membership are removed. " +
+          "The canonical Library release and masters are not deleted.\n\n" +
+          "A later Live deployment will carry this removal to the website.",
+        );
 
       if (!reviewed) {
         return;
@@ -7490,11 +7532,11 @@ function PublishWorkspace({
               ) : (
                 <>
                   <div>
-                    <span>Included</span>
+                    <span>Public releases</span>
                     <strong>{publishFleet.summary.publicCatalogCount}</strong>
                   </div>
                   <div>
-                    <span>Not included</span>
+                    <span>Private releases</span>
                     <strong>{publishFleet.summary.notPublishedCount}</strong>
                   </div>
                   <div>
@@ -7514,18 +7556,21 @@ function PublishWorkspace({
               aria-label="Artist Web Package"
             >
               <div className="publish-artist-web-package-copy">
-                <span className="publish-deployment-kicker">Artists</span>
+                <span className="publish-deployment-kicker">
+                  Artists · selection follows releases
+                </span>
                 <strong>
-                  {publishFleet.artists.summary.artistCount} Artists · {publishFleet.artists.summary.photoCount} photos
+                  {publishFleet.artists.summary.artistCount} required Artists · {publishFleet.artists.summary.photoCount} photos
                 </strong>
                 <small>
+                  {publishFleet.artists.summary.includedReleaseCount} Public release{publishFleet.artists.summary.includedReleaseCount === 1 ? "" : "s"} determine Artist inclusion automatically through release.primary_artist.id.{" "}
                   {publishFleet.artists.state === "up-to-date"
-                    ? "Sanitized Artist JSON and WebP photos match the canonical Library."
+                    ? "The sanitized Artist snapshot is current."
                     : publishFleet.artists.state === "not-published"
-                      ? "Artist identities and photos have not been added to the Web Package yet."
+                      ? "The required Artist snapshot has not been prepared yet."
                       : publishFleet.artists.state === "blocked"
-                        ? publishFleet.artists.issues.find((issue) => issue.severity === "blocked")?.message ?? "Artist publication is blocked."
-                        : "Canonical Artist changes are ready to replace the complete Artist Web Package snapshot."}
+                        ? publishFleet.artists.issues.find((issue) => issue.severity === "blocked")?.message ?? "Artist preparation is blocked."
+                        : "Required Artist identities or photos have updates ready."}
                 </small>
               </div>
               <div className="publish-artist-web-package-actions">
@@ -7539,12 +7584,12 @@ function PublishWorkspace({
                   }`}
                 >
                   {publishFleet.artists.state === "up-to-date"
-                    ? "Included · current"
+                    ? "Current"
                     : publishFleet.artists.state === "not-published"
-                      ? "Not included"
+                      ? "Preparation needed"
                       : publishFleet.artists.state === "blocked"
                         ? "Blocked"
-                        : "Update available"}
+                        : "Update ready"}
                 </span>
                 {mode === "public-package" && (
                   <button
@@ -7558,15 +7603,15 @@ function PublishWorkspace({
                       batchPrepareLoading
                     }
                     onClick={() => void publishArtistSnapshot()}
-                    title="Rebuild the complete sanitized Artist snapshot. Removed canonical photos disappear from public JSON and WebP output on this update."
+                    title="Prepare the complete sanitized Artist snapshot required by the current Included release set. Artist public membership is not selected independently here."
                   >
                     {artistPublicationLoading
-                      ? "Updating Artists…"
+                      ? "Preparing Artists…"
                       : publishFleet.artists.state === "not-published"
-                        ? "Add Artists to Web Package"
+                        ? "Prepare Artist Snapshot"
                         : publishFleet.artists.state === "up-to-date"
-                          ? "Artists up to date"
-                          : "Update Artist Web Package"}
+                          ? "Artist snapshot current"
+                          : "Prepare Artist Updates"}
                   </button>
                 )}
               </div>
@@ -7574,7 +7619,7 @@ function PublishWorkspace({
 
             {mode === "public-package" && (
               <p className="publish-public-set-note">
-                <strong>Public set:</strong> only releases marked <strong>Included</strong> are part of the Web Package and can be sent to Live. <strong>Not included</strong> releases stay private in Library.
+                <strong>Visibility:</strong> releases are <strong>Private / Local by default</strong>. The slider is OFF until you consciously review and make a release Public. Public means included in the local Web Package and eligible for a future Live deployment; it does not mean the release has already been deployed. <strong>Media prep</strong> only creates private derivatives and never changes visibility. Artist inclusion follows the Public release set automatically.
               </p>
             )}
 
@@ -7735,8 +7780,8 @@ function PublishWorkspace({
                           }
                         >
                           {unpublishLoadingReleaseId === release.releaseId
-                            ? "Removing…"
-                            : "Review removal"}
+                            ? "Making private…"
+                            : "Make Private"}
                         </button>
                       </div>
                     ))}
@@ -8057,7 +8102,7 @@ function PublishWorkspace({
                   aria-pressed={webPackageFilter === "included"}
                   onClick={() => setWebPackageFilter("included")}
                 >
-                  Included ({publishFleet?.summary.publicCatalogCount ?? 0})
+                  Public ({publishFleet?.summary.publicCatalogCount ?? 0})
                 </button>
                 <button
                   type="button"
@@ -8065,7 +8110,7 @@ function PublishWorkspace({
                   aria-pressed={webPackageFilter === "not-included"}
                   onClick={() => setWebPackageFilter("not-included")}
                 >
-                  Not included ({publishFleet?.summary.notPublishedCount ?? 0})
+                  Private ({publishFleet?.summary.notPublishedCount ?? 0})
                 </button>
                 <button
                   type="button"
@@ -8132,7 +8177,7 @@ function PublishWorkspace({
                       className="publish-batch-select-column"
                       title="Select releases that need private derivative preparation"
                     >
-                      Prepare
+                      Media prep
                     </th>
                   )}
                   <th scope="col" className="publish-release-column">Release</th>
@@ -8196,34 +8241,16 @@ function PublishWorkspace({
                             ? "is-public-included"
                             : "is-public-excluded",
                       ].filter(Boolean).join(" ")}
-                      tabIndex={mode === "public-package" && !loadingPlan ? 0 : undefined}
                       aria-busy={mode === "public-package" && loadingPlan || undefined}
                       aria-label={
                         mode === "public-package"
-                          ? `${loadingPlan ? "Loading Ready Check for" : "Open Ready Check for"} ${
-                              release.releaseTitle ?? formatReleaseTitle(release.id)
-                            } · ${webPackageMembership.label}`
+                          ? `${release.releaseTitle ?? formatReleaseTitle(release.id)} · ${
+                              webPackageMembership.label === "Included"
+                                ? "Public"
+                                : "Private / Local"
+                            }`
                           : `${release.releaseTitle ?? formatReleaseTitle(release.id)} · Included in Web Package · ${liveStatus.label}`
                       }
-                      onClick={() => {
-                        if (mode === "public-package" && !loadingPlan) {
-                          void loadPublishPlan(release.id);
-                        }
-                      }}
-                      onKeyDown={(event) => {
-                        if (
-                          mode !== "public-package" ||
-                          loadingPlan ||
-                          event.target !== event.currentTarget
-                        ) {
-                          return;
-                        }
-
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          void loadPublishPlan(release.id);
-                        }
-                      }}
                     >
                       {showBatchPreparationControls && (
                         <td className="publish-batch-select-cell">
@@ -8231,7 +8258,8 @@ function PublishWorkspace({
                             <input
                               type="checkbox"
                               checked={batchSelected}
-                              aria-label={`Select ${release.releaseTitle ?? formatReleaseTitle(release.id)} for preparation`}
+                              aria-label={`Select ${release.releaseTitle ?? formatReleaseTitle(release.id)} for media preparation only`}
+                              title="Media preparation only — this does not change whether the release is Public or Private."
                               onClick={(event) => event.stopPropagation()}
                               onChange={(event) => {
                                 const checked = event.target.checked;
@@ -8293,9 +8321,57 @@ function PublishWorkspace({
                       {mode === "public-package" ? (
                         <>
                           <td className="publish-status-cell publish-membership-cell">
-                            <span className={`badge ${webPackageMembership.tone}`}>
-                              {webPackageMembership.label}
-                            </span>
+                            <button
+                              type="button"
+                              role="switch"
+                              aria-checked={webPackageMembership.label === "Included"}
+                              className={`publish-visibility-switch ${
+                                webPackageMembership.label === "Included"
+                                  ? "is-public"
+                                  : "is-private"
+                              }`}
+                              disabled={loadingPlan}
+                              aria-label={`${
+                                webPackageMembership.label === "Included"
+                                  ? "Public"
+                                  : "Private / Local"
+                              } visibility for ${
+                                release.releaseTitle ?? formatReleaseTitle(release.id)
+                              }. Activate to review the visibility change.`}
+                              title={
+                                webPackageMembership.label === "Included"
+                                  ? "Public now. Review before making this release Private / Local."
+                                  : "Private / Local now. Review before making this release Public."
+                              }
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (!loadingPlan) {
+                                  openPublishPlan(
+                                    release.id,
+                                    webPackageMembership.label === "Included"
+                                      ? "make-private"
+                                      : "make-public",
+                                  );
+                                }
+                              }}
+                            >
+                              <span
+                                className="publish-visibility-switch-track"
+                                aria-hidden="true"
+                              >
+                                <span className="publish-visibility-switch-thumb" />
+                              </span>
+                              <strong>
+                                {webPackageMembership.label === "Included"
+                                  ? "Public"
+                                  : "Private / Local"}
+                              </strong>
+                            </button>
+                            <small>
+                              {webPackageMembership.label === "Included"
+                                ? "Selected for a future Live deployment"
+                                : "Library only · not in the public Web Package"}
+                            </small>
                           </td>
                           <td className="publish-status-cell publish-ready-check-cell">
                             {operationBadge ? (
@@ -8315,7 +8391,16 @@ function PublishWorkspace({
                                 Checking…
                               </small>
                             ) : (
-                              <small>Click row for Ready Check</small>
+                              <button
+                                type="button"
+                                className="publish-ready-check-link"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openPublishPlan(release.id, "package");
+                                }}
+                              >
+                                Review package
+                              </button>
                             )}
                           </td>
                         </>
@@ -8454,7 +8539,13 @@ function PublishWorkspace({
 
       {selectedPlan && mode === "public-package" && (
         <MetadataFieldModal
-          title={`Web Package Ready Check · ${
+          title={`${
+            selectedPlanIntent === "make-public"
+              ? "Review before making public"
+              : selectedPlanIntent === "make-private"
+                ? "Review before making private"
+                : "Web Package Ready Check"
+          } · ${
             releases.find(
               (release) =>
                 release.id === selectedPlan.releaseId,
@@ -8468,6 +8559,7 @@ function PublishWorkspace({
           }
           onClose={() => {
             setSelectedPlan(null);
+            setSelectedPlanIntent("package");
             setPlanError(null);
           }}
         >
@@ -8505,7 +8597,59 @@ function PublishWorkspace({
             })()}
           </header>
 
-          <section className="publish-preflight-primary" aria-label="Web Package next step">
+          {selectedPlanIntent === "make-private" ? (
+            <section
+              className="publish-preflight-primary publish-visibility-review"
+              aria-label="Review before making private"
+            >
+              <div className="publish-preflight-result-copy">
+                <span className="eyebrow">Visibility change</span>
+                <strong>Public → Private / Local</strong>
+                <small>
+                  The canonical Library release, masters, metadata, and private
+                  derivatives stay untouched. Only the sanitized Web Package
+                  copy and public catalog membership are removed.
+                </small>
+              </div>
+              <div className="publish-preflight-next-step">
+                <span className="eyebrow">Next step</span>
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={
+                    prepareLoading ||
+                    publishLoading ||
+                    unpublishLoadingReleaseId !== null ||
+                    Boolean(
+                      unresolvedPublishOperationForRelease(
+                        publishOperations,
+                        selectedPlan.releaseId,
+                      ),
+                    )
+                  }
+                  onClick={() =>
+                    void unpublishRelease(
+                      selectedPlan.releaseId,
+                      releases.find(
+                        (release) =>
+                          release.id === selectedPlan.releaseId,
+                      )?.releaseTitle,
+                      false,
+                    )
+                  }
+                >
+                  {unpublishLoadingReleaseId === selectedPlan.releaseId
+                    ? "Making private…"
+                    : "Make Private"}
+                </button>
+                <small>
+                  This does not deploy anything. A later Live deployment will
+                  carry the resulting public removal to the website.
+                </small>
+              </div>
+            </section>
+          ) : (
+            <section className="publish-preflight-primary" aria-label="Web Package next step">
             <div className="publish-preflight-result-copy">
               <span className="eyebrow">Result</span>
               <strong>{publishPreflightHeadline(selectedPlan)}</strong>
@@ -8652,9 +8796,11 @@ function PublishWorkspace({
                 </>
               )}
             </div>
-          </section>
+            </section>
+          )}
 
-          {selectedPlan.destinationReleaseExists && (
+          {selectedPlan.destinationReleaseExists &&
+            selectedPlanIntent !== "make-private" && (
             <section
               className="publish-public-membership-action"
               aria-label="Web Package inclusion action"
@@ -8663,7 +8809,7 @@ function PublishWorkspace({
                 <span className="eyebrow">Web Package inclusion</span>
                 <strong>Included in Web Package</strong>
                 <small>
-                  This release is part of the exact set eligible for a future Live deployment. Removing it affects only the sanitized Web Package; the canonical Library release, masters, metadata, and private derivatives remain unchanged.
+                  This release is part of the exact set eligible for a future Live deployment. Making it Private / Local affects only the sanitized Web Package; the canonical Library release, masters, metadata, and private derivatives remain unchanged.
                 </small>
               </div>
               <button
@@ -8689,11 +8835,11 @@ function PublishWorkspace({
                     )?.releaseTitle,
                   )
                 }
-                title="Build a read-only removal plan, review its public file count, then remove this release from the Web Package and catalog.json. Library content is never deleted."
+                title="Review the current public package, then make this release Private / Local. Library content is never deleted."
               >
                 {unpublishLoadingReleaseId === selectedPlan.releaseId
-                  ? "Removing…"
-                  : "Review removal"}
+                  ? "Making private…"
+                  : "Make Private"}
               </button>
             </section>
           )}
@@ -10991,7 +11137,7 @@ function LibraryArtistRoster({
                             onClick={() => void removePhoto(asset)}
                           >
                             {artistMutationKey === removeMutationKey
-                              ? "Removing…"
+                              ? "Making private…"
                               : "Remove"}
                           </button>
                         </div>
@@ -22108,11 +22254,21 @@ function ReleaseMetadataDetailView({
               </button>
             </section>
 
-            <WaveformColorMenuCard
-              playback={playback}
-              colorMode={waveformColorMode}
-              onColorModeChange={onWaveformColorModeChange}
-            />
+            <Suspense
+              fallback={
+                <section className="menu-card">
+                  <p className="menu-meta">
+                    Loading waveform controls…
+                  </p>
+                </section>
+              }
+            >
+              <LazyWaveformColorMenuCard
+                playback={playback}
+                colorMode={waveformColorMode}
+                onColorModeChange={onWaveformColorModeChange}
+              />
+            </Suspense>
 
             <section className="menu-card">
               <h2>Admin</h2>

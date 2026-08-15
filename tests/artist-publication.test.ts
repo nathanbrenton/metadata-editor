@@ -16,6 +16,7 @@ import test from "node:test";
 import {
   buildArtistPublicationPlan,
   buildArtistWebpFfmpegArgs,
+  collectIncludedArtistRequirements,
   publishArtistPackage,
   verifyPublishedArtistSnapshot,
 } from "../server/artist-publication.js";
@@ -136,6 +137,59 @@ const fakeProcessRunner = async (
   }
 };
 
+
+test("derives the required Artist set from Included release relationships", () => {
+  const requirements =
+    collectIncludedArtistRequirements([
+      {
+        releaseId: "release-a",
+        primaryArtistId: "artist_alpha",
+      },
+      {
+        releaseId: "release-b",
+        primaryArtistId: "artist_alpha",
+      },
+      {
+        releaseId: "release-c",
+        primaryArtistId: "artist_beta",
+      },
+    ]);
+
+  assert.deepEqual(
+    requirements.artistIds,
+    ["artist_alpha", "artist_beta"],
+  );
+  assert.deepEqual(
+    requirements.releaseIdsByArtist.get("artist_alpha"),
+    ["release-a", "release-b"],
+  );
+  assert.deepEqual(
+    requirements.releaseIdsByArtist.get("artist_beta"),
+    ["release-c"],
+  );
+  assert.equal(
+    requirements.includedReleaseCount,
+    3,
+  );
+  assert.deepEqual(
+    requirements.issues,
+    [],
+  );
+
+  const unresolved =
+    collectIncludedArtistRequirements([
+      { releaseId: "release-without-artist-id" },
+    ]);
+  assert.equal(
+    unresolved.issues[0]?.code,
+    "included-release-primary-artist-id-unresolved",
+  );
+  assert.equal(
+    unresolved.issues[0]?.severity,
+    "blocked",
+  );
+});
+
 test("defines a no-crop no-upscale WebP Artist-photo profile", () => {
   const args =
     buildArtistWebpFfmpegArgs(
@@ -212,6 +266,9 @@ test("publishes and atomically refreshes the complete Artist snapshot without st
       {
         ffmpegCapabilities:
           capabilities,
+        requiredArtistIds: [
+          "artist_nathan_brenton",
+        ],
         generatedAt:
           "2026-08-15T01:00:00.000Z",
       },
@@ -244,6 +301,9 @@ test("publishes and atomically refreshes the complete Artist snapshot without st
           initialPlan.generatedAt,
         ffmpegCapabilities:
           capabilities,
+        requiredArtistIds: [
+          "artist_nathan_brenton",
+        ],
         processRunner:
           fakeProcessRunner,
       },
@@ -304,6 +364,9 @@ test("publishes and atomically refreshes the complete Artist snapshot without st
       {
         ffmpegCapabilities:
           capabilities,
+        requiredArtistIds: [
+          "artist_nathan_brenton",
+        ],
         generatedAt:
           "2026-08-15T01:05:00.000Z",
       },
@@ -328,6 +391,9 @@ test("publishes and atomically refreshes the complete Artist snapshot without st
           updatePlan.generatedAt,
         ffmpegCapabilities:
           capabilities,
+        requiredArtistIds: [
+          "artist_nathan_brenton",
+        ],
         processRunner:
           fakeProcessRunner,
       },

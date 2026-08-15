@@ -16252,3 +16252,107 @@ main:has(.persistent-library-player) {
     justify-content: flex-start;
   }
 }
+
+
+/* Web Package catalog selection: Public/Private is the primary per-release
+   membership control. Media prep is a separate private-derivative concern. */
+.publish-public-membership-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.publish-public-membership-control input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0;
+  cursor: pointer;
+  accent-color: currentColor;
+}
+
+.publish-public-membership-control input[type="checkbox"]:disabled {
+  cursor: progress;
+}
+
+.publish-public-membership-control strong {
+  font-size: 0.9rem;
+}
+
+.publish-membership-cell > small {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+/* Public visibility is a deliberate release-level choice.
+   OFF = Private / Local. ON = Public Web Package membership. */
+.publish-visibility-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.publish-visibility-switch:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.publish-visibility-switch-track {
+  position: relative;
+  display: inline-block;
+  width: 2.7rem;
+  height: 1.4rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  opacity: 0.9;
+}
+
+.publish-visibility-switch-thumb {
+  position: absolute;
+  top: 0.18rem;
+  left: 0.18rem;
+  width: 0.92rem;
+  height: 0.92rem;
+  border-radius: 50%;
+  background: currentColor;
+  transition: transform 120ms ease;
+}
+
+.publish-visibility-switch.is-public .publish-visibility-switch-thumb {
+  transform: translateX(1.28rem);
+}
+
+.publish-visibility-switch.is-private {
+  opacity: 0.78;
+}
+
+.publish-visibility-switch:focus-visible,
+.publish-ready-check-link:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+
+.publish-ready-check-link {
+  display: inline-block;
+  margin-top: 0.25rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.78rem;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.publish-visibility-review {
+  border-color: rgba(174, 92, 92, 0.7);
+}

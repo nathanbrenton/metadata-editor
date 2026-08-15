@@ -24,7 +24,7 @@ const helpViewSource = await readFile(
 );
 
 test("Publish exposes guarded release-scoped unpublish instead of deployment-level partial selection", () => {
-  assert.match(appSource, /Review removal/);
+  assert.match(appSource, /Make Private/);
   assert.match(appSource, /UNPUBLISH_PUBLIC_RELEASE/);
   assert.match(appSource, /canonical Library release, masters, metadata, and private derivatives remain unchanged/i);
   assert.match(serverSource, /\/api\/publish\/unpublish-plan/);

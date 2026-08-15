@@ -183,60 +183,113 @@ const runCommand: CommandRunner =
     };
   };
 
+export function buildFfmpegExecutableCandidates(
+  platform: string = process.platform,
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const override =
+    env.METADATA_EDITOR_FFMPEG?.trim();
+
+  // An explicit override is authoritative. A bad override should surface as
+  // configuration error instead of silently selecting some other FFmpeg.
+  if (override) {
+    return [override];
+  }
+
+  const candidates: string[] = [];
+
+  if (platform === "darwin") {
+    const homebrewPrefix =
+      env.HOMEBREW_PREFIX?.trim();
+
+    if (homebrewPrefix) {
+      candidates.push(
+        `${homebrewPrefix}/opt/ffmpeg-full/bin/ffmpeg`,
+      );
+    }
+
+    // Default Homebrew prefixes. Missing executables are harmless because
+    // capability detection falls through to the next candidate.
+    candidates.push(
+      "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg",
+      "/usr/local/opt/ffmpeg-full/bin/ffmpeg",
+    );
+  }
+
+  candidates.push("ffmpeg");
+
+  return [...new Set(candidates)];
+}
+
 export async function detectFfmpegCapabilities(
   runner: CommandRunner =
     runCommand,
 ): Promise<FfmpegCapabilities> {
-  try {
-    const versionResult =
-      await runner("ffmpeg", [
-        "-version",
-      ]);
-    const encoderResult =
-      await runner("ffmpeg", [
-        "-hide_banner",
-        "-encoders",
-      ]);
+  /*
+   * Keep custom/injected runners deterministic for existing tests and callers.
+   * Real application detection uses the platform-aware resolver.
+   */
+  const candidates =
+    runner === runCommand
+      ? buildFfmpegExecutableCandidates()
+      : ["ffmpeg"];
+  let lastError: unknown;
 
-    const encoderOutput = [
-      encoderResult.stdout,
-      encoderResult.stderr,
-    ].join("\n");
-    const encoders =
-      parseFfmpegEncoders(
-        encoderOutput,
-      );
+  for (const executable of candidates) {
+    try {
+      const versionResult =
+        await runner(executable, [
+          "-version",
+        ]);
+      const encoderResult =
+        await runner(executable, [
+          "-hide_banner",
+          "-encoders",
+        ]);
 
-    return {
-      available: true,
-      version:
-        parseFfmpegVersion(
-          versionResult.stdout,
-        ) ?? "unknown",
-      executable: "ffmpeg",
-      encoders,
-      containers:
-        classifyContainerCapabilities(
-          encoders,
-        ),
-      checkedAt:
-        new Date().toISOString(),
-    };
-  } catch (error) {
-    return {
-      available: false,
-      executable: "ffmpeg",
-      encoders: [],
-      containers:
-        classifyContainerCapabilities(
-          [],
-        ),
-      checkedAt:
-        new Date().toISOString(),
-      error:
-        error instanceof Error
-          ? error.message
-          : "Unable to run ffmpeg.",
-    };
+      const encoderOutput = [
+        encoderResult.stdout,
+        encoderResult.stderr,
+      ].join("\n");
+      const encoders =
+        parseFfmpegEncoders(
+          encoderOutput,
+        );
+
+      return {
+        available: true,
+        version:
+          parseFfmpegVersion(
+            versionResult.stdout,
+          ) ?? "unknown",
+        executable,
+        encoders,
+        containers:
+          classifyContainerCapabilities(
+            encoders,
+          ),
+        checkedAt:
+          new Date().toISOString(),
+      };
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  return {
+    available: false,
+    executable:
+      candidates[0] ?? "ffmpeg",
+    encoders: [],
+    containers:
+      classifyContainerCapabilities(
+        [],
+      ),
+    checkedAt:
+      new Date().toISOString(),
+    error:
+      lastError instanceof Error
+        ? lastError.message
+        : "Unable to run ffmpeg.",
+  };
 }

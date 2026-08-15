@@ -24,6 +24,12 @@ import {
   scanArtistLibrary,
 } from "./artist-library.js";
 import {
+  listPublicCatalogMembership,
+} from "./publication-membership.js";
+import {
+  scanMediaLibrary,
+} from "./scanner.js";
+import {
   detectFfmpegCapabilities,
 } from "./ffmpeg-capabilities.js";
 import {
@@ -72,6 +78,7 @@ export type ArtistPublicationIssue = {
   severity: "warning" | "blocked";
   artistId?: string;
   assetId?: string;
+  releaseId?: string;
   message: string;
 };
 
@@ -91,6 +98,7 @@ export type ArtistPublicationArtistPlan = {
   displayName: string;
   sortName?: string;
   primaryAssetId?: string;
+  requiredByReleaseIds: string[];
   documentRelativePath: string;
   assets: ArtistPublicationAssetPlan[];
 };
@@ -119,6 +127,7 @@ export type ArtistPublicationPlan = {
   issues: ArtistPublicationIssue[];
   summary: {
     artistCount: number;
+    includedReleaseCount: number;
     photoCount: number;
     primaryPhotoCount: number;
     blockedCount: number;
@@ -482,6 +491,192 @@ function artistAssetDestination(
   );
 }
 
+type IncludedArtistRequirementInput = {
+  releaseId: string;
+  primaryArtistId?: string;
+};
+
+type ArtistPublicationRequirements = {
+  artistIds: string[];
+  releaseIdsByArtist: Map<string, string[]>;
+  includedReleaseCount: number;
+  issues: ArtistPublicationIssue[];
+};
+
+export function collectIncludedArtistRequirements(
+  inputs: readonly IncludedArtistRequirementInput[],
+): ArtistPublicationRequirements {
+  const releaseIdsByArtist = new Map<string, string[]>();
+  const issues: ArtistPublicationIssue[] = [];
+
+  for (const input of inputs) {
+    const artistId = input.primaryArtistId?.trim();
+
+    if (!artistId) {
+      issues.push({
+        code: "included-release-primary-artist-id-unresolved",
+        severity: "blocked",
+        releaseId: input.releaseId,
+        message:
+          `Included release ${input.releaseId} does not resolve to a stable release.primary_artist.id. ` +
+          "Keep the release private or repair its canonical Artist relationship before preparing the Artist snapshot.",
+      });
+      continue;
+    }
+
+    const releaseIds = releaseIdsByArtist.get(artistId) ?? [];
+    releaseIds.push(input.releaseId);
+    releaseIdsByArtist.set(artistId, releaseIds);
+  }
+
+  for (const releaseIds of releaseIdsByArtist.values()) {
+    releaseIds.sort((left, right) =>
+      left.localeCompare(right, undefined, {
+        numeric: true,
+      }),
+    );
+  }
+
+  const artistIds = [...releaseIdsByArtist.keys()].sort(
+    (left, right) => left.localeCompare(right),
+  );
+
+  return {
+    artistIds,
+    releaseIdsByArtist,
+    includedReleaseCount: inputs.length,
+    issues,
+  };
+}
+
+async function readPublishedReleasePrimaryArtistId(
+  publishRoot: string,
+  href: string,
+): Promise<string | undefined> {
+  try {
+    const root = path.resolve(publishRoot);
+    const releasePath = rootPath(root, href);
+    const stats = await lstat(releasePath);
+
+    if (stats.isSymbolicLink() || !stats.isFile()) {
+      return undefined;
+    }
+
+    const document = await readJson(releasePath);
+    if (!isRecord(document)) {
+      return undefined;
+    }
+
+    const metadata = isRecord(document.metadata)
+      ? document.metadata
+      : undefined;
+    const primaryArtist =
+      metadata && isRecord(metadata.primary_artist)
+        ? metadata.primary_artist
+        : undefined;
+    const artistId = primaryArtist?.id;
+
+    return typeof artistId === "string" && artistId.trim()
+      ? artistId.trim()
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveArtistPublicationRequirements(
+  mediaRoot: string,
+  publishRoot: string,
+  requiredArtistIdsOverride?: readonly string[],
+): Promise<ArtistPublicationRequirements> {
+  // This narrow override is used by isolated publisher unit tests. Production
+  // callers do not supply it; production always derives selection from the
+  // release Web Package catalog below.
+  if (requiredArtistIdsOverride) {
+    const artistIds = [...new Set(
+      requiredArtistIdsOverride
+        .map((artistId) => artistId.trim())
+        .filter(Boolean),
+    )].sort((left, right) => left.localeCompare(right));
+
+    return {
+      artistIds,
+      releaseIdsByArtist: new Map(
+        artistIds.map((artistId) => [artistId, []]),
+      ),
+      includedReleaseCount: 0,
+      issues: [],
+    };
+  }
+
+  const [memberships, library] = await Promise.all([
+    listPublicCatalogMembership(publishRoot),
+    scanMediaLibrary(mediaRoot),
+  ]);
+  const releasesById = new Map(
+    library.releases.map((release) => [
+      release.id,
+      release,
+    ]),
+  );
+  const inputs: IncludedArtistRequirementInput[] = [];
+  const resolutionIssues: ArtistPublicationIssue[] = [];
+
+  for (const membership of memberships) {
+    const release = releasesById.get(membership.releaseId);
+
+    if (release) {
+      inputs.push({
+        releaseId: membership.releaseId,
+        ...(release.primaryArtistId
+          ? { primaryArtistId: release.primaryArtistId }
+          : {}),
+      });
+      continue;
+    }
+
+    // Published-only releases intentionally remain authoritative members of
+    // the public set. Reuse only an explicit stable Artist ID already present
+    // in their sanitized release.json. Never infer identity from a display
+    // name.
+    const publishedArtistId =
+      await readPublishedReleasePrimaryArtistId(
+        publishRoot,
+        membership.href,
+      );
+
+    if (!publishedArtistId) {
+      resolutionIssues.push({
+        code:
+          "published-only-release-primary-artist-id-unresolved",
+        severity: "blocked",
+        releaseId: membership.releaseId,
+        message:
+          `Included Published-only release ${membership.releaseId} has no explicit stable release.primary_artist.id in its sanitized release metadata. ` +
+          "Restore/update its canonical Library release or review its removal from the Web Package before preparing the Artist snapshot.",
+      });
+      continue;
+    }
+
+    inputs.push({
+      releaseId: membership.releaseId,
+      primaryArtistId: publishedArtistId,
+    });
+  }
+
+  const collected =
+    collectIncludedArtistRequirements(inputs);
+
+  return {
+    ...collected,
+    includedReleaseCount: memberships.length,
+    issues: [
+      ...resolutionIssues,
+      ...collected.issues,
+    ],
+  };
+}
+
 async function existingManifestFingerprint(
   publishRoot: string,
 ): Promise<string | undefined> {
@@ -531,6 +726,7 @@ export async function buildArtistPublicationPlan(
   options: {
     ffmpegCapabilities?: FfmpegCapabilities;
     generatedAt?: string;
+    requiredArtistIds?: readonly string[];
   } = {},
 ): Promise<ArtistPublicationPlan> {
   const generatedAt =
@@ -538,18 +734,31 @@ export async function buildArtistPublicationPlan(
     new Date().toISOString();
   const profile = buildArtistPublicationProfile();
   const profileSha256 = hashObject(profile);
-  const library = await scanArtistLibrary(
-    mediaRoot,
+  const [library, requirements] = await Promise.all([
+    scanArtistLibrary(mediaRoot),
+    resolveArtistPublicationRequirements(
+      mediaRoot,
+      publishRoot,
+      options.requiredArtistIds,
+    ),
+  ]);
+  const requiredArtistIds = new Set(
+    requirements.artistIds,
   );
-  const issues: ArtistPublicationIssue[] =
-    library.warnings.map((message) => ({
+  const issues: ArtistPublicationIssue[] = [
+    ...requirements.issues,
+    ...library.warnings.map((message) => ({
       code: "artist-library-warning",
       severity: "blocked" as const,
       message,
-    }));
+    })),
+  ];
   const artists: ArtistPublicationArtistPlan[] = [];
 
   for (const artist of library.artists) {
+    if (!requiredArtistIds.has(artist.id)) {
+      continue;
+    }
     if (!validSlug(artist.slug)) {
       issues.push({
         code: "artist-slug-invalid",
@@ -671,9 +880,28 @@ export async function buildArtistPublicationPlan(
       ...(artist.primaryAssetId
         ? { primaryAssetId: artist.primaryAssetId }
         : {}),
+      requiredByReleaseIds:
+        requirements.releaseIdsByArtist.get(artist.id) ?? [],
       documentRelativePath:
         artistDocumentRelativePath(artist),
       assets: plannedAssets,
+    });
+  }
+
+  const canonicalArtistIds = new Set(
+    library.artists.map((artist) => artist.id),
+  );
+  for (const artistId of requirements.artistIds) {
+    if (canonicalArtistIds.has(artistId)) {
+      continue;
+    }
+
+    issues.push({
+      code: "included-release-artist-missing",
+      severity: "blocked",
+      artistId,
+      message:
+        `The Included release set requires Artist ${artistId}, but no matching canonical Artist entity exists in Library.`,
     });
   }
 
@@ -821,6 +1049,8 @@ export async function buildArtistPublicationPlan(
     issues,
     summary: {
       artistCount: artists.length,
+      includedReleaseCount:
+        requirements.includedReleaseCount,
       photoCount,
       primaryPhotoCount: artists.filter(
         (artist) => Boolean(artist.primaryAssetId),
@@ -1289,6 +1519,7 @@ export async function publishArtistPackage(
     expectedPlanFingerprint: string;
     planGeneratedAt: string;
     ffmpegCapabilities?: FfmpegCapabilities;
+    requiredArtistIds?: readonly string[];
     processRunner?: ArtistPublicationProcessRunner;
     now?: () => Date;
   },
@@ -1311,6 +1542,9 @@ export async function publishArtistPackage(
     {
       ffmpegCapabilities: capabilities,
       generatedAt: options.planGeneratedAt,
+      ...(options.requiredArtistIds
+        ? { requiredArtistIds: options.requiredArtistIds }
+        : {}),
     },
   );
 
@@ -1469,7 +1703,12 @@ export async function publishArtistPackage(
     const currentPlan = await buildArtistPublicationPlan(
       canonicalMediaRoot,
       canonicalPublishRoot,
-      { ffmpegCapabilities: capabilities },
+      {
+        ffmpegCapabilities: capabilities,
+        ...(options.requiredArtistIds
+          ? { requiredArtistIds: options.requiredArtistIds }
+          : {}),
+      },
     );
     if (
       currentPlan.sourceContentFingerprint !==

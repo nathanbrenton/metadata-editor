@@ -28,17 +28,17 @@ test("shows persistent up-to-date publish state instead of a repeat write action
 });
 
 test("uses the shared success toast for publish and preparation writes", () => {
+  assert.match(appSource, /"Web Package updated successfully\."/);
   assert.match(
     appSource,
-    /Web Package .* successfully\.`,[\s\S]*?"success"/,
+    /"Release is now Public in the Web Package\."/,
   );
-  assert.match(appSource, /const preparedParts =/);
   assert.match(
     appSource,
-    /`Prepared \$\{preparedParts\.join\(", "\)\}\.`/,
+    /Prepared \$\{payload\.streamCount\} video HLS/,
   );
-  assert.match(appSource, /aria-label="Dismiss notification"/);
-  assert.match(appSource, /}, 4200\);/);
+  assert.match(appSource, /onNotify\(/);
+  assert.match(appSource, /"success"/);
 });
 
 test("documents publish freshness and transient success feedback", () => {

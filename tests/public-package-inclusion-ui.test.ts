@@ -11,25 +11,31 @@ const help = await readFile(
   "utf8",
 );
 
-test("Web Package is the explicit release inclusion set for future Live deployment", () => {
-  assert.match(app, /Choose releases for the Web Package/);
-  assert.match(app, /useState<"included" \| "not-included" \| "all">\("included"\)/);
-  assert.match(app, /Included \(\{publishFleet\?\.summary\.publicCatalogCount \?\? 0\}\)/);
-  assert.match(app, /Not included \(\{publishFleet\?\.summary\.notPublishedCount \?\? 0\}\)/);
-  assert.match(app, /All Library \(\{releases\.length\}\)/);
-  assert.match(app, /Included in Web Package/);
-  assert.match(app, /Only releases marked Included are part of the exact Web Package/);
-  assert.match(app, /<span>Included<\/span>[\s\S]*publicCatalogCount/);
-  assert.match(app, /<span>Not included<\/span>[\s\S]*notPublishedCount/);
-  assert.match(app, /<th[^>]*>Public set<\/th>/);
-  assert.match(app, /<th[^>]*>Package status<\/th>/);
-  assert.match(app, /return \{ label: "Included", tone: "success" \};/);
-  assert.match(app, /return \{ label: "Not included", tone: "preview" \};/);
-  assert.match(app, /Add to Web Package/);
-  assert.match(app, /Included in Web Package/);
-  assert.match(app, /Review removal/);
-  assert.match(help, /defaults to an Included-only view/);
-  assert.match(help, /Public set is the authoritative publication-membership view/);
+test("Web Package is the explicit release visibility set for future Live deployment", () => {
+  assert.match(
+    app,
+    /useState<"included" \| "not-included" \| "all">\("all"\)/,
+  );
+  assert.match(app, /role="switch"/);
+  assert.match(app, /publish-visibility-switch/);
+  assert.match(
+    app,
+    /aria-checked=\{webPackageMembership\.label === "Included"\}/,
+  );
+  assert.match(app, /Private \/ Local by default/);
+  assert.match(
+    app,
+    /Media prep<\/strong> only creates private derivatives and never changes visibility/,
+  );
+  assert.match(
+    app,
+    /Artist inclusion follows the Public release set automatically/,
+  );
+  assert.match(app, /Public means included in the local Web Package/);
+  assert.match(
+    app,
+    /it does not mean the release has already been deployed/,
+  );
 });
 
 test("Live mirrors the Included Web Package set and emphasizes only Live-state differences", () => {

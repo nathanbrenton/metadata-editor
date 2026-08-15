@@ -125,7 +125,7 @@ test("application menu owns the waveform palette selector used by the footer", (
   assert.match(waveformMenuSource, /<h2>Waveform Color<\/h2>/);
   assert.match(waveformMenuSource, /WAVEFORM_COLOR_OPTIONS/);
   assert.match(waveformMenuSource, /value=\{colorMode\}/);
-  assert.match(appSource, /<WaveformColorMenuCard/);
+  assert.match(appSource, /<LazyWaveformColorMenuCard/);
   assert.match(appSource, /colorMode=\{waveformColorMode\}/);
   assert.match(helpSource, /3Band, RGB, Blue, and Monochrome/);
 });

@@ -15,75 +15,39 @@ const helpSource = readFileSync(
   "utf8",
 );
 
-test("opens Web Package Ready Check from the whole release row without an action column", () => {
-  const workspaceStart = appSource.indexOf(
-    "function PublishWorkspace",
-  );
-  const workspaceEnd = appSource.indexOf(
-    "function IngestView",
-    workspaceStart,
-  );
-
-  assert.notEqual(workspaceStart, -1);
-  assert.notEqual(workspaceEnd, -1);
-
-  const publishWorkspaceSource = appSource.slice(
-    workspaceStart,
-    workspaceEnd,
-  );
-
-  const overviewStart = publishWorkspaceSource.indexOf(
+test("opens Web Package review from explicit visibility and package controls instead of the whole row", () => {
+  const tableStart = appSource.indexOf(
     '<table className="workflow-workspace-table publish-readiness-table">',
   );
-  const overviewEnd = publishWorkspaceSource.indexOf(
-    '{selectedPlan && mode === "public-package" && (',
-    overviewStart,
-  );
+  const tableEnd = appSource.indexOf("<details", tableStart);
 
-  assert.notEqual(overviewStart, -1);
-  assert.notEqual(overviewEnd, -1);
+  assert.notEqual(tableStart, -1);
+  assert.notEqual(tableEnd, -1);
 
-  const readinessOverviewSource =
-    publishWorkspaceSource.slice(
-      overviewStart,
-      overviewEnd,
-    );
+  const table = appSource.slice(tableStart, tableEnd);
 
+  assert.match(table, /role="switch"/);
+  assert.match(table, /Review package/);
   assert.match(
-    readinessOverviewSource,
-    /"publish-release-row"/,
+    table,
+    /openPublishPlan\(release\.id, "package"\)/,
   );
-  assert.match(
-    readinessOverviewSource,
-    /loadPublishPlan\(release\.id\)/,
-  );
-  assert.match(
-    readinessOverviewSource,
-    /event\.key === "Enter"/,
-  );
-  assert.match(
-    readinessOverviewSource,
-    /event\.key === " "/,
-  );
+  assert.match(table, /"make-private"/);
+  assert.match(table, /"make-public"/);
   assert.doesNotMatch(
-    readinessOverviewSource,
-    /<th[^>]*>Next step<\/th>/,
-  );
-  assert.doesNotMatch(
-    readinessOverviewSource,
-    /Continue to Ready Check/,
+    table,
+    /onClick=\{\(\) => \{\s*if \(mode === "public-package"[\s\S]*?loadPublishPlan\(release\.id\)/,
   );
 });
 
-test("renders Web Package Ready Check in the reusable wide modal", () => {
-  assert.match(appSource, /title=\{`Web Package Ready Check ·/);
-  assert.match(appSource, /variant="wide"/);
-  assert.match(
-    appSource,
-    /closeDisabled=\{\s*prepareLoading \|\|\s*publishLoading \|\|\s*unpublishLoadingReleaseId !== null\s*\}/,
-  );
-  assert.match(appSource, /publish-plan-panel publish-plan-modal/);
-  assert.match(stylesSource, /metadata-field-modal--wide/);
+test("renders directional Web Package review in the reusable wide modal", () => {
+  assert.match(appSource, /<MetadataFieldModal/);
+  assert.match(appSource, /selectedPlanIntent === "make-public"/);
+  assert.match(appSource, /"Review before making public"/);
+  assert.match(appSource, /selectedPlanIntent === "make-private"/);
+  assert.match(appSource, /"Review before making private"/);
+  assert.match(appSource, /"Web Package Ready Check"/);
+  assert.match(appSource, /setSelectedPlanIntent\("package"\)/);
 });
 
 test("modal supports Escape close, upper-right close, backdrop close, and focus return", () => {
@@ -94,7 +58,7 @@ test("modal supports Escape close, upper-right close, backdrop close, and focus 
 });
 
 test("Workflow and Help documents the modal Publish interaction", () => {
-  assert.match(helpSource, /whole row opens Ready Check/);
+  assert.match(helpSource, /visibility slider or Package Status review opens Ready Check/);
   assert.match(helpSource, /wide modal/);
   assert.match(helpSource, /closes with Escape/);
   assert.match(helpSource, /returns keyboard focus/);

@@ -25,7 +25,7 @@ test("enables one reviewed Web Package prepare or update action", () => {
   );
   assert.match(
     appSource,
-    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update Web Package[\s\S]*?Add to Web Package/,
+    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update Web Package[\s\S]*?Make Public/,
   );
   assert.match(
     appSource,

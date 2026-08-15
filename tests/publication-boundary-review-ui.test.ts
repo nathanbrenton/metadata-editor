@@ -36,19 +36,19 @@ test("publication review rows expose release dates and Web Package terminology",
   assert.match(app, /<dt>Web Package<\/dt>/);
   assert.doesNotMatch(app, />Preflight result</);
   assert.doesNotMatch(app, /\? "Unpublish"/);
-  assert.match(help, /Add to Web Package after Ready Check passes/);
-  assert.match(help, /choose Review removal/);
+  assert.match(help, /Make Public after Ready Check passes/);
+  assert.match(help, /choose Make Private/);
 });
 
 test("publication review separates preparation selection from membership and keeps Live release-oriented", () => {
   assert.match(app, /const showBatchPreparationControls/);
   assert.match(app, /batchPreparationEligibleReleaseIds\.has\(release\.id\)/);
-  assert.match(app, />\s*Prepare\s*<\/th>/);
+  assert.match(app, />\s*Media prep\s*<\/th>/);
   assert.match(app, /aria-label="No preparation needed"/);
   assert.match(app, /return \{ label: "Current", tone: "success" \}/);
   assert.match(app, /deploymentSyncPlan\?\.status === "changes"[\s\S]*?"Changes ready"/);
   assert.match(app, /mode === "production"[\s\S]*?"Refresh Web Package"/);
   assert.doesNotMatch(app, /summary\.changeCount\} file changes/);
-  assert.match(help, /A labeled Prepare column appears only when/);
+  assert.match(help, /A labeled Media prep column appears only when/);
   assert.match(help, /Refresh Web Package in Live/);
 });

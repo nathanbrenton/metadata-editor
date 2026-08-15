@@ -11,24 +11,22 @@ const serverSource = await readFile(
   "utf8",
 );
 
-test("Web Package exposes guided Ready Check, preparation, and guarded package writes", () => {
-  assert.match(appSource, /Ready Check is read-only/);
-  assert.match(appSource, /publish-release-row/);
-  assert.match(appSource, /Web Package Ready Check ·/);
-  assert.match(appSource, /Technical package plan/);
-  assert.match(appSource, /Add to Web Package/);
-  assert.match(appSource, /Update Web Package/);
-  assert.match(serverSource, /\/api\/publish\/plan/);
-  assert.match(serverSource, /\/api\/publish\/prepare/);
-  assert.match(serverSource, /\/api\/publish\/build/);
-  assert.match(serverSource, /prepareReleaseMedia/);
-  assert.match(serverSource, /publishReleasePackage/);
+test("Web Package exposes directional review, preparation, and guarded package writes", () => {
+  assert.match(appSource, /selectedPlanIntent === "make-public"/);
+  assert.match(appSource, /"Review before making public"/);
+  assert.match(appSource, /"Review before making private"/);
+  assert.match(appSource, /"Web Package Ready Check"/);
+  assert.match(appSource, /canPreparePublishPlan\(selectedPlan\)/);
+  assert.match(appSource, /canPrepareVideoPublishPlan\(selectedPlan\)/);
+  assert.match(appSource, /void publishRelease\(selectedPlan\)/);
+  assert.match(appSource, /Make Public/);
+  assert.match(appSource, /Make Private/);
 });
 
 test("uses Publish for first publication and Update for later publication", () => {
   assert.match(
     appSource,
-    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update Web Package[\s\S]*?Add to Web Package/,
+    /return publicReleaseAlreadyExists\(plan\)[\s\S]*?Update Web Package[\s\S]*?Make Public/,
   );
   assert.doesNotMatch(
     appSource,
@@ -36,80 +34,48 @@ test("uses Publish for first publication and Update for later publication", () =
   );
 });
 
-test("Web Package table makes exact public-set inclusion explicit", () => {
-  assert.match(appSource, /<th scope="col">Release<\/th>/);
-  assert.match(appSource, /<th[^>]*>Public set<\/th>/);
-  assert.match(appSource, /<th[^>]*>Package status<\/th>/);
-  assert.match(appSource, /webPackageMembershipStatus/);
-  assert.match(appSource, /label: "Included"/);
-  assert.match(appSource, /label: "Not included"/);
-  assert.match(appSource, /Public set:<\/strong> only releases marked/);
-  assert.doesNotMatch(appSource, /<th scope="col">Current guidance<\/th>/);
-  assert.doesNotMatch(appSource, /<th scope="col">Publication<\/th>/);
-  assert.doesNotMatch(appSource, />Dry-run only<\/span>/);
+test("Web Package table makes explicit Public and Private visibility", () => {
+  assert.match(appSource, /role="switch"/);
+  assert.match(
+    appSource,
+    /aria-checked=\{webPackageMembership\.label === "Included"\}/,
+  );
+  assert.match(appSource, /Private \/ Local/);
+  assert.match(appSource, /Selected for a future Live deployment/);
+  assert.match(
+    appSource,
+    /Library only · not in the public Web Package/,
+  );
+  assert.match(
+    appSource,
+    /Visibility:<\/strong> releases are <strong>Private \/ Local by default<\/strong>/,
+  );
+  assert.match(
+    appSource,
+    /Public means included in the local Web Package and eligible for a future Live deployment/,
+  );
 });
 
-test("Web Package readiness overview uses each release row as the Ready Check action", () => {
-  const workspaceStart = appSource.indexOf(
-    "function PublishWorkspace",
-  );
-  const workspaceEnd = appSource.indexOf(
-    "function IngestView",
-    workspaceStart,
-  );
-
-  assert.notEqual(workspaceStart, -1);
-  assert.notEqual(workspaceEnd, -1);
-
-  const publishWorkspaceSource = appSource.slice(
-    workspaceStart,
-    workspaceEnd,
-  );
-
-  const overviewStart = publishWorkspaceSource.indexOf(
+test("Web Package readiness overview uses explicit package review instead of row clicks", () => {
+  const tableStart = appSource.indexOf(
     '<table className="workflow-workspace-table publish-readiness-table">',
   );
-  const overviewEnd = publishWorkspaceSource.indexOf(
-    '{selectedPlan && mode === "public-package" && (',
-    overviewStart,
-  );
+  const tableEnd = appSource.indexOf("<details", tableStart);
 
-  assert.notEqual(overviewStart, -1);
-  assert.notEqual(overviewEnd, -1);
+  assert.notEqual(tableStart, -1);
+  assert.notEqual(tableEnd, -1);
 
-  const readinessOverviewSource =
-    publishWorkspaceSource.slice(
-      overviewStart,
-      overviewEnd,
-    );
+  const table = appSource.slice(tableStart, tableEnd);
 
+  assert.match(table, /role="switch"/);
+  assert.match(table, /Review package/);
   assert.match(
-    readinessOverviewSource,
-    /"publish-release-row"/,
-  );
-  assert.match(
-    readinessOverviewSource,
-    /loadPublishPlan\(release\.id\)/,
-  );
-  assert.match(
-    readinessOverviewSource,
-    /event\.key === "Enter"/,
-  );
-  assert.match(
-    readinessOverviewSource,
-    /event\.key === " "/,
+    table,
+    /openPublishPlan\(release\.id, "package"\)/,
   );
   assert.doesNotMatch(
-    readinessOverviewSource,
-    /<th[^>]*>Next step<\/th>/,
-  );
-  assert.doesNotMatch(
-    readinessOverviewSource,
-    /Continue to Ready Check/,
-  );
-  assert.doesNotMatch(
-    readinessOverviewSource,
-    /publish-next-step-action/,
+    table,
+    /onClick=\{\(\) => \{\s*if \(mode === "public-package"[\s\S]*?loadPublishPlan\(release\.id\)/,
   );
 });
 
@@ -143,7 +109,7 @@ test("Web Package Ready Check keeps technical detail collapsed behind one next-s
   assert.match(publishWorkspaceSource, /publishNextStepLabel/);
   assert.match(publishWorkspaceSource, /Resolve blockers/);
   assert.match(publishWorkspaceSource, /Prepare release/);
-  assert.match(publishWorkspaceSource, /Add to Web Package/);
+  assert.match(publishWorkspaceSource, /Make Public/);
   assert.match(publishWorkspaceSource, /Update Web Package/);
   assert.match(publishWorkspaceSource, /HLS/);
   assert.match(publishWorkspaceSource, /selectedPlan\.webStreams/);
