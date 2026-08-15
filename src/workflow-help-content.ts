@@ -203,6 +203,11 @@ export const workflowFaqItems: readonly WorkflowFaqItem[] = [
       "Ingest operational feedback now uses the same health/readiness language as the rest of the workflow: green Ready for verified conditions, amber Review for non-blocking attention, and red Blocked when the next operation cannot safely continue. This is not field provenance. Provenance remains reserved for Stored, Inherited, and Generated metadata values.",
   },
   {
+    question: "How are ©, ℗, UTF-8, ASCII/ANSI, and BOM handled?",
+    answer:
+      "Metadata Editor treats Unicode preservation as an integrity requirement. © is U+00A9 COPYRIGHT SIGN and ℗ is U+2117 SOUND RECORDING COPYRIGHT; ℗ is the stronger encoding canary because it cannot survive an ASCII or legacy Latin-1-style path. Canonical TOML and generated public JSON are written as strict UTF-8 without a BOM. Legacy UTF-8 TOML and FFmetadata input may contain a leading BOM and is tolerated on read; the next canonical metadata save rewrites TOML without that BOM. Do not replace the canonical symbols with (C) or (P): those keyboard aliases are accepted by the guided editor, which normalizes them back to literal © and ℗. Published JSON keeps the literal Unicode characters for Hiplingo, whose HTML declares UTF-8 and whose catalog loader uses the browser's native JSON decoder. Embedded media tags are different from text files: each container may use its own internal tag encoding, so Metadata Editor does not require UTF-8 bytes inside every ID3/MP4/Vorbis/RIFF tag. For file export, the effective composition/text © notice and sound-recording ℗ notice are combined into the target container's copyright tag when either is present. When that export writes any non-ASCII metadata, FFprobe must read the exact Unicode value back from the temporary output before that media file is promoted. This protects ©, ℗, accented names such as Beyoncé and Sigur Rós, and non-Latin text such as 日本語 without confusing container encoding with text-file encoding.",
+  },
+  {
     question: "Where did the global Metadata Reference menu card go?",
     answer:
       "The application and release hamburger menus no longer duplicate Metadata Reference. Use the contextual ? help controls beside the corresponding metadata/tag areas for field guidance and player/tag mapping references.",

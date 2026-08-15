@@ -47,4 +47,8 @@ test("retains detailed feature reference while the rendered guide stays concise"
   assert.match(text, /release artwork never substitutes for an Artist photo/i);
   assert.match(text, /copy high-quality photos from ingest-drop/i);
   assert.match(text, /select one authoritative Primary/i);
+  assert.match(text, /U\+00A9 COPYRIGHT SIGN/i);
+  assert.match(text, /U\+2117 SOUND RECORDING COPYRIGHT/i);
+  assert.match(text, /strict UTF-8 without a BOM/i);
+  assert.match(text, /FFprobe must read the exact Unicode value back/i);
 });

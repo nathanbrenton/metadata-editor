@@ -171,6 +171,10 @@ async function createFixture(): Promise<{
       'release = "2026-08-09"',
       'original_release = ""',
       "",
+      "[release.rights]",
+      'copyright = "Copyright © 2026 Beyoncé. All rights reserved."',
+      'phonographic_copyright = "Sound Recording Copyright ℗ 2026 Sigur Rós 日本語. All rights reserved."',
+      "",
       "[release.numbering]",
       "track_total = 1",
       "disc_total = 1",
@@ -520,6 +524,26 @@ test("builds a sanitized HLS public package without canonical/private files", as
       releaseJson.metadata.title,
       "Writer Test",
     );
+    assert.equal(
+      releaseJson.metadata.rights.copyright,
+      "Copyright © 2026 Beyoncé. All rights reserved.",
+    );
+    assert.equal(
+      releaseJson.metadata.rights.phonographic_copyright,
+      "Sound Recording Copyright ℗ 2026 Sigur Rós 日本語. All rights reserved.",
+    );
+
+    const releaseJsonBytes = await readFile(
+      path.join(publicRelease, "release.json"),
+    );
+    assert.notDeepEqual(
+      [...releaseJsonBytes.subarray(0, 3)],
+      [0xef, 0xbb, 0xbf],
+    );
+    const releaseJsonText =
+      releaseJsonBytes.toString("utf8");
+    assert.match(releaseJsonText, /© 2026 Beyoncé/);
+    assert.match(releaseJsonText, /℗ 2026 Sigur Rós 日本語/);
     assert.equal(
       releaseJson.artwork.front.href,
       "artwork/front/artwork.jpg",

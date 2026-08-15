@@ -285,6 +285,7 @@ export type ExportPlanField = {
   canonicalPath: string;
   label: string;
   targetTags: string[];
+  ffmpegTags?: string[];
   value:
     | string
     | number
@@ -393,6 +394,8 @@ export type ExportExecutionItem = {
   destinationRelativePath?: string;
   encoder?: string;
   sizeBytes?: number;
+  unicodeMetadataVerified?: boolean;
+  unicodeMetadataVerifiedCount?: number;
   sha256?: string;
   createdAt?: string;
   error?: string;

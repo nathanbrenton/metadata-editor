@@ -82,6 +82,11 @@ const quickQuestions = [
       "npm run audit:file-spec reports extension/naming conformance. npm run audit:media-technical uses ffprobe to inventory observed technical characteristics plus per-release probe/consistency health. Both are read-only; technical health does not grade quality or change Publish gating.",
   },
   {
+    question: "How are ©, ℗, UTF-8, and BOM handled?",
+    answer:
+      "Canonical TOML and public JSON are strict UTF-8 without BOM. Legacy BOM-prefixed UTF-8 metadata can still be read and is normalized on save. Keep literal © and ℗ rather than ASCII/ANSI substitutes; the guided editor accepts (C)/(P) as keyboard aliases but stores the real symbols. Hiplingo reads the published JSON through the browser's UTF-8 JSON path. For exported media, the effective © and ℗ notices share the container's copyright tag when either is present; the container may use its own tag encoding, so non-ASCII tag values are verified by exact FFprobe readback before the file is promoted.",
+  },
+  {
     question: "Where did the Publishing Guide button go?",
     answer:
       "Publication guidance now lives here in Workflow & Help. Web Package owns Ready Check and web preparation; Live owns remote comparison and reviewed deployment changes. The Library never deploys directly.",

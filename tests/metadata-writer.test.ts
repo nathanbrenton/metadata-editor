@@ -225,3 +225,50 @@ test(
     );
   },
 );
+
+test(
+  "writes canonical metadata as BOM-free UTF-8 and preserves Unicode rights text",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const relativePath =
+          "releases/test-release/release.toml";
+        const releaseDirectory = path.dirname(
+          path.join(mediaRoot, relativePath),
+        );
+        await mkdir(releaseDirectory, {
+          recursive: true,
+        });
+
+        const content = [
+          "[release]",
+          'id = "test-release"',
+          'title = "Beyoncé 日本語"',
+          "",
+          "[release.rights]",
+          'copyright = "Copyright © 2026 Hiplingo. All rights reserved."',
+          'phonographic_copyright = "Sound Recording Copyright ℗ 2026 Sigur Rós. All rights reserved."',
+          "",
+        ].join("\n");
+
+        await executeMetadataCreationPlan(
+          mediaRoot,
+          createPlan(relativePath, content),
+        );
+
+        const bytes = await readFile(
+          path.join(mediaRoot, relativePath),
+        );
+
+        assert.notDeepEqual(
+          [...bytes.subarray(0, 3)],
+          [0xef, 0xbb, 0xbf],
+        );
+        assert.equal(
+          bytes.toString("utf8"),
+          content,
+        );
+      },
+    );
+  },
+);

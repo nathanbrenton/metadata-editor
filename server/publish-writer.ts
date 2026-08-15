@@ -30,6 +30,9 @@ import {
   assertPathWithinRoot,
 } from "./media-root.js";
 import {
+  encodeUtf8WithoutBom,
+} from "./unicode-integrity.js";
+import {
   advancePublishOperation,
   assertNoUnresolvedPublishOperation,
   publishOperationsRoot,
@@ -562,10 +565,14 @@ async function writeJson(
   await mkdir(path.dirname(filePath), {
     recursive: true,
   });
+  const content =
+    `${JSON.stringify(value, null, 2)}\n`;
   await writeFile(
     filePath,
-    `${JSON.stringify(value, null, 2)}\n`,
-    "utf8",
+    encodeUtf8WithoutBom(
+      content,
+      filePath,
+    ),
   );
 }
 

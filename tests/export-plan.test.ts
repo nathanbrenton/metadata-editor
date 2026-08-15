@@ -269,6 +269,16 @@ test(
       )?.targetTags,
       ["©nam"],
     );
+
+    assert.deepEqual(
+      plan.items[0].fields.find(
+        (field) =>
+          field.canonicalPath ===
+          "track.title",
+      )?.ffmpegTags,
+      ["title"],
+      "FFmpeg CLI uses its canonical muxer key rather than the raw MP4 atom name",
+    );
   },
 );
 
@@ -321,6 +331,98 @@ test(
           },
         ),
       /cannot leave/,
+    );
+  },
+);
+
+test(
+  "marks the separate ℗ notice for combination into the container copyright tag",
+  () => {
+    const rightsRegistry: MetadataFieldDefinition[] = [
+      ...registry,
+      {
+        id: "release.rights.copyright",
+        canonicalName: "release.rights.copyright",
+        label: "Copyright",
+        description: "Copyright notice.",
+        scope: "release",
+        storageFileRole: "release",
+        tomlPath: "release.rights.copyright",
+        valueType: "string",
+        required: false,
+        repeatable: false,
+        inherited: false,
+        aliases: {
+          id3: ["TCOP"],
+          vorbis: ["COPYRIGHT"],
+          mp4: ["cprt"],
+          riff: ["ICOP"],
+          players: {},
+        },
+        displayPolicy: "auto",
+      },
+      {
+        id: "release.rights.phonographic_copyright",
+        canonicalName:
+          "release.rights.phonographic_copyright",
+        label: "Sound Recording Copyright",
+        description: "Sound recording copyright notice.",
+        scope: "release",
+        storageFileRole: "release",
+        tomlPath:
+          "release.rights.phonographic_copyright",
+        valueType: "string",
+        required: false,
+        repeatable: false,
+        inherited: false,
+        displayPolicy: "auto",
+      },
+    ];
+
+    const rightsDetail: ReleaseMetadataDetail = {
+      ...detail,
+      documents: detail.documents.map(
+        (document) =>
+          document.filename === "release.toml"
+            ? {
+                ...document,
+                parsed: {
+                  release: {
+                    title: "Test Release",
+                    rights: {
+                      copyright:
+                        "Copyright © 2026 Hiplingo. All rights reserved.",
+                      phonographic_copyright:
+                        "Sound Recording Copyright ℗ 2026 Hiplingo. All rights reserved.",
+                    },
+                  },
+                },
+              }
+            : document,
+      ),
+    };
+
+    const plan = buildMetadataExportPlan(
+      release,
+      rightsDetail,
+      rightsRegistry,
+      { container: "mp3" },
+    );
+
+    const phonographic =
+      plan.items[0].fields.find(
+        (field) =>
+          field.canonicalPath ===
+          "release.rights.phonographic_copyright",
+      );
+
+    assert.equal(
+      phonographic?.status,
+      "normalized",
+    );
+    assert.match(
+      phonographic?.note ?? "",
+      /combined with the effective ©\/℗ rights statements/i,
     );
   },
 );

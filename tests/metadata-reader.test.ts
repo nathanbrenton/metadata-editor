@@ -254,3 +254,140 @@ test(
     );
   },
 );
+
+test(
+  "reads BOM-prefixed UTF-8 metadata as legacy input and preserves Unicode values",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const releasePath =
+          "releases/unicode-release";
+        const relativePath =
+          `${releasePath}/release.toml`;
+        await mkdir(
+          path.join(mediaRoot, releasePath),
+          { recursive: true },
+        );
+
+        await writeFile(
+          path.join(mediaRoot, relativePath),
+          Buffer.from(
+            [
+              "\uFEFF[release]",
+              'id = "unicode-release"',
+              'title = "Beyoncé 日本語"',
+              "",
+              "[release.rights]",
+              'copyright = "Copyright © 2026 Hiplingo. All rights reserved."',
+              'phonographic_copyright = "Sound Recording Copyright ℗ 2026 Sigur Rós. All rights reserved."',
+              "",
+            ].join("\n"),
+            "utf8",
+          ),
+        );
+
+        const release: ReleaseScanResult = {
+          id: "unicode-release",
+          relativePath: releasePath,
+          metadataFiles: [
+            {
+              filename: "release.toml",
+              relativePath,
+              exists: true,
+            },
+          ],
+          artworkMasters: [],
+          tracks: [],
+        };
+
+        const detail =
+          await readReleaseMetadataDetail(
+            mediaRoot,
+            release,
+          );
+
+        assert.deepEqual(detail.warnings, []);
+        assert.equal(detail.documents.length, 1);
+        assert.equal(
+          detail.documents[0]?.content.startsWith("\uFEFF"),
+          false,
+        );
+
+        const parsed = detail.documents[0]?.parsed as {
+          release?: {
+            title?: string;
+            rights?: {
+              copyright?: string;
+              phonographic_copyright?: string;
+            };
+          };
+        };
+
+        assert.equal(
+          parsed.release?.title,
+          "Beyoncé 日本語",
+        );
+        assert.equal(
+          parsed.release?.rights?.copyright,
+          "Copyright © 2026 Hiplingo. All rights reserved.",
+        );
+        assert.equal(
+          parsed.release?.rights?.phonographic_copyright,
+          "Sound Recording Copyright ℗ 2026 Sigur Rós. All rights reserved.",
+        );
+      },
+    );
+  },
+);
+
+test(
+  "reports invalid UTF-8 metadata instead of silently replacing bytes",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const releasePath =
+          "releases/invalid-utf8";
+        const relativePath =
+          `${releasePath}/release.toml`;
+        await mkdir(
+          path.join(mediaRoot, releasePath),
+          { recursive: true },
+        );
+
+        await writeFile(
+          path.join(mediaRoot, relativePath),
+          Buffer.concat([
+            Buffer.from('[release]\ntitle = "', "utf8"),
+            Buffer.from([0xc3, 0x28]),
+            Buffer.from('"\n', "utf8"),
+          ]),
+        );
+
+        const detail =
+          await readReleaseMetadataDetail(
+            mediaRoot,
+            {
+              id: "invalid-utf8",
+              relativePath: releasePath,
+              metadataFiles: [
+                {
+                  filename: "release.toml",
+                  relativePath,
+                  exists: true,
+                },
+              ],
+              artworkMasters: [],
+              tracks: [],
+            },
+          );
+
+        assert.equal(detail.documents.length, 0);
+        assert.equal(detail.warnings.length, 1);
+        assert.match(
+          detail.warnings[0] ?? "",
+          /not valid UTF-8/,
+        );
+      },
+    );
+  },
+);

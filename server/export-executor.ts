@@ -105,11 +105,78 @@ function fieldValueByPath(
     : undefined;
 }
 
-function metadataArguments(
+type MetadataEntry = {
+  tag: string;
+  value: string;
+};
+
+type MetadataProbeRunner = (
+  filename: string,
+) => Promise<string[]>;
+
+const combinedRightsPaths = new Set([
+  "release.rights.copyright",
+  "release.rights.phonographic_copyright",
+  "track.rights.copyright",
+  "track.rights.phonographic_copyright",
+]);
+
+function firstNonBlank(
+  ...values: Array<string | undefined>
+): string | undefined {
+  return values.find(
+    (value) => value?.trim(),
+  )?.trim();
+}
+
+function combinedRightsEntry(
+  item: MetadataExportPlan["items"][number],
+): MetadataEntry | undefined {
+  const copyright = firstNonBlank(
+    fieldValueByPath(
+      item,
+      "track.rights.copyright",
+    ),
+    fieldValueByPath(
+      item,
+      "release.rights.copyright",
+    ),
+  );
+  const phonographicCopyright = firstNonBlank(
+    fieldValueByPath(
+      item,
+      "track.rights.phonographic_copyright",
+    ),
+    fieldValueByPath(
+      item,
+      "release.rights.phonographic_copyright",
+    ),
+  );
+  const value = [
+    copyright,
+    phonographicCopyright,
+  ]
+    .filter(
+      (entry): entry is string =>
+        Boolean(entry),
+    )
+    .join(" ");
+
+  return value
+    ? {
+        // FFmpeg accepts its canonical metadata key and maps it to
+        // the appropriate ID3/MP4/Vorbis/RIFF representation.
+        tag: "copyright",
+        value,
+      }
+    : undefined;
+}
+
+function metadataEntries(
   item: MetadataExportPlan["items"][number],
   container: MetadataExportPlan["container"],
-): string[] {
-  const args: string[] = [];
+): MetadataEntry[] {
+  const entries: MetadataEntry[] = [];
   const emittedTags = new Set<string>();
 
   const trackNumber = fieldValueByPath(
@@ -129,7 +196,18 @@ function metadataArguments(
     "track.numbering.disc_total",
   );
 
+  const rightsEntry = combinedRightsEntry(
+    item,
+  );
+  if (rightsEntry) {
+    emittedTags.add(rightsEntry.tag);
+    entries.push(rightsEntry);
+  }
+
   for (const field of item.fields) {
+    if (combinedRightsPaths.has(field.canonicalPath)) {
+      continue;
+    }
     if (
       field.status === "omitted" ||
       field.status === "unverified"
@@ -137,7 +215,9 @@ function metadataArguments(
       continue;
     }
 
-    const tag = field.targetTags[0];
+    const tag =
+      field.ffmpegTags?.[0] ??
+      field.targetTags[0];
 
     if (!tag || emittedTags.has(tag)) {
       continue;
@@ -189,10 +269,135 @@ function metadataArguments(
     }
 
     emittedTags.add(tag);
-    args.push("-metadata", `${tag}=${value}`);
+    entries.push({ tag, value });
   }
 
-  return args;
+  return entries;
+}
+
+function metadataArguments(
+  entries: readonly MetadataEntry[],
+): string[] {
+  return entries.flatMap(({ tag, value }) => [
+    "-metadata",
+    `${tag}=${value}`,
+  ]);
+}
+
+function containsNonAscii(
+  value: string,
+): boolean {
+  return /[^\x00-\x7f]/u.test(value);
+}
+
+function ffprobeTagValues(
+  value: unknown,
+): string[] {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return [];
+  }
+
+  const payload = value as Record<string, unknown>;
+  const values: string[] = [];
+
+  const appendTags = (tags: unknown) => {
+    if (
+      typeof tags !== "object" ||
+      tags === null ||
+      Array.isArray(tags)
+    ) {
+      return;
+    }
+
+    for (const entry of Object.values(tags)) {
+      if (typeof entry === "string") {
+        values.push(entry);
+      }
+    }
+  };
+
+  const format = payload.format;
+  if (
+    typeof format === "object" &&
+    format !== null &&
+    !Array.isArray(format)
+  ) {
+    appendTags(
+      (format as Record<string, unknown>).tags,
+    );
+  }
+
+  if (Array.isArray(payload.streams)) {
+    for (const stream of payload.streams) {
+      if (
+        typeof stream === "object" &&
+        stream !== null &&
+        !Array.isArray(stream)
+      ) {
+        appendTags(
+          (stream as Record<string, unknown>).tags,
+        );
+      }
+    }
+  }
+
+  return values;
+}
+
+const defaultMetadataProbeRunner:
+  MetadataProbeRunner =
+  async (filename) => {
+    const { stdout } = await execFile(
+      process.env.FFPROBE_PATH ?? "ffprobe",
+      [
+        "-v",
+        "error",
+        "-show_entries",
+        "format_tags:stream_tags",
+        "-of",
+        "json",
+        filename,
+      ],
+      {
+        windowsHide: true,
+        maxBuffer: 4 * 1024 * 1024,
+      },
+    );
+
+    return ffprobeTagValues(
+      JSON.parse(String(stdout)),
+    );
+  };
+
+async function verifyUnicodeMetadataReadback(
+  entries: readonly MetadataEntry[],
+  filename: string,
+  probeMetadata: MetadataProbeRunner,
+): Promise<number> {
+  const unicodeEntries = entries.filter(
+    ({ value }) => containsNonAscii(value),
+  );
+
+  if (unicodeEntries.length === 0) {
+    return 0;
+  }
+
+  const observedValues =
+    await probeMetadata(filename);
+
+  for (const entry of unicodeEntries) {
+    if (!observedValues.includes(entry.value)) {
+      throw new Error(
+        `Unicode metadata readback mismatch for ${entry.tag}; FFprobe did not return the exact written value.`,
+      );
+    }
+  }
+
+  return unicodeEntries.length;
 }
 
 function codecArguments(
@@ -231,6 +436,8 @@ export async function executeValidatedExportPlan(
   confirmation: string,
   runCommand: CommandRunner =
     defaultCommandRunner,
+  probeMetadata: MetadataProbeRunner =
+    defaultMetadataProbeRunner,
 ): Promise<ExportExecutionResult> {
   if (
     confirmation !==
@@ -342,6 +549,11 @@ export async function executeValidatedExportPlan(
         `.${parsed.name}.${randomUUID()}.tmp${parsed.ext}`,
       );
 
+      const metadata = metadataEntries(
+        item,
+        plan.container,
+      );
+
       const args = [
         "-nostdin",
         "-hide_banner",
@@ -356,10 +568,7 @@ export async function executeValidatedExportPlan(
           plan.container,
           capability.selectedEncoder,
         ),
-        ...metadataArguments(
-          item,
-          plan.container,
-        ),
+        ...metadataArguments(metadata),
         temporaryPath,
       ];
 
@@ -379,6 +588,13 @@ export async function executeValidatedExportPlan(
           "FFmpeg did not create a non-empty temporary output.",
         );
       }
+
+      const unicodeMetadataVerifiedCount =
+        await verifyUnicodeMetadataReadback(
+          metadata,
+          temporaryPath,
+          probeMetadata,
+        );
 
       /*
        * link() is create-only: it fails with EEXIST rather than
@@ -401,6 +617,12 @@ export async function executeValidatedExportPlan(
         encoder:
           capability.selectedEncoder,
         sizeBytes: temporaryStats.size,
+        ...(unicodeMetadataVerifiedCount > 0
+          ? {
+              unicodeMetadataVerified: true,
+              unicodeMetadataVerifiedCount,
+            }
+          : {}),
         sha256:
           await sha256File(
             destinationPath,

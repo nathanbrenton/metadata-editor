@@ -73,6 +73,23 @@ function getFieldStatus(
   ExportPlanField,
   "status" | "note"
 > {
+  if (
+    field.tomlPath ===
+      "release.rights.copyright" ||
+    field.tomlPath ===
+      "release.rights.phonographic_copyright" ||
+    field.tomlPath ===
+      "track.rights.copyright" ||
+    field.tomlPath ===
+      "track.rights.phonographic_copyright"
+  ) {
+    return {
+      status: "normalized",
+      note:
+        "This rights notice is combined with the effective ©/℗ rights statements in the target container's copyright tag.",
+    };
+  }
+
   if (tags.length === 0) {
     return {
       status: "unverified",
@@ -445,6 +462,9 @@ export function buildMetadataExportPlan(
             options.container,
           );
 
+        const ffmpegTags =
+          field.aliases?.ffmpeg ?? targetTags;
+
         const guidance = getFieldStatus(
           field,
           options.container,
@@ -455,6 +475,7 @@ export function buildMetadataExportPlan(
           canonicalPath: field.tomlPath,
           label: field.label,
           targetTags,
+          ffmpegTags,
           value,
           status: guidance.status,
           note: guidance.note,

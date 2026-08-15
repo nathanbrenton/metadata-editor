@@ -112,3 +112,23 @@ test("handles escaped physical newlines and does not promote section metadata", 
 test("returns undefined for ordinary text files", () => {
   assert.equal(parseFfmetadataSidecar("hello world\n", "notes.txt"), undefined);
 });
+
+test("accepts a UTF-8 BOM on legacy FFmetadata input and preserves Unicode exactly", () => {
+  const parsed = parseFfmetadataSidecar(
+    "\uFEFF;FFMETADATA1\nTITLE=Beyoncé 日本語\nCOPYRIGHT=℗ 2026 Sigur Rós © Hiplingo\n",
+    "unicode.wav.ffmetadata",
+  );
+
+  assert.ok(parsed);
+  assert.equal(
+    sidecarSuggestionValue(parsed, "track.title"),
+    "Beyoncé 日本語",
+  );
+  assert.equal(
+    sidecarSuggestionValue(
+      parsed,
+      "release.rights.phonographic_copyright",
+    ),
+    "℗ 2026 Sigur Rós © Hiplingo",
+  );
+});

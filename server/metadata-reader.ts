@@ -12,6 +12,9 @@ import { parse } from "smol-toml";
 import {
   assertPathWithinRoot,
 } from "./media-root.js";
+import {
+  decodeUtf8Strict,
+} from "./unicode-integrity.js";
 import type {
   MetadataFileStatus,
   ParsedMetadataDocument,
@@ -63,9 +66,15 @@ async function readMetadataDocument(
     canonicalFilePath,
   );
 
-  const content = await readFile(
+  const rawContent = await readFile(
     canonicalFilePath,
-    "utf8",
+  );
+  const content = decodeUtf8Strict(
+    rawContent,
+    {
+      allowBom: true,
+      context: file.relativePath,
+    },
   );
 
   const parsed = parse(content);
@@ -87,7 +96,7 @@ async function readMetadataDocument(
     ...(trackId ? { trackId } : {}),
     content,
     sha256: createHash("sha256")
-      .update(content, "utf8")
+      .update(rawContent)
       .digest("hex"),
     parsed: parsed as Record<string, unknown>,
   };

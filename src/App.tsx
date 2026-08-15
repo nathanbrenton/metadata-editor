@@ -1472,6 +1472,7 @@ type ExportPlanField = {
   canonicalPath: string;
   label: string;
   targetTags: string[];
+  ffmpegTags?: string[];
   value:
     | string
     | number

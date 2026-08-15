@@ -16,6 +16,10 @@ import { parse } from "smol-toml";
 import {
   assertPathWithinRoot,
 } from "./media-root.js";
+import {
+  decodeUtf8Strict,
+  encodeUtf8WithoutBom,
+} from "./unicode-integrity.js";
 import type {
   MetadataCreationReceipt,
   MetadataCreationResult,
@@ -96,8 +100,10 @@ async function createFileAtomically(
 
     try {
       await temporaryFile.writeFile(
-        content,
-        "utf8",
+        encodeUtf8WithoutBom(
+          content,
+          relativePath,
+        ),
       );
 
       // Flush the completed temporary file before publishing it.
@@ -136,8 +142,12 @@ async function verifyCreatedFile(
 
   const content = await readFile(targetPath);
 
-  // Verify the exact bytes published to disk still contain valid TOML.
-  parse(content.toString("utf8"));
+  // Verify the exact bytes published to disk are strict UTF-8 without BOM.
+  const decodedContent = decodeUtf8Strict(
+    content,
+    { context: relativePath },
+  );
+  parse(decodedContent);
 
   return {
     relativePath,

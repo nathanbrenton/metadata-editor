@@ -23,6 +23,10 @@ import {
   toLibraryRelativePath,
 } from "./media-root.js";
 import {
+  decodeUtf8Strict,
+  encodeUtf8WithoutBom,
+} from "./unicode-integrity.js";
+import {
   applyMetadataChanges,
   applyMetadataCreations,
   applyMetadataDeletions,
@@ -427,9 +431,15 @@ export async function saveScalarMetadataChanges(
     );
   }
 
-  const parsed = parse(
-    originalContent.toString("utf8"),
+  const originalText = decodeUtf8Strict(
+    originalContent,
+    {
+      allowBom: true,
+      context: relativePath,
+    },
   );
+
+  const parsed = parse(originalText);
 
   if (
     typeof parsed !== "object" ||
@@ -620,8 +630,10 @@ export async function saveScalarMetadataChanges(
 
     try {
       await temporaryFile.writeFile(
-        updatedContent,
-        "utf8",
+        encodeUtf8WithoutBom(
+          updatedContent,
+          relativePath,
+        ),
       );
       await temporaryFile.sync();
     } finally {
@@ -661,7 +673,11 @@ export async function saveScalarMetadataChanges(
     canonicalTargetPath,
   );
 
-  parse(savedContent.toString("utf8"));
+  const savedText = decodeUtf8Strict(
+    savedContent,
+    { context: relativePath },
+  );
+  parse(savedText);
 
   return {
     relativePath,

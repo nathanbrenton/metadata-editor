@@ -1493,3 +1493,69 @@ test(
     );
   },
 );
+
+test(
+  "reads legacy BOM-prefixed UTF-8 metadata and rewrites it BOM-free without losing Unicode",
+  async () => {
+    await withTemporaryLibrary(
+      async (mediaRoot) => {
+        const relativePath =
+          "releases/test-release/release.toml";
+        const targetPath = path.join(
+          mediaRoot,
+          relativePath,
+        );
+        await mkdir(path.dirname(targetPath), {
+          recursive: true,
+        });
+
+        const originalContent = [
+          "\uFEFF[release]",
+          'id = "test-release"',
+          'title = "Beyoncé"',
+          "",
+          "[release.rights]",
+          'copyright = "Copyright © 2026 Hiplingo. All rights reserved."',
+          'phonographic_copyright = "Sound Recording Copyright ℗ 2026 Hiplingo. All rights reserved."',
+          "",
+        ].join("\n");
+
+        await writeFile(
+          targetPath,
+          Buffer.from(originalContent, "utf8"),
+        );
+
+        await saveScalarMetadataChanges(
+          mediaRoot,
+          buildRelease(relativePath),
+          relativePath,
+          sha256(originalContent),
+          [
+            {
+              path: "release.title",
+              value: "Beyoncé · 日本語",
+            },
+            {
+              path: "release.rights.phonographic_copyright",
+              value:
+                "Sound Recording Copyright ℗ 2026 Sigur Rós. All rights reserved.",
+            },
+          ],
+        );
+
+        const savedBytes = await readFile(
+          targetPath,
+        );
+        assert.notDeepEqual(
+          [...savedBytes.subarray(0, 3)],
+          [0xef, 0xbb, 0xbf],
+        );
+
+        const savedText = savedBytes.toString("utf8");
+        assert.match(savedText, /Beyoncé · 日本語/);
+        assert.match(savedText, /Copyright © 2026 Hiplingo/);
+        assert.match(savedText, /Sound Recording Copyright ℗ 2026 Sigur Rós/);
+      },
+    );
+  },
+);
