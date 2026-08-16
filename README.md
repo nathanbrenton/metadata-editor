@@ -46,8 +46,9 @@ Scalar edits are currently browser-local only. Persisting edits to existing TOML
 
 ```text
 ~/Desktop/record-label/
-├── audio-player/
+├── hiplingo.com/        # public Hiplingo web application
 ├── metadata-editor/
+├── packages/            # shared @hiplingo packages
 ├── ingest-drop/          # incoming read-only source candidates
 ├── media-library/        # private canonical release Library; Staging writes here
 └── published-media/      # generated host-facing website media snapshot
@@ -56,7 +57,8 @@ Scalar edits are currently browser-local only. Persisting edits to existing TOML
 Repository boundaries:
 
 - `metadata-editor/` is its own Git repository.
-- `audio-player/` is a separate Git repository and is evolving into the Hiplingo public web application. Its `packages/media-player/` subpackage contains reusable player primitives consumed by both Hiplingo and metadata-editor, including compact and fixed-center scrubbable waveform rendering/colors, transport SVGs, player time formatting, the Spacebar shortcut contract, the shared compact Now Playing/volume shell and perceptual volume curve, a queue-neutral transport-controller shape, stable queue navigation helpers, and the normalized playable-media item contract used for title/artist/release identity, artwork, waveform, and host-owned source descriptors; each host still owns its own audio engine, queue state, and data adapter.
+- `packages/` is a separate local Git repository containing host-neutral shared `@hiplingo` packages.
+- `hiplingo.com/` is the separate Git repository for the Hiplingo public web application. The sibling `packages/media-player/` package contains reusable player primitives consumed by both Hiplingo and metadata-editor, including compact and fixed-center scrubbable waveform rendering/colors, transport SVGs, player time formatting, the Spacebar shortcut contract, the shared compact Now Playing/volume shell and perceptual volume curve, a queue-neutral transport-controller shape, stable queue navigation helpers, and the normalized playable-media item contract used for title/artist/release identity, artwork, waveform, and host-owned source descriptors; each host still owns its own audio engine, queue state, and data adapter.
 - `ingest-drop/`, `media-library/`, and `published-media/` remain outside both application repositories.
 - Private canonical roots and public deployment output must not be committed with either application source repository.
 - Do not initialize Git at `~/Desktop/record-label/`.
@@ -393,7 +395,7 @@ The established Hiplingo host boundary keeps frontend and media lifecycles indep
 
 ```text
 Local frontend source:
-  ~/Desktop/record-label/audio-player/
+  ~/Desktop/record-label/hiplingo.com/
 
 Server frontend releases:
   /var/www/hiplingo.com/app/releases/<timestamp>/
@@ -843,7 +845,7 @@ The initial four-Artist/13-release migration is deliberately separate from appli
 Library → Artists supports Artist-scoped photo intake from `ingest-drop/`. Import copies the original high-quality image into `media-library/artists/<slug>/assets/<asset-id>/master.<ext>`, records its source filename and SHA-256 in `artist.toml`, leaves the disposable ingest source untouched, and automatically makes the first imported photo Primary. Additional photos remain alternates unless explicitly imported as Primary; clicking an alternate canonical photo makes it Primary without moving files. Any Artist photo can be removed after explicit confirmation: metadata is backed up and its complete canonical asset directory is moved into the Artist's private `.asset-trash/` recovery area rather than hard-deleted. The matching asset record is removed from `artist.toml`; when the removed asset was Primary, `primary_asset_id` is removed as well so the Artist may intentionally have no Primary photo and no dangling metadata reference remains. Every Artist metadata write creates a private `.metadata-backups/` copy. Release artwork is never used as an Artist-photo fallback. When Artist publication is added, public JSON and browser derivatives will be regenerated through the Web Package lifecycle rather than mutated directly by a private Library edit, ensuring removed public assets disappear on the next reviewed Artist package update.
 
 Shared branding is source-owned once at
-`../audio-player/packages/brand/src/hiplingo-logo.png`.
+`../packages/brand/src/hiplingo-logo.png`.
 metadata-editor imports `hiplingoLogoUrl` from `@hiplingo/brand`; it does not
 keep a second logo source file. Missing Artist or release artwork may display
 the shared logo as neutral UI chrome, but the logo is never written into

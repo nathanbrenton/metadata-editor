@@ -27,7 +27,7 @@ export type PublishedMediaDeploymentProfileSelection = {
   profiles: PublishedMediaDeploymentProfile[];
   environment: NodeJS.ProcessEnv;
   architecture: {
-    frontendSource: "~/Desktop/record-label/audio-player/";
+    frontendSource: "~/Desktop/record-label/hiplingo.com/";
     frontendServerRoot: "/var/www/hiplingo.com/app/current";
     publicMediaServerRoot: "/var/www/hiplingo.com/published-media";
     publicMediaUrlPrefix: "/media/";
@@ -213,7 +213,7 @@ export function resolvePublishedMediaDeploymentProfileSelection(
     profiles,
     environment: effectiveEnvironment,
     architecture: {
-      frontendSource: "~/Desktop/record-label/audio-player/",
+      frontendSource: "~/Desktop/record-label/hiplingo.com/",
       frontendServerRoot: "/var/www/hiplingo.com/app/current",
       publicMediaServerRoot:
         "/var/www/hiplingo.com/published-media",

@@ -154,7 +154,7 @@ test("waveform rendering and color vocabulary come from the shared Hiplingo medi
     "utf8",
   );
 
-  assert.match(packageSource, /"@hiplingo\/media-player": "file:\.\.\/audio-player\/packages\/media-player"/);
+  assert.match(packageSource, /"@hiplingo\/media-player": "file:\.\.\/packages\/media-player"/);
   assert.match(rendererSource, /@hiplingo\/media-player/);
   assert.doesNotMatch(rendererSource, /getContext\("2d"\)/);
   assert.match(waveformSource, /WAVEFORM_COLOR_OPTIONS/);
@@ -219,7 +219,7 @@ test("persistent footer is visible before the first playback selection", () => {
 test("persistent footer consumes the shared volume interaction and perceptual curve", async () => {
   const sharedVolumeSource = await readFile(
     new URL(
-      "../../audio-player/packages/media-player/src/MediaVolumeControl.tsx",
+      "../../packages/media-player/src/MediaVolumeControl.tsx",
       import.meta.url,
     ),
     "utf8",
@@ -227,7 +227,7 @@ test("persistent footer consumes the shared volume interaction and perceptual cu
 
   const sharedVolumeLifecycle = await readFile(
     new URL(
-      "../../audio-player/packages/media-player/src/useMediaElementVolume.ts",
+      "../../packages/media-player/src/useMediaElementVolume.ts",
       import.meta.url,
     ),
     "utf8",
@@ -292,7 +292,7 @@ test("persistent footer supplies one shared shell controller", () => {
 test("persistent Library timeline state and seeking come from the shared media-element timeline", async () => {
   const sharedTimeline = await readFile(
     new URL(
-      "../../audio-player/packages/media-player/src/useMediaElementTimeline.ts",
+      "../../packages/media-player/src/useMediaElementTimeline.ts",
       import.meta.url,
     ),
     "utf8",
@@ -311,7 +311,7 @@ test("persistent Library timeline state and seeking come from the shared media-e
 test("persistent Library play and loading state come from the shared media-element state", async () => {
   const sharedPlaybackState = await readFile(
     new URL(
-      "../../audio-player/packages/media-player/src/useMediaElementPlaybackState.ts",
+      "../../packages/media-player/src/useMediaElementPlaybackState.ts",
       import.meta.url,
     ),
     "utf8",
@@ -342,7 +342,7 @@ test("persistent Library play and loading state come from the shared media-eleme
 test("persistent Library ordinary media events use the shared transition handlers", async () => {
   const sharedPlaybackEvents = await readFile(
     new URL(
-      "../../audio-player/packages/media-player/src/useMediaElementPlaybackEvents.ts",
+      "../../packages/media-player/src/useMediaElementPlaybackEvents.ts",
       import.meta.url,
     ),
     "utf8",
@@ -368,7 +368,7 @@ test("persistent Library ordinary media events use the shared transition handler
 test("persistent Library source attachment implements the shared host-neutral adapter contract", async () => {
   const sharedSourceAdapter = await readFile(
     new URL(
-      "../../audio-player/packages/media-player/src/media-source-adapter.ts",
+      "../../packages/media-player/src/media-source-adapter.ts",
       import.meta.url,
     ),
     "utf8",
@@ -416,7 +416,7 @@ test("persistent Library source attachment implements the shared host-neutral ad
 test("persistent Library uses shared source-session orchestration while keeping preview implementation local", async () => {
   const sharedSourceSession = await readFile(
     new URL(
-      "../../audio-player/packages/media-player/src/useMediaSourceSession.ts",
+      "../../packages/media-player/src/useMediaSourceSession.ts",
       import.meta.url,
     ),
     "utf8",
@@ -439,14 +439,14 @@ test("persistent Library uses shared source-session orchestration while keeping 
 test("persistent Library media element is rendered and owned through the shared package", async () => {
   const persistentElement = await readFile(
     new URL(
-      "../../audio-player/packages/media-player/src/PersistentMediaElement.tsx",
+      "../../packages/media-player/src/PersistentMediaElement.tsx",
       import.meta.url,
     ),
     "utf8",
   );
   const sourceSession = await readFile(
     new URL(
-      "../../audio-player/packages/media-player/src/useMediaSourceSession.ts",
+      "../../packages/media-player/src/useMediaSourceSession.ts",
       import.meta.url,
     ),
     "utf8",

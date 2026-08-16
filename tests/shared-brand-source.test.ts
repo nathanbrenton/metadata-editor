@@ -16,7 +16,7 @@ const packageSource = await readFile(
 );
 const brandPackageSource = await readFile(
   new URL(
-    "../../audio-player/packages/brand/package.json",
+    "../../packages/brand/package.json",
     import.meta.url,
   ),
   "utf8",
@@ -25,7 +25,7 @@ const brandPackageSource = await readFile(
 test("metadata-editor consumes the canonical Hiplingo brand package", async () => {
   assert.match(
     packageSource,
-    /"@hiplingo\/brand": "file:\.\.\/audio-player\/packages\/brand"/,
+    /"@hiplingo\/brand": "file:\.\.\/packages\/brand"/,
   );
   assert.match(
     appSource,
