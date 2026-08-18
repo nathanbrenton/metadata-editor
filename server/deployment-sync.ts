@@ -3,6 +3,7 @@ import {
   randomUUID,
 } from "node:crypto";
 import {
+  chmod,
   mkdir,
   readFile,
   readdir,
@@ -1025,6 +1026,148 @@ function publishedMediaRsyncTimeoutMs(): number {
   return Math.trunc(timeoutMs);
 }
 
+async function normalizeLocalPublishedMediaPermissions(
+  root: string,
+): Promise<void> {
+  await chmod(root, 0o755);
+  const entries = await readdir(root, {
+    withFileTypes: true,
+  });
+
+  for (const entry of entries) {
+    const absolute = path.join(root, entry.name);
+
+    if (entry.isSymbolicLink()) {
+      throw new Error(
+        `Published-media deployment target contains a symbolic link during permission normalization: ${absolute}`,
+      );
+    }
+
+    if (entry.isDirectory()) {
+      await normalizeLocalPublishedMediaPermissions(
+        absolute,
+      );
+      continue;
+    }
+
+    if (entry.isFile()) {
+      await chmod(absolute, 0o644);
+      continue;
+    }
+
+    throw new Error(
+      `Published-media deployment target contains an unsupported filesystem entry during permission normalization: ${absolute}`,
+    );
+  }
+}
+
+async function assertLocalPublishedMediaPermissions(
+  root: string,
+): Promise<void> {
+  const rootMode = (await stat(root)).mode & 0o777;
+  if (rootMode !== 0o755) {
+    throw new Error(
+      `Published-media deployment directory mode is ${rootMode.toString(8)} instead of 755: ${root}`,
+    );
+  }
+
+  const entries = await readdir(root, {
+    withFileTypes: true,
+  });
+
+  for (const entry of entries) {
+    const absolute = path.join(root, entry.name);
+
+    if (entry.isDirectory()) {
+      await assertLocalPublishedMediaPermissions(
+        absolute,
+      );
+      continue;
+    }
+
+    if (entry.isFile()) {
+      const mode = (await stat(absolute)).mode & 0o777;
+      if (mode !== 0o644) {
+        throw new Error(
+          `Published-media deployment file mode is ${mode.toString(8)} instead of 644: ${absolute}`,
+        );
+      }
+      continue;
+    }
+
+    throw new Error(
+      `Published-media deployment target contains an unsupported filesystem entry during permission verification: ${absolute}`,
+    );
+  }
+}
+
+function remotePublishedMediaPermissionCommand(
+  root: string,
+  normalize: boolean,
+): string {
+  const quotedRoot = shellQuote(root);
+  return [
+    "set -eu",
+    `test -d ${quotedRoot}`,
+    ...(normalize
+      ? [
+          `find ${quotedRoot} -type d -exec chmod 0755 {} +`,
+          `find ${quotedRoot} -type f -exec chmod 0644 {} +`,
+        ]
+      : []),
+    `bad_dir="$(find ${quotedRoot} -type d ! -perm 0755 -print -quit)"; if [ -n "$bad_dir" ]; then echo "Published-media deployment contains a non-0755 directory: $bad_dir" >&2; exit 1; fi`,
+    `bad_file="$(find ${quotedRoot} -type f ! -perm 0644 -print -quit)"; if [ -n "$bad_file" ]; then echo "Published-media deployment contains a non-0644 file: $bad_file" >&2; exit 1; fi`,
+  ].join("; ");
+}
+
+export async function assertPublishedMediaTargetPermissions(
+  target: PublishedMediaDeploymentTarget,
+  root = target.destinationPath,
+): Promise<void> {
+  if (target.kind === "local") {
+    await assertLocalPublishedMediaPermissions(root);
+    return;
+  }
+
+  await runCommand(
+    process.env.SSH_PATH ?? "ssh",
+    [
+      ...sshArgs(target),
+      remotePublishedMediaPermissionCommand(
+        root,
+        false,
+      ),
+    ],
+    { timeoutMs: 60_000 },
+  );
+}
+
+export async function normalizePublishedMediaTargetPermissions(
+  target: PublishedMediaDeploymentTarget,
+  root = target.destinationPath,
+): Promise<void> {
+  if (target.kind === "local") {
+    await normalizeLocalPublishedMediaPermissions(root);
+  } else {
+    await runCommand(
+      process.env.SSH_PATH ?? "ssh",
+      [
+        ...sshArgs(target),
+        remotePublishedMediaPermissionCommand(
+          root,
+          true,
+        ),
+      ],
+      { timeoutMs: 60_000 },
+    );
+  }
+
+  await assertPublishedMediaTargetPermissions(
+    target,
+    root,
+  );
+}
+
 async function syncToIncoming(
   publishRoot: string,
   target: PublishedMediaDeploymentTarget,
@@ -1038,6 +1181,15 @@ async function syncToIncoming(
       rsyncDestination(target, incomingPath),
     ],
     { timeoutMs: publishedMediaRsyncTimeoutMs() },
+  );
+
+  /*
+   * Defense in depth: rsync --chmod is retained, but the incoming tree must
+   * independently prove the public web permission contract before promotion.
+   */
+  await normalizePublishedMediaTargetPermissions(
+    target,
+    incomingPath,
   );
 
   const verifyChanges = await runRsyncPlan(
