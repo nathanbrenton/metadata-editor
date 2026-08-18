@@ -12757,6 +12757,13 @@ input[aria-invalid="true"] {
   gap: 0.55rem;
 }
 
+.library-waveform-release-back-button {
+  min-width: 0;
+  padding: 0.32rem 0.55rem;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
 .library-release-browser-toolbar strong {
   color: #dce2e7;
   font-size: 0.82rem;
@@ -16738,6 +16745,35 @@ main:has(.persistent-library-player) {
   margin: 0.25rem 0 0;
   color: #aeb8c0;
   font-size: 1rem;
+}
+
+.library-release-overview-artist-link {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 0.18em;
+  cursor: pointer;
+  transition:
+    color 120ms ease,
+    text-decoration-color 120ms ease;
+}
+
+.library-release-overview-artist-link:hover,
+.library-release-overview-artist-link:focus-visible {
+  color: #e6edf3;
+  text-decoration-color: currentColor;
+}
+
+.library-release-overview-artist-link:focus-visible {
+  outline: 1px solid #8fa5b6;
+  outline-offset: 0.2rem;
+  border-radius: 0.1rem;
 }
 
 .library-release-overview-facts {

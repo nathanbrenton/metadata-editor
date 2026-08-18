@@ -455,6 +455,7 @@ test(
     ) as {
       release?: {
         primary_artist?: {
+          id?: string;
           name?: string;
         };
       };
@@ -462,8 +463,54 @@ test(
 
     assert.equal(
       releaseToml.release
+        ?.primary_artist?.id,
+      "artist_nathan_brenton",
+    );
+    assert.equal(
+      releaseToml.release
         ?.primary_artist?.name,
       "Nathan Brenton",
+    );
+
+    const artistToml = parse(
+      await readFile(
+        path.join(
+          fixture.outputRoot,
+          "artists",
+          "nathan-brenton",
+          "artist.toml",
+        ),
+        "utf8",
+      ),
+    ) as {
+      artist?: {
+        id?: string;
+        slug?: string;
+        display_name?: string;
+        primary_asset_id?: string;
+        assets?: unknown[];
+      };
+    };
+
+    assert.equal(
+      artistToml.artist?.id,
+      "artist_nathan_brenton",
+    );
+    assert.equal(
+      artistToml.artist?.slug,
+      "nathan-brenton",
+    );
+    assert.equal(
+      artistToml.artist?.display_name,
+      "Nathan Brenton",
+    );
+    assert.equal(
+      artistToml.artist?.primary_asset_id,
+      "",
+    );
+    assert.deepEqual(
+      artistToml.artist?.assets,
+      [],
     );
 
     const releaseSettings = parse(
@@ -657,6 +704,31 @@ test(
       fixture.outputRoot,
       created.releaseRelativePath,
     );
+
+    // Simulate a release created by the pre-Artist-integration build path:
+    // the release has a display name but no stable Artist ID/entity. The next
+    // guarded Staging update should reconcile this exact identity without
+    // fuzzy name matching.
+    await rm(
+      path.join(
+        fixture.outputRoot,
+        "artists",
+        "nathan-brenton",
+      ),
+      { recursive: true, force: true },
+    );
+    const legacyReleaseTomlPath = path.join(
+      releaseRoot,
+      "release.toml",
+    );
+    await writeFile(
+      legacyReleaseTomlPath,
+      (await readFile(legacyReleaseTomlPath, "utf8")).replace(
+        /^id = "artist_nathan_brenton"\n/m,
+        "",
+      ),
+      "utf8",
+    );
     const initialReceipt = JSON.parse(
       await readFile(
         path.join(releaseRoot, "ingest-receipt.json"),
@@ -839,6 +911,40 @@ test(
     assert.ok(updated.createdFiles.length > 0);
     assert.ok(updated.updatedFiles.length > 0);
     assert.ok(updated.preservedFiles.length > 0);
+
+    const reconciledReleaseToml = parse(
+      await readFile(legacyReleaseTomlPath, "utf8"),
+    ) as {
+      release?: {
+        primary_artist?: {
+          id?: string;
+          name?: string;
+        };
+      };
+    };
+    assert.equal(
+      reconciledReleaseToml.release?.primary_artist?.id,
+      "artist_nathan_brenton",
+    );
+    assert.equal(
+      reconciledReleaseToml.release?.primary_artist?.name,
+      "Nathan Brenton",
+    );
+    const reconciledArtistToml = parse(
+      await readFile(
+        path.join(
+          fixture.outputRoot,
+          "artists",
+          "nathan-brenton",
+          "artist.toml",
+        ),
+        "utf8",
+      ),
+    ) as { artist?: { id?: string } };
+    assert.equal(
+      reconciledArtistToml.artist?.id,
+      "artist_nathan_brenton",
+    );
 
     const preservedTrackToml = parse(
       await readFile(originalTrackTomlPath, "utf8"),

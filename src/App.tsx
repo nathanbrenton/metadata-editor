@@ -2573,10 +2573,25 @@ export function App() {
   const openReleaseInLibrary = useCallback(async (
     releaseId: string,
   ) => {
+    // A release destination always belongs to the Releases browser. Do not
+    // carry a previously selected Artists subview across a Staging → Library
+    // handoff or other direct release navigation.
+    setLibraryEntityView("releases");
+    setSelectedLibraryArtistId(null);
     setApplicationView("library");
     setSelectedReleaseDetail(null);
     await openReleaseMetadata(releaseId);
   }, [openReleaseMetadata]);
+
+  const openReleaseOverviewInLibrary = useCallback(async (
+    releaseId: string,
+  ) => {
+    setLibraryEntityView("releases");
+    setSelectedLibraryArtistId(null);
+    setApplicationView("library");
+    setSelectedReleaseDetail(null);
+    await openReleaseOverview(releaseId);
+  }, [openReleaseOverview]);
 
   const openReleaseMetadataAtTarget = useCallback(async (
     releaseId: string,
@@ -3034,11 +3049,11 @@ export function App() {
                 )
               }
               onOpenArtist={openArtistInLibrary}
-              onOpenRelease={(releaseId) => {
-                setApplicationView("library");
-                setSelectedReleaseDetail(null);
-                void openReleaseOverview(releaseId);
-              }}
+              onOpenRelease={(releaseId) =>
+                void openReleaseOverviewInLibrary(
+                  releaseId,
+                )
+              }
               onLibraryChanged={() =>
                 refreshLibrary(true)
               }
@@ -3111,6 +3126,7 @@ export function App() {
                             release.id === selectedReleaseDetail.releaseId,
                         ) ?? null
                       }
+                      artists={scan.artists}
                       technicalSummary={mediaTechnicalByRelease.get(
                         selectedReleaseDetail.releaseId,
                       )}
@@ -3118,6 +3134,7 @@ export function App() {
                       onEditMetadata={() =>
                         setSelectedReleaseDetailMode("metadata")
                       }
+                      onOpenArtist={openArtistInLibrary}
                     />
                   ) : libraryEntityView === "artists" ? (
                     <LibraryArtistRoster
@@ -12117,15 +12134,19 @@ function LibraryEntitySwitcher({
 function LibraryReleaseOverview({
   detail,
   release,
+  artists,
   technicalSummary,
   playback,
   onEditMetadata,
+  onOpenArtist,
 }: {
   detail: ReleaseMetadataDetail;
   release: ReleaseScanResult | null;
+  artists: ArtistScanResult[];
   technicalSummary?: MediaTechnicalReleaseSummary;
   playback: PersistentLibraryPlaybackController;
   onEditMetadata: () => void;
+  onOpenArtist: (artistId: string) => void;
 }) {
   const [selectedTrackKey, setSelectedTrackKey] =
     useState<string | null>(playback.currentTrack?.key ?? null);
@@ -12153,6 +12174,16 @@ function LibraryReleaseOverview({
   );
   const releaseArtistName =
     release.primaryArtistName?.trim() || "Artist not set";
+  const releaseArtist =
+    artists.find(
+      (artist) =>
+        artist.id === release.primaryArtistId ||
+        (
+          !release.primaryArtistId &&
+          release.primaryArtistName?.trim() &&
+          artist.displayName === release.primaryArtistName.trim()
+        ),
+    ) ?? null;
   const releaseDescriptionValue =
     findMetadataValueAcrossDocuments(
       detail.documents,
@@ -12240,7 +12271,26 @@ function LibraryReleaseOverview({
             <div>
               <h1>{releaseDisplayTitle}</h1>
               <p className="library-release-overview-artist">
-                {releaseArtistName}
+                {releaseArtist ? (
+                  <button
+                    type="button"
+                    className="library-release-overview-artist-link"
+                    onClick={() => onOpenArtist(releaseArtist.id)}
+                    title={`Open ${releaseArtist.displayName} in Library Artists`}
+                  >
+                    {releaseArtistName}
+                  </button>
+                ) : (
+                  <span
+                    title={
+                      release.primaryArtistName
+                        ? "No canonical Artist profile is registered for this release yet."
+                        : "This release does not declare a primary Artist."
+                    }
+                  >
+                    {releaseArtistName}
+                  </span>
+                )}
               </p>
             </div>
 
@@ -13445,6 +13495,16 @@ function LibraryReleaseBrowser({
     <section className="library-release-browser">
       <header className="library-release-browser-toolbar">
         <div>
+          {viewMode === "waveform" && (
+            <button
+              type="button"
+              className="secondary-button library-waveform-release-back-button"
+              onClick={() => chooseViewMode("tiles")}
+              title="Return to artwork-first release tiles"
+            >
+              ← Releases
+            </button>
+          )}
           <strong>{heading}</strong>
           <small>
             {releases.length} {releases.length === 1 ? "release" : "releases"}

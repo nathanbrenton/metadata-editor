@@ -78,6 +78,9 @@ import {
   scanReleaseById,
 } from "./scanner.js";
 import {
+  scanArtistLibrary,
+} from "./artist-library.js";
+import {
   inspectWaveformDocument,
 } from "./media-processing/plan.js";
 import {
@@ -160,9 +163,18 @@ export type ExecuteIngestReleaseBuildOptions = {
   waveformWriter?: StagingWaveformWriter;
 };
 
+type CanonicalArtistIdentity = {
+  id: string;
+  slug: string;
+  displayName: string;
+  sortName: string;
+  exists: boolean;
+};
+
 type PreparedIngestBuild = {
   preview: IngestBuildPreview;
   operation: IngestBuildOperation;
+  canonicalArtist: CanonicalArtistIdentity;
   releasePath: string;
   releaseRelativePath: string;
   documents: PreparedDocument[];
@@ -1272,6 +1284,7 @@ function customizeGeneratedDocuments(
   tracks: PreparedIngestTrack[],
   artworkPlacements: PreparedArtworkPlacement[],
   releaseRelativePath: string,
+  primaryArtistId?: string,
 ): GeneratedMetadataDocument[] {
   const trackByDirectory = new Map(
     tracks.map((track) => [track.relativePath, track]),
@@ -1301,6 +1314,14 @@ function customizeGeneratedDocuments(
         "name",
         draft.releaseArtist,
       );
+      if (primaryArtistId) {
+        setNestedRecordValue(
+          data,
+          ["release", "primary_artist"],
+          "id",
+          primaryArtistId,
+        );
+      }
       setNestedRecordValue(
         data,
         ["release", "primary_artist"],
@@ -1496,6 +1517,189 @@ async function pathExists(
 
     throw error;
   }
+}
+
+function deterministicArtistIdentity(
+  displayName: string,
+): Omit<CanonicalArtistIdentity, "exists"> {
+  const normalizedDisplayName = requireString(
+    displayName,
+    "Release artist",
+  );
+  const slug = slugifyIngestValue(
+    normalizedDisplayName,
+  );
+
+  if (!slug) {
+    throw new Error(
+      "Release artist could not produce a stable Artist slug.",
+    );
+  }
+
+  return {
+    id: `artist_${slug.replaceAll("-", "_")}`,
+    slug,
+    displayName: normalizedDisplayName,
+    sortName: generateArtistSortName(
+      normalizedDisplayName,
+    ).value,
+  };
+}
+
+async function resolveCanonicalArtistIdentity(
+  mediaRoot: string,
+  displayName: string,
+): Promise<CanonicalArtistIdentity> {
+  const proposed = deterministicArtistIdentity(
+    displayName,
+  );
+  const artistLibrary = await scanArtistLibrary(
+    mediaRoot,
+  );
+  const exactMatches = artistLibrary.artists.filter(
+    (artist) =>
+      artist.displayName === proposed.displayName,
+  );
+
+  if (exactMatches.length > 1) {
+    throw new Error(
+      `Release artist ${proposed.displayName} matches more than one canonical Artist identity. Resolve the duplicate Artist records before building this release.`,
+    );
+  }
+
+  const exactMatch = exactMatches[0];
+  if (exactMatch) {
+    return {
+      id: exactMatch.id,
+      slug: exactMatch.slug,
+      displayName: exactMatch.displayName,
+      sortName:
+        exactMatch.sortName ??
+        generateArtistSortName(
+          exactMatch.displayName,
+        ).value,
+      exists: true,
+    };
+  }
+
+  const identityConflict = artistLibrary.artists.find(
+    (artist) =>
+      artist.id === proposed.id ||
+      artist.slug === proposed.slug,
+  );
+
+  if (identityConflict) {
+    throw new Error(
+      `Release artist ${proposed.displayName} conflicts with canonical Artist ${identityConflict.displayName} (${identityConflict.id}). Artist identities are not guessed from similar names.`,
+    );
+  }
+
+  const artistPath = assertPathWithinRoot(
+    mediaRoot,
+    path.join(
+      mediaRoot,
+      "artists",
+      proposed.slug,
+    ),
+  );
+
+  if (await pathExists(artistPath)) {
+    throw new Error(
+      `Artist directory artists/${proposed.slug} already exists but is not a valid canonical Artist record. Repair it before building this release.`,
+    );
+  }
+
+  return {
+    ...proposed,
+    exists: false,
+  };
+}
+
+function canonicalArtistDocument(
+  artist: CanonicalArtistIdentity,
+): string {
+  const content = `${stringify({
+    schema: {
+      name: "artist-metadata",
+      version: 1,
+    },
+    artist: {
+      id: artist.id,
+      slug: artist.slug,
+      display_name: artist.displayName,
+      sort_name: artist.sortName,
+      primary_asset_id: "",
+      assets: [],
+    },
+  }).trimEnd()}\n`;
+  parse(content);
+  return content;
+}
+
+async function ensureCanonicalArtistIdentity(
+  mediaRoot: string,
+  expected: CanonicalArtistIdentity,
+): Promise<string | null> {
+  const current = await resolveCanonicalArtistIdentity(
+    mediaRoot,
+    expected.displayName,
+  );
+
+  if (
+    current.id !== expected.id ||
+    current.slug !== expected.slug
+  ) {
+    throw new Error(
+      "The canonical Artist identity changed after the build preview. Refresh the Staging build before writing.",
+    );
+  }
+
+  if (current.exists) {
+    return null;
+  }
+
+  if (expected.exists) {
+    throw new Error(
+      "The canonical Artist identity disappeared after the build preview. Refresh the Staging build before writing.",
+    );
+  }
+
+  const artistsRoot = assertPathWithinRoot(
+    mediaRoot,
+    path.join(mediaRoot, "artists"),
+  );
+  const artistPath = assertPathWithinRoot(
+    artistsRoot,
+    path.join(artistsRoot, expected.slug),
+  );
+  const metadataPath = assertPathWithinRoot(
+    artistPath,
+    path.join(artistPath, "artist.toml"),
+  );
+
+  await mkdir(artistsRoot, {
+    recursive: true,
+    mode: 0o700,
+  });
+  await mkdir(artistPath, {
+    recursive: false,
+    mode: 0o700,
+  });
+
+  try {
+    await writeTextFile(
+      metadataPath,
+      canonicalArtistDocument(expected),
+    );
+  } catch (error) {
+    await rm(artistPath, {
+      recursive: true,
+      force: true,
+    }).catch(() => undefined);
+    throw error;
+  }
+
+  return artistPath;
 }
 
 type SidecarComparableMetadataValue =
@@ -4036,6 +4240,11 @@ export async function prepareIngestReleaseBuild(
   );
   const operation: IngestBuildOperation =
     finalExists ? "update" : "create";
+  const canonicalArtist =
+    await resolveCanonicalArtistIdentity(
+      canonicalOutputRoot,
+      draft.releaseArtist,
+    );
   const existingReceipt = finalExists
     ? await readExistingIngestReceipt(
         releasePath,
@@ -4678,6 +4887,7 @@ export async function prepareIngestReleaseBuild(
       tracks,
       artworkPlacements,
       releaseRelativePath,
+      canonicalArtist.id,
     );
   const videoDocuments = videos
     .map((video, index) => ({
@@ -5544,6 +5754,41 @@ export async function prepareIngestReleaseBuild(
       );
     let releaseTomlChanged = false;
     const releaseTomlAdjustments: string[] = [];
+    const existingReleaseArtistName =
+      readNestedRecordValue(
+        releaseToml.data,
+        ["release", "primary_artist", "name"],
+      );
+    const existingReleaseArtistId =
+      readNestedRecordValue(
+        releaseToml.data,
+        ["release", "primary_artist", "id"],
+      );
+
+    if (existingReleaseArtistName !== draft.releaseArtist) {
+      throw new Error(
+        `Existing release artist ${String(existingReleaseArtistName ?? "(blank)")} does not match the reviewed Staging artist ${draft.releaseArtist}. Artist reassignment requires a separate explicit workflow.`,
+      );
+    }
+
+    if (!existingReleaseArtistId) {
+      setNestedRecordValue(
+        releaseToml.data,
+        ["release", "primary_artist"],
+        "id",
+        canonicalArtist.id,
+      );
+      releaseTomlChanged = true;
+      releaseTomlAdjustments.push(
+        `Canonical Artist → ${canonicalArtist.id}`,
+      );
+    } else if (
+      existingReleaseArtistId !== canonicalArtist.id
+    ) {
+      throw new Error(
+        `Existing release Artist reference ${String(existingReleaseArtistId)} conflicts with canonical Artist ${canonicalArtist.id}. Resolve the Artist identity before applying this update.`,
+      );
+    }
 
     if (previousTrackTotal !== tracks.length) {
       setNestedRecordValue(
@@ -6270,6 +6515,7 @@ export async function prepareIngestReleaseBuild(
           : INGEST_UPDATE_CONFIRMATION_PHRASE,
     },
     operation,
+    canonicalArtist,
     releasePath,
     releaseRelativePath,
     documents,
@@ -6565,6 +6811,8 @@ export async function executeIngestReleaseBuild(
   );
   let stagingCreated = false;
   let backupCreated = false;
+  let createdArtistPath: string | null = null;
+  let releasePromoted = false;
 
   try {
     await lock.writeFile(
@@ -6771,6 +7019,12 @@ export async function executeIngestReleaseBuild(
       );
     }
 
+    createdArtistPath =
+      await ensureCanonicalArtistIdentity(
+        canonicalOutputRoot,
+        prepared.canonicalArtist,
+      );
+
     if (prepared.operation === "create") {
       if (
         await pathExists(prepared.releasePath)
@@ -6785,6 +7039,7 @@ export async function executeIngestReleaseBuild(
         prepared.releasePath,
       );
       stagingCreated = false;
+      releasePromoted = true;
     } else {
       if (
         !(await pathExists(prepared.releasePath))
@@ -6806,6 +7061,7 @@ export async function executeIngestReleaseBuild(
           prepared.releasePath,
         );
         stagingCreated = false;
+        releasePromoted = true;
       } catch (error) {
         await rename(
           backupPath,
@@ -6909,6 +7165,16 @@ export async function executeIngestReleaseBuild(
 
     if (stagingCreated) {
       await rm(stagingPath, {
+        recursive: true,
+        force: true,
+      }).catch(() => undefined);
+    }
+
+    if (
+      createdArtistPath &&
+      !releasePromoted
+    ) {
+      await rm(createdArtistPath, {
         recursive: true,
         force: true,
       }).catch(() => undefined);
