@@ -4,6 +4,7 @@ import {
 } from "node:crypto";
 import {
   chmod,
+  cp,
   mkdir,
   readFile,
   readdir,
@@ -1168,11 +1169,66 @@ export async function normalizePublishedMediaTargetPermissions(
   );
 }
 
+async function seedIncomingFromCurrentTarget(
+  target: PublishedMediaDeploymentTarget,
+  incomingPath: string,
+): Promise<boolean> {
+  if (target.kind === "local") {
+    if (!(await localPathExists(target.destinationPath))) {
+      return false;
+    }
+
+    await cp(
+      target.destinationPath,
+      incomingPath,
+      {
+        recursive: true,
+        preserveTimestamps: true,
+        errorOnExist: true,
+        force: false,
+      },
+    );
+    return true;
+  }
+
+  const destination = shellQuote(
+    target.destinationPath,
+  );
+  const incoming = shellQuote(incomingPath);
+  const command = [
+    "set -eu",
+    `if [ -d ${destination} ]; then cp -a -- ${destination} ${incoming}; elif [ -e ${destination} ]; then echo "Published-media deployment target exists but is not a directory." >&2; exit 1; fi`,
+  ].join("; ");
+
+  await runCommand(
+    process.env.SSH_PATH ?? "ssh",
+    [
+      ...sshArgs(target),
+      command,
+    ],
+    { timeoutMs: 30 * 60_000 },
+  );
+
+  return await sshPathExists(
+    target,
+    incomingPath,
+  );
+}
+
 async function syncToIncoming(
   publishRoot: string,
   target: PublishedMediaDeploymentTarget,
   incomingPath: string,
 ): Promise<void> {
+  /*
+   * Seed from the currently deployed sibling first. For SSH targets this copy
+   * happens entirely on the server, so rsync only needs to upload the delta.
+   */
+  await seedIncomingFromCurrentTarget(
+    target,
+    incomingPath,
+  );
+
   await runCommand(
     process.env.RSYNC_PATH ?? "rsync",
     [
