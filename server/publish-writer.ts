@@ -3,6 +3,7 @@ import {
   randomUUID,
 } from "node:crypto";
 import {
+  chmod,
   copyFile,
   lstat,
   mkdir,
@@ -844,6 +845,10 @@ async function buildStagedRelease(
       recursive: true,
     });
     await copyFile(source, destination);
+    // Everything crossing into published-media is a public web asset.
+    // Private Library derivatives may intentionally be 0600; never preserve
+    // that private source mode in the sanitized public package.
+    await chmod(destination, 0o644);
     const stagedDigest = await sha256File(destination);
 
     if (stagedDigest.sha256 !== sourceDigest.sha256) {

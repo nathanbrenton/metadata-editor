@@ -593,6 +593,7 @@ function rsyncBaseArgs(
     "-a",
     "--checksum",
     "--delete",
+    "--chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r",
     ...(remoteShell
       ? ["-e", remoteShell]
       : []),
@@ -1008,6 +1009,22 @@ async function ensureTargetParent(
   );
 }
 
+function publishedMediaRsyncTimeoutMs(): number {
+  const configured = process.env.PUBLISHED_MEDIA_RSYNC_TIMEOUT_MS?.trim();
+  if (!configured) {
+    return 60 * 60_000;
+  }
+
+  const timeoutMs = Number(configured);
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 60_000) {
+    throw new Error(
+      "PUBLISHED_MEDIA_RSYNC_TIMEOUT_MS must be a finite number of milliseconds >= 60000.",
+    );
+  }
+
+  return Math.trunc(timeoutMs);
+}
+
 async function syncToIncoming(
   publishRoot: string,
   target: PublishedMediaDeploymentTarget,
@@ -1020,7 +1037,7 @@ async function syncToIncoming(
       `${path.resolve(publishRoot)}${path.sep}`,
       rsyncDestination(target, incomingPath),
     ],
-    { timeoutMs: 10 * 60_000 },
+    { timeoutMs: publishedMediaRsyncTimeoutMs() },
   );
 
   const verifyChanges = await runRsyncPlan(
