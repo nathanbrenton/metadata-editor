@@ -955,3 +955,9 @@ same listener-facing metadata presentation consumed by hiplingo.com through
 `@hiplingo/media-player`. The default preview intentionally matches Hiplingo's
 normal public listener views (Overview, Credits, and Track Info); private raw
 or developer metadata is not exposed by this preview.
+
+## Deployment guide
+
+Production publication and media deployment are documented in [`docs/DEPLOYMENT-GUIDE.md`](docs/DEPLOYMENT-GUIDE.md).
+
+The deployment workflow uses a reviewed plan fingerprint, server-side seeding for incremental transfers, checksum verification, explicit public permission normalization (`0755` directories / `0644` files), atomic promotion, and a retained rollback snapshot. The Hiplingo frontend application is deployed separately from `published-media`.
