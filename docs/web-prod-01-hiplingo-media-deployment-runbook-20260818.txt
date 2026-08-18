@@ -1,0 +1,785 @@
+WEB-PROD-01 — HIPLINGO PUBLIC MEDIA DEPLOYMENT RUNBOOK
+======================================================
+Created/finalized: 2026-08-18 (America/Los_Angeles)
+Target: Debian 13 (trixie)
+Host:   web-prod-01
+Public site: https://hiplingo.com/
+Public media URL prefix: https://hiplingo.com/media/
+
+PURPOSE
+-------
+This runbook describes the complete Hiplingo public-media publication and
+deployment path from metadata-editor to the production server.
+
+It is intentionally separate from Hiplingo frontend deployment,
+nathanbrenton.com deployment, and the private metadata-editor media-library.
+
+Core safety rule:
+
+    media-library/        PRIVATE — NEVER DEPLOY
+    published-media/      SANITIZED PUBLIC PACKAGE — MAY DEPLOY
+
+The production media tree is persistent and has an independent lifecycle from
+the Hiplingo frontend. Rolling the frontend forward/back must not erase or
+roll back published-media.
+
+
+ARCHITECTURE
+------------
+
+Local/private:
+
+    ~/Desktop/record-label/media-library/
+        canonical private Library
+        NEVER copied to the public server
+
+Metadata/publication application:
+
+    ~/Desktop/record-label/metadata-editor/
+        creates/validates sanitized public package
+        plans production sync
+        executes guarded atomic deployment
+
+Local public package:
+
+    ~/Desktop/record-label/published-media/
+        public JSON
+        public artwork / artist images
+        selected public tracks only
+        HLS audio
+        compact waveform-peaks.wfp
+        publication/deployment manifests
+        no private Library tree
+        video omitted when per-release video publication is OFF
+
+Production filesystem:
+
+    /var/www/hiplingo.com/published-media/
+
+Public nginx mapping:
+
+    /media/
+        ->
+    /var/www/hiplingo.com/published-media/
+
+Example:
+
+    filesystem:
+      /var/www/hiplingo.com/published-media/catalog.json
+
+    public URL:
+      https://hiplingo.com/media/catalog.json
+
+
+DEPLOYMENT IDENTITIES / WRITE BOUNDARIES
+----------------------------------------
+
+Media deployment user:
+    deploy-hiplingo-media
+
+Primary group:
+    hiplingo-media-deploy
+
+Frontend deployment user:
+    deploy-hiplingo-app
+
+Frontend group:
+    hiplingo-app-deploy
+
+nginx:
+    www-data
+    read-only
+    NOT a member of either deployment group
+
+
+WHY /var/www/hiplingo.com IS MODE 3775
+---------------------------------------
+metadata-editor does not rsync directly into the live directory. It stages a
+new tree beside it, verifies the staged content, then performs an atomic swap.
+
+Temporary path shape:
+
+    /var/www/hiplingo.com/
+      published-media
+      published-media.metadata-editor-incoming.<operation-id>
+
+The media deployment identity therefore needs permission to CREATE A SIBLING
+under /var/www/hiplingo.com.
+
+Current production parent:
+
+    /var/www/hiplingo.com
+        owner root
+        group hiplingo-media-deploy
+        mode 3775
+        drwxrwsr-t
+
+Mode meaning:
+
+    SGID (2xxx)
+        new entries inherit hiplingo-media-deploy
+
+    sticky bit (1xxx)
+        a group member cannot rename/remove a root-owned sibling such as app
+
+    group write (0775 portion)
+        allows deploy-hiplingo-media to create atomic incoming/backup paths
+
+The frontend remains:
+
+    /var/www/hiplingo.com/app
+        root:hiplingo-app-deploy
+        mode 2775
+
+Do NOT use chmod 777.
+Do NOT add www-data to hiplingo-media-deploy.
+
+
+PUBLIC FILE-MODE CONTRACT
+-------------------------
+
+Private Library content and public web content intentionally differ.
+
+Private Library waveform:
+
+    waveform-peaks.wfp
+        0600 is acceptable/private
+
+Public package / production:
+
+    directories
+        0755
+
+    files
+        0644
+
+    waveform-peaks.wfp
+        0644
+
+Why:
+    nginx/www-data is deliberately outside the deploy group, so public assets
+    must be readable/traversable without granting nginx deployment privileges.
+
+Defense in depth implemented in metadata-editor:
+
+    publication boundary:
+        copied public assets are chmod 0644
+
+    deployment boundary:
+        rsync enforces
+            directories 0755
+            files       0644
+
+The first production deployment found WFP files at 0600. nginx consequently
+returned HTTP 403 for those assets. This is why both boundaries now normalize
+permissions.
+
+
+SAFETY CONVENTION
+-----------------
+
+SAFE TO PASTE
+    Output is appropriate to paste back into chat.
+
+DO NOT PASTE
+    - private SSH keys
+    - private media/library metadata not intended for publication
+    - passwords or tokens
+    - unrelated server secrets
+
+WRITE TO PRODUCTION
+    Commands explicitly marked this way modify the live public-media tree.
+
+READ-ONLY
+    Planning/audit/check commands do not modify production.
+
+
+======================================================================
+1. LOCAL CLIENT — CONFIRM REPOSITORY / PACKAGE LOCATIONS
+======================================================================
+
+Run on: LOCAL CLIENT (Mac)
+Output: SAFE TO PASTE.
+
+    cd ~/Desktop/record-label/metadata-editor || return
+
+    pwd
+    test -d ../published-media &&
+      echo "published_media=present"
+
+Do not point the deployment tool at media-library.
+
+
+======================================================================
+2. LOCAL CLIENT — RUN THE PUBLICATION V1 AUDIT
+======================================================================
+
+Run on: LOCAL CLIENT
+Mode: READ-ONLY
+Output: SAFE TO PASTE.
+
+    cd ~/Desktop/record-label/metadata-editor || return
+    npm run audit:public-v1
+
+The audit should report:
+
+    Status: ready
+
+and should verify the current public selection/package contract, including:
+
+    - expected public release/track counts
+    - compact WFP waveform count
+    - zero legacy waveform-peaks.json
+    - zero public video when video publication is OFF
+    - current publication contract version
+    - current deployment manifest
+    - no junk/editor/OS artifacts
+    - no waveform-count mismatch
+
+Do not deploy a package whose audit is blocked.
+
+
+Initial production checkpoint — 2026-08-18
+------------------------------------------
+The first real production batch was:
+
+    Public releases/tracks: 6 / 29
+    Waveforms: 29 compact WFP / 0 legacy JSON
+    Video files: 0
+    Contract versions: 6
+    Package size: approximately 157.80 MiB
+
+This is a historical checkpoint, not a permanent expected count.
+
+
+======================================================================
+3. LOCAL CLIENT — VERIFY PUBLIC WFP MODES
+======================================================================
+
+Run on: LOCAL CLIENT
+Mode: READ-ONLY
+Output: SAFE TO PASTE.
+
+    find ../published-media \
+      -type f -name 'waveform-peaks.wfp' \
+      -exec stat -f '%Lp %N' {} \; |
+      head -40
+
+Expected:
+    every listed WFP begins with 644
+
+Do not change the PRIVATE Library WFP writer to 0644. Private 0600 is correct;
+normalization belongs at the public-package boundary.
+
+
+======================================================================
+4. LOCAL CLIENT — GENERATE THE PRODUCTION PLAN
+======================================================================
+
+Run on: LOCAL CLIENT
+Mode: READ-ONLY
+Output: SAFE TO PASTE.
+
+IMPORTANT:
+    Always specify --profile production.
+
+Without it, the deployment command defaults to local-sandbox.
+
+    cd ~/Desktop/record-label/metadata-editor || return
+    npm run plan:published-media-deploy -- --profile production
+
+Required production header:
+
+    Profile: Production (production)
+    Target: ssh:hiplingo-prod:/var/www/hiplingo.com/published-media
+
+Review:
+    Status, Snapshot, add/update/remove/metadata/unknown counts,
+    file list, and Plan fingerprint.
+
+For a known-empty first deployment, unexpected UPDATE or REMOVE entries are a
+STOP condition until explained.
+
+Compact plan output:
+
+    tmp="$(mktemp)"
+    npm run plan:published-media-deploy -- --profile production >"$tmp" &&
+    grep -E \
+      '^(Source:|Profile:|Target:|Status:|Snapshot:|Changes:|Plan fingerprint:)' \
+      "$tmp"
+    rm -f "$tmp"
+
+
+======================================================================
+5. PLAN FINGERPRINT RULE
+======================================================================
+
+The deployment requires the fingerprint from the exact reviewed production
+plan.
+
+Do NOT:
+    - reuse an old fingerprint after package changes
+    - reuse a local-sandbox fingerprint
+    - guess a fingerprint
+    - deploy after server state changes without regenerating the plan
+
+The fingerprint binds the write action to the reviewed plan state.
+
+
+======================================================================
+6. PUBLIC SERVER — REQUIRED FILESYSTEM PERMISSIONS
+======================================================================
+
+Run on: PUBLIC SERVER as n8
+Output: SAFE TO PASTE.
+
+Current intended boundary:
+
+    sudo chgrp hiplingo-media-deploy /var/www/hiplingo.com
+    sudo chmod 3775 /var/www/hiplingo.com
+
+For a freshly created EMPTY live media directory before the first deployment:
+
+    sudo chown deploy-hiplingo-media:hiplingo-media-deploy \
+      /var/www/hiplingo.com/published-media
+
+    sudo chmod 2775 \
+      /var/www/hiplingo.com/published-media
+
+Why the initial directory is owned by the deploy user:
+    the sticky parent prevents a group member from renaming a root-owned child.
+
+After the first atomic deployment, the live directory is expected to be
+deploy-hiplingo-media:hiplingo-media-deploy and normally mode 0755 because
+deployment rsync normalizes public directories.
+
+Validate:
+
+    stat -c '%A %a %U:%G %n' \
+      /var/www/hiplingo.com \
+      /var/www/hiplingo.com/app \
+      /var/www/hiplingo.com/published-media
+
+Expected current production shape:
+
+    /var/www/hiplingo.com
+        root:hiplingo-media-deploy 3775
+
+    /var/www/hiplingo.com/app
+        root:hiplingo-app-deploy 2775
+
+    /var/www/hiplingo.com/published-media
+        deploy-hiplingo-media:hiplingo-media-deploy 0755
+
+
+======================================================================
+7. LOCAL CLIENT — PROVE ATOMIC SIBLING STAGING PERMISSION
+======================================================================
+
+Run on: LOCAL CLIENT
+Mode: creates/removes one disposable empty probe directory
+Output: SAFE TO PASTE.
+
+    ssh hiplingo-prod '
+    probe="/var/www/hiplingo.com/published-media.metadata-editor-permission-probe.$$"
+    mkdir "$probe" &&
+    rmdir "$probe" &&
+    echo "PASS: atomic deployment staging permission"
+    '
+
+Expected:
+
+    PASS: atomic deployment staging permission
+
+This is different from testing write permission INSIDE published-media.
+
+
+======================================================================
+8. LOCAL CLIENT — EXECUTE THE REVIEWED PRODUCTION DEPLOYMENT
+======================================================================
+
+Run on: LOCAL CLIENT
+Mode: WRITE TO PRODUCTION
+
+Only after reviewing the current production plan:
+
+    cd ~/Desktop/record-label/metadata-editor || return
+
+    npm run deploy:published-media -- \
+      --profile production \
+      --plan-fingerprint <CURRENT_PRODUCTION_PLAN_FINGERPRINT> \
+      --confirm DEPLOY_PUBLISHED_MEDIA
+
+Do not paste an old literal fingerprint from this runbook.
+
+
+======================================================================
+9. TRANSFER TIMEOUT
+======================================================================
+
+The long-running rsync transfer has a 60-minute default timeout.
+
+Optional override:
+
+    PUBLISHED_MEDIA_RSYNC_TIMEOUT_MS
+
+Example for a deliberately longer transfer:
+
+    PUBLISHED_MEDIA_RSYNC_TIMEOUT_MS=7200000 \
+    npm run deploy:published-media -- \
+      --profile production \
+      --plan-fingerprint <CURRENT_PRODUCTION_PLAN_FINGERPRINT> \
+      --confirm DEPLOY_PUBLISHED_MEDIA
+
+The override is milliseconds and must be at least 60000.
+
+The initial ~157.8 MiB production upload exceeded the earlier hard-coded
+10-minute limit, which is why the normal default is now 60 minutes.
+
+
+======================================================================
+10. WHAT THE ATOMIC DEPLOYMENT PROTECTS
+======================================================================
+
+Operational intent:
+
+    1. create incoming sibling
+    2. rsync package into incoming sibling
+    3. checksum/difference verification
+    4. swap staged tree into live published-media
+    5. verify resulting state
+    6. retain/restore the previous tree when required by failure handling
+
+A failure during the initial rsync should not expose a partially copied live
+media tree.
+
+Observed during commissioning:
+    - permission-denied failure left live published-media empty
+    - transfer-timeout failure left live published-media empty
+    - no abandoned incoming tree remained after the failed attempt
+
+Do not bypass this by manually rsyncing directly into the live directory
+during ordinary operation.
+
+
+======================================================================
+11. LOCAL CLIENT — POST-DEPLOY CONVERGENCE CHECK
+======================================================================
+
+Run on: LOCAL CLIENT
+Mode: READ-ONLY
+Output: SAFE TO PASTE.
+
+    cd ~/Desktop/record-label/metadata-editor || return
+
+    tmp="$(mktemp)"
+    npm run plan:published-media-deploy -- --profile production >"$tmp" &&
+    grep -E \
+      '^(Source:|Profile:|Target:|Status:|Snapshot:|Changes:|Plan fingerprint:)' \
+      "$tmp"
+    rm -f "$tmp"
+
+Healthy result:
+
+    Status: current
+    Changes: 0 · add 0 · update 0 · remove 0 · metadata 0 · unknown 0
+
+
+======================================================================
+12. PUBLIC SERVER — POST-DEPLOY PERMISSION AUDIT
+======================================================================
+
+Run on: PUBLIC SERVER
+Mode: READ-ONLY
+Output: SAFE TO PASTE.
+
+    stat -c '%A %a %U:%G %n' \
+      /var/www/hiplingo.com \
+      /var/www/hiplingo.com/app \
+      /var/www/hiplingo.com/published-media
+
+    echo "----- FILES NOT WORLD-READABLE -----"
+    find /var/www/hiplingo.com/published-media \
+      -type f ! -perm -004 -print
+
+    echo "----- WFP MODES -----"
+    find /var/www/hiplingo.com/published-media \
+      -type f -name 'waveform-peaks.wfp' \
+      -printf '%m %p\n' |
+      head -40
+
+Healthy result:
+    parent is root:hiplingo-media-deploy mode 3775
+    app remains root:hiplingo-app-deploy
+    published-media remains deploy-hiplingo-media owned
+    unreadable-file search prints nothing
+    every WFP is 644
+
+
+======================================================================
+13. LOCAL CLIENT — PUBLIC HTTP SMOKE TEST
+======================================================================
+
+Run on: LOCAL CLIENT
+Mode: READ-ONLY
+Output: SAFE TO PASTE.
+
+Use /media/, not /published-media/.
+
+    echo "===== PUBLIC MEDIA HTTP CHECK ====="
+
+    for url in \
+      "https://hiplingo.com/media/catalog.json" \
+      "https://hiplingo.com/media/releases/2009-05-01_gateway/release.json" \
+      "https://hiplingo.com/media/releases/2009-05-01_gateway/tracks/nathan-brenton_06_angel/stream/index.m3u8" \
+      "https://hiplingo.com/media/releases/2009-05-01_gateway/tracks/nathan-brenton_06_angel/waveform-peaks.wfp"
+    do
+      echo
+      echo "$url"
+      curl -fsSI "$url" |
+        grep -Ei \
+          '^(HTTP/|content-type:|content-length:|cache-control:)'
+    done
+
+Expected:
+    JSON      -> HTTP 200 / application/json
+    HLS       -> HTTP 200 / application/vnd.apple.mpegurl
+    WFP       -> HTTP 200 / application/octet-stream
+
+application/octet-stream is appropriate for the compact binary WFP format.
+
+
+======================================================================
+14. NGINX MEDIA ROUTE
+======================================================================
+
+Production nginx:
+
+    location = /media {
+        return 301 /media/;
+    }
+
+    location /media/ {
+        alias /var/www/hiplingo.com/published-media/;
+        autoindex off;
+    }
+
+Wrong:
+    https://hiplingo.com/published-media/catalog.json
+
+Correct:
+    https://hiplingo.com/media/catalog.json
+
+A wrong /published-media/... request can be captured by the SPA fallback and
+return text/html. That is not successful media delivery.
+
+
+======================================================================
+15. TROUBLESHOOTING — ATOMIC STAGING PERMISSION DENIED
+======================================================================
+
+Symptom:
+
+    rsync: [Receiver] mkdir
+    "/var/www/hiplingo.com/published-media.metadata-editor-incoming...."
+    failed: Permission denied (13)
+
+Cause:
+    deploy-hiplingo-media can write inside published-media but cannot create a
+    sibling under /var/www/hiplingo.com.
+
+Correct parent:
+
+    root:hiplingo-media-deploy 3775
+
+Correction:
+
+    sudo chgrp hiplingo-media-deploy /var/www/hiplingo.com
+    sudo chmod 3775 /var/www/hiplingo.com
+
+Ensure live published-media is owned by deploy-hiplingo-media when a
+sticky-parent atomic rename is required. Then rerun the sibling probe.
+
+
+======================================================================
+16. TROUBLESHOOTING — RSYNC TIMEOUT
+======================================================================
+
+Historical symptom:
+
+    Error: rsync timed out after 600000ms.
+
+That was the old 10-minute transfer ceiling.
+
+Current metadata-editor:
+    default long-transfer timeout = 60 minutes
+    optional PUBLISHED_MEDIA_RSYNC_TIMEOUT_MS override
+
+Before retrying, verify no rsync remains active:
+
+    ps -ef | grep "[r]sync" || true
+
+and inspect any incoming staging directory before starting a second write.
+
+
+======================================================================
+17. TROUBLESHOOTING — WFP RETURNS HTTP 403
+======================================================================
+
+Symptom:
+    waveform-peaks.wfp -> HTTP 403
+
+Typical nginx evidence:
+    open() ".../waveform-peaks.wfp" failed (13: Permission denied)
+
+If the PUBLIC WFP is 0600, nginx cannot read it because www-data is purposely
+not in the media deployment group.
+
+Emergency correction for already-deployed public WFP files:
+
+    sudo find /var/www/hiplingo.com/published-media \
+      -type f -name 'waveform-peaks.wfp' \
+      -exec chmod 0644 {} +
+
+Then verify the source-side publication/deployment permission fix is present.
+A server-only chmod is not sufficient for future syncs.
+
+
+======================================================================
+18. TROUBLESHOOTING — MEDIA URLS RETURN SMALL HTML
+======================================================================
+
+If unrelated media URLs all return text/html with the same small length, the
+request probably used /published-media/... instead of /media/... and fell
+through to the SPA index fallback.
+
+Use:
+    https://hiplingo.com/media/...
+
+Do not add a second nginx route merely to accommodate the wrong client URL.
+
+
+======================================================================
+19. ROUTINE MEDIA UPDATE WORKFLOW
+======================================================================
+
+For every future publication change:
+
+    1. Make metadata/public-selection changes in metadata-editor.
+    2. Regenerate/update the Web Package.
+    3. Confirm only intended releases/tracks/videos are public.
+    4. Run npm run audit:public-v1.
+    5. Require Status: ready.
+    6. Generate production plan with --profile production.
+    7. Review add/update/remove/metadata counts and paths.
+    8. Use the exact CURRENT production plan fingerprint.
+    9. Execute the guarded production deployment.
+   10. Regenerate the production plan.
+   11. Require Status: current and 0 changes.
+   12. Run the permission audit.
+   13. Run public HTTP smoke tests.
+   14. Spot-check Hiplingo frontend/browser behavior as appropriate.
+
+Never let a media refresh become an implicit frontend deployment.
+
+
+======================================================================
+20. FRONTEND / MEDIA DECOUPLING
+======================================================================
+
+Hiplingo frontend:
+
+    /var/www/hiplingo.com/app/releases/<release>/
+    /var/www/hiplingo.com/app/current
+
+Public media:
+
+    /var/www/hiplingo.com/published-media/
+
+Frontend rollback changes app/current only.
+Media deployment changes published-media only.
+
+
+======================================================================
+21. INITIAL PRODUCTION DEPLOYMENT — VALIDATED CHECKPOINT
+======================================================================
+
+Validated on 2026-08-18:
+
+    production target:
+      ssh:hiplingo-prod:/var/www/hiplingo.com/published-media
+
+    initial plan:
+      1913 changes
+      1913 add
+      0 update
+      0 remove
+      0 metadata
+      0 unknown
+
+    deployed snapshot:
+      d474ef6c942c88f8319fb76ba3a7790d0da49d9b0382fabdf023fb0e8cda5a2c
+
+    post-deploy plan:
+      Status: current
+      Changes: 0
+
+    public HTTP:
+      catalog.json -> 200 application/json
+      release.json -> 200 application/json
+      HLS playlist -> 200 application/vnd.apple.mpegurl
+      WFP -> 200 application/octet-stream
+
+    permission correction discovered during commissioning:
+      public WFP copies initially inherited private 0600 mode.
+      Production files were corrected to 0644 and metadata-editor was updated
+      so both publication and rsync normalize future public modes.
+
+    atomic deployment permission correction:
+      /var/www/hiplingo.com changed to
+      root:hiplingo-media-deploy mode 3775
+      so sibling staging works while sticky-bit protection retains the
+      root-owned frontend boundary.
+
+
+======================================================================
+22. FINAL QUICK AUDIT
+======================================================================
+
+LOCAL CLIENT — READ-ONLY:
+
+    cd ~/Desktop/record-label/metadata-editor || return
+    npm run audit:public-v1
+
+    tmp="$(mktemp)"
+    npm run plan:published-media-deploy -- --profile production >"$tmp" &&
+    grep -E \
+      '^(Source:|Profile:|Target:|Status:|Snapshot:|Changes:|Plan fingerprint:)' \
+      "$tmp"
+    rm -f "$tmp"
+
+PUBLIC SERVER — READ-ONLY:
+
+    stat -c '%A %a %U:%G %n' \
+      /var/www/hiplingo.com \
+      /var/www/hiplingo.com/app \
+      /var/www/hiplingo.com/published-media
+
+    find /var/www/hiplingo.com/published-media \
+      -type f ! -perm -004 -print
+
+LOCAL CLIENT — PUBLIC HTTP:
+
+    curl -fsSI https://hiplingo.com/media/catalog.json |
+      grep -Ei '^(HTTP/|content-type:|content-length:)'
+
+Healthy final state:
+
+    publication audit -> ready
+    production plan   -> current / 0 changes
+    parent             -> root:hiplingo-media-deploy 3775
+    unreadable files   -> none
+    catalog HTTP       -> 200 application/json
+
+
+END OF RUNBOOK
