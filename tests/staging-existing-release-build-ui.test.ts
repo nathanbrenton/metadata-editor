@@ -68,7 +68,7 @@ test("candidate-free Build previews and applies only Library waveforms", () => {
   );
   assert.match(
     workspaceSource,
-    /create or refresh[\s\S]*?waveform-peaks\.json/i,
+    /create or refresh[\s\S]*?waveform-peaks\.wfp/i,
   );
   assert.match(
     workspaceSource,

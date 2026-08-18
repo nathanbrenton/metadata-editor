@@ -28,7 +28,7 @@ test("workflow refresh controls live with the workspace they affect", () => {
   );
   assert.match(
     appSource,
-    /library-workspace-local-actions[\s\S]*?Rescan Library/,
+    /function LibraryEntitySwitcher[\s\S]*?library-entity-switcher__rescan[\s\S]*?Rescan Library/,
   );
 });
 

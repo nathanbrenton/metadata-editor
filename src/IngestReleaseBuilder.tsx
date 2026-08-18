@@ -1566,6 +1566,10 @@ export function IngestReleaseBuilder({
     useState<IngestStagingTargetStatus | null>(null);
   const [targetStatusLoading, setTargetStatusLoading] =
     useState(false);
+  const [legacyReceiptMigrationLoading, setLegacyReceiptMigrationLoading] =
+    useState(false);
+  const [legacyArtworkReceiptRepairLoading, setLegacyArtworkReceiptRepairLoading] =
+    useState(false);
   const canonicalTargetAppliedRef =
     useRef<string | null>(null);
   const blockingSources =
@@ -2016,6 +2020,136 @@ export function IngestReleaseBuilder({
     }));
   };
 
+  const migrateLegacyReceipt = async () => {
+    const migration = targetStatus?.legacyReceiptMigration;
+    if (!migration) {
+      return;
+    }
+
+    setLegacyReceiptMigrationLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        "/api/ingest/migrate-legacy-receipt",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: draft.releaseId,
+            expectedFingerprint: migration.fingerprint,
+            confirmation: migration.confirmationPhrase,
+          }),
+        },
+      );
+      const responseBody = (await response.json()) as unknown;
+
+      if (!response.ok) {
+        throw new Error(
+          messageFromResponse(
+            responseBody,
+            `Legacy receipt migration failed: HTTP ${response.status}`,
+          ),
+        );
+      }
+
+      if (
+        typeof responseBody !== "object" ||
+        responseBody === null ||
+        Array.isArray(responseBody) ||
+        !("status" in responseBody)
+      ) {
+        throw new Error(
+          "Legacy receipt migration returned an invalid staging-target status.",
+        );
+      }
+
+      setTargetStatus(
+        (responseBody as { status: IngestStagingTargetStatus }).status,
+      );
+      setPreview(null);
+      setConfirmed(false);
+      setGuidedStep(4);
+    } catch (migrationError) {
+      setError(
+        migrationError instanceof Error
+          ? migrationError.message
+          : "Unknown legacy receipt migration error",
+      );
+    } finally {
+      setLegacyReceiptMigrationLoading(false);
+    }
+  };
+
+  const repairLegacyArtworkReceipt = async () => {
+    const repair = targetStatus?.legacyArtworkReceiptRepair;
+    if (!repair) {
+      return;
+    }
+
+    setLegacyArtworkReceiptRepairLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(
+        "/api/ingest/repair-legacy-artwork-receipt",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: draft.releaseId,
+            expectedFingerprint: repair.fingerprint,
+            confirmation: repair.confirmationPhrase,
+          }),
+        },
+      );
+      const responseBody = (await response.json()) as unknown;
+
+      if (!response.ok) {
+        throw new Error(
+          messageFromResponse(
+            responseBody,
+            `Legacy artwork receipt repair failed: HTTP ${response.status}`,
+          ),
+        );
+      }
+
+      if (
+        typeof responseBody !== "object" ||
+        responseBody === null ||
+        Array.isArray(responseBody) ||
+        !("status" in responseBody)
+      ) {
+        throw new Error(
+          "Legacy artwork receipt repair returned an invalid staging-target status.",
+        );
+      }
+
+      setTargetStatus(
+        (responseBody as { status: IngestStagingTargetStatus }).status,
+      );
+      setPreview(null);
+      setConfirmed(false);
+      setGuidedStep(4);
+      onNotify(
+        `Current canonical artwork baselined in the legacy ingest receipt. Confirm the intended artwork replacement to continue.`,
+        "success",
+      );
+    } catch (repairError) {
+      setError(
+        repairError instanceof Error
+          ? repairError.message
+          : "Unknown legacy artwork receipt repair error",
+      );
+    } finally {
+      setLegacyArtworkReceiptRepairLoading(false);
+    }
+  };
+
   const previewBuild = async () => {
     setPreviewLoading(true);
     setError(null);
@@ -2431,8 +2565,53 @@ export function IngestReleaseBuilder({
           <span>
             {targetStatusLoading
               ? `Looking for releases/${draft.releaseId}`
-              : `Updates will be previewed as a delta against ${targetStatus?.releaseRelativePath}.`}
+              : targetStatus?.legacyReceiptMigration
+                ? "This canonical release predates ingest receipts and needs one guarded baseline migration before incremental updates."
+                : targetStatus?.legacyArtworkReceiptRepair
+                  ? "This migrated legacy receipt is missing canonical artwork baseline entries; repair those entries before replacing artwork."
+                : `Updates will be previewed as a delta against ${targetStatus?.releaseRelativePath}.`}
           </span>
+        </div>
+      )}
+
+      {targetStatus?.legacyReceiptMigration && (
+        <div className="message warning">
+          <strong>Legacy release migration required.</strong>{" "}
+          The migration records hashes for the current canonical Library
+          masters/artwork without changing those files. After it completes,
+          return to Artwork &amp; files and explicitly confirm any occupied
+          artwork target before previewing the update.
+          <button
+            type="button"
+            className="primary-button"
+            disabled={legacyReceiptMigrationLoading}
+            onClick={() => void migrateLegacyReceipt()}
+          >
+            {legacyReceiptMigrationLoading
+              ? "Migrating legacy receipt…"
+              : "Migrate legacy receipt"}
+          </button>
+        </div>
+      )}
+
+      {targetStatus?.legacyArtworkReceiptRepair && (
+        <div className="message warning">
+          <strong>Legacy artwork receipt baseline incomplete.</strong>{" "}
+          This release has {targetStatus.legacyArtworkReceiptRepair.artworkCount}{" "}
+          canonical artwork file{targetStatus.legacyArtworkReceiptRepair.artworkCount === 1 ? "" : "s"}{" "}
+          that predate the ingest receipt and are not yet represented by it.
+          Baseline only those existing artwork bytes before replacing them;
+          audio/video receipt entries are verified and left unchanged.
+          <button
+            type="button"
+            className="primary-button"
+            disabled={legacyArtworkReceiptRepairLoading}
+            onClick={() => void repairLegacyArtworkReceipt()}
+          >
+            {legacyArtworkReceiptRepairLoading
+              ? "Baselining current artwork…"
+              : "Baseline current Library artwork"}
+          </button>
         </div>
       )}
 
@@ -2884,6 +3063,11 @@ function GuidedIngestBuilder({
             sourceStatuses={sourceStatuses}
             blockingSources={blockingSources}
             existingTracks={targetStatus?.existingTracks ?? []}
+            legacyReceiptMigrationRequired={
+              targetStatus?.legacyReceiptMigration?.required === true
+            }
+            onReviewArtwork={() => onStepChange(4)}
+            onTrackChange={onTrackChange}
             onAcceptBlockingSource={onAcceptBlockingSource}
             onSkipBlockingSource={onSkipBlockingSource}
             onReviewBlockingSource={onReviewBlockingSource}
@@ -3099,7 +3283,10 @@ function QuickIngestBuilder({
         />
       </section>
 
-      <section className="ingest-table-panel">
+      <section
+        id="ingest-quick-review-artwork"
+        className="ingest-table-panel"
+      >
         <header className="ingest-table-panel-header">
           <h3>Artwork & files</h3>
         </header>
@@ -3134,6 +3321,18 @@ function QuickIngestBuilder({
           sourceStatuses={sourceStatuses}
           blockingSources={blockingSources}
           existingTracks={targetStatus?.existingTracks ?? []}
+          legacyReceiptMigrationRequired={
+            targetStatus?.legacyReceiptMigration?.required === true
+          }
+          onReviewArtwork={() =>
+            document
+              .getElementById("ingest-quick-review-artwork")
+              ?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+              })
+          }
+          onTrackChange={onTrackChange}
           onAcceptBlockingSource={onAcceptBlockingSource}
           onSkipBlockingSource={onSkipBlockingSource}
           onReviewBlockingSource={onReviewBlockingSource}
@@ -5843,6 +6042,9 @@ function BuildReview({
   sourceStatuses,
   blockingSources,
   existingTracks,
+  legacyReceiptMigrationRequired,
+  onReviewArtwork,
+  onTrackChange,
   onAcceptBlockingSource,
   onSkipBlockingSource,
   onReviewBlockingSource,
@@ -5861,6 +6063,12 @@ function BuildReview({
   sourceStatuses: IngestDraftSourceStatus[];
   blockingSources: IngestDraftSourceStatus[];
   existingTracks: IngestStagingTargetStatus["existingTracks"];
+  legacyReceiptMigrationRequired: boolean;
+  onReviewArtwork?: () => void;
+  onTrackChange: (
+    sourceRelativePath: string,
+    patch: Partial<IngestBuildTrackDraft>,
+  ) => void;
   onAcceptBlockingSource: (
     status: IngestDraftSourceStatus,
   ) => void;
@@ -5959,6 +6167,65 @@ function BuildReview({
               left.title.localeCompare(right.title),
           )
       : [];
+  const existingTrackByNumber = new Map(
+    existingTracks.map((track) => [track.number, track]),
+  );
+  const confirmedTrackReplacements =
+    operation === "update"
+      ? includedTracks.flatMap((track) => {
+          const replacementTrackId =
+            track.replacementTrackId?.trim();
+          if (!replacementTrackId) {
+            return [];
+          }
+
+          const target = existingTrackById.get(
+            replacementTrackId,
+          );
+
+          return target
+            ? [{ candidate: track, target }]
+            : [];
+        })
+      : [];
+  const unresolvedTrackReplacementConflicts =
+    operation === "update"
+      ? includedTracks.flatMap((track) => {
+          if (track.replacementTrackId?.trim()) {
+            return [];
+          }
+
+          const sourceMatch = existingTrackBySource.get(
+            track.sourceRelativePath,
+          );
+          const sourceStatus = sourceStatusForPath(
+            sourceStatuses,
+            track.sourceRelativePath,
+          );
+          const numberMatch = existingTrackByNumber.get(
+            track.trackNumber,
+          );
+
+          /*
+           * An unchanged receipt source can participate in a normal
+           * metadata/order update. Changed bytes for that source, or a
+           * different/new source claiming an existing number, require an
+           * explicit canonical-audio replacement target.
+           */
+          const target =
+            sourceMatch && sourceStatus?.state === "changed"
+              ? sourceMatch
+              : numberMatch && numberMatch.id !== sourceMatch?.id
+                ? numberMatch
+                : !sourceMatch && numberMatch
+                  ? numberMatch
+                  : undefined;
+
+          return target
+            ? [{ candidate: track, target }]
+            : [];
+        })
+      : [];
   const newCandidateTrackCount =
     includedTracks.filter(
       (track) =>
@@ -6054,9 +6321,149 @@ function BuildReview({
   const metadataItems = preview?.items.filter(
     (item) => item.kind === "toml",
   ) ?? [];
+  const blockedPlanItems = preview?.items.filter(
+    (item) => item.action === "blocked",
+  ) ?? [];
+  const blockedArtworkReplacement =
+    blockedPlanItems.some((item) =>
+      item.reason.toLowerCase().includes("artwork") ||
+      item.logicalRoles?.some((role) =>
+        role.includes("artwork"),
+      ),
+    );
+  const waveformBuildJobCount = preview
+    ? preview.summary.waveformCreateCount +
+      preview.summary.waveformReplaceCount
+    : 0;
+  const [buildElapsedSeconds, setBuildElapsedSeconds] =
+    useState(0);
+
+  useEffect(() => {
+    if (!buildLoading) {
+      setBuildElapsedSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const updateElapsed = () => {
+      setBuildElapsedSeconds(
+        Math.max(
+          0,
+          Math.floor((Date.now() - startedAt) / 1000),
+        ),
+      );
+    };
+
+    updateElapsed();
+    const timer = window.setInterval(updateElapsed, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [buildLoading]);
 
   return (
     <div className="ingest-build-review">
+      {unresolvedTrackReplacementConflicts.length > 0 && (
+        <section
+          className="ingest-build-replacement-resolution"
+          aria-label="Canonical audio replacement required"
+        >
+          <div>
+            <span className="ingest-review-eyebrow">
+              Track replacement required
+            </span>
+            <h3>Confirm the existing master to replace</h3>
+            <p>
+              A candidate source is claiming an existing Library track number
+              or contains changed bytes for an existing source. Replacement is
+              never inferred automatically: confirm the stable track below or
+              return to Tracks and choose another number.
+            </p>
+          </div>
+          <div className="ingest-build-replacement-resolution-list">
+            {unresolvedTrackReplacementConflicts.map(
+              ({ candidate, target }) => (
+                <div
+                  className="ingest-build-replacement-resolution-row"
+                  key={candidate.sourceRelativePath}
+                >
+                  <div>
+                    <strong>
+                      Track {target.number} · {target.title || "Untitled"}
+                    </strong>
+                    <small>
+                      Preserve {target.id}; replace canonical audio only.
+                    </small>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() =>
+                      onTrackChange(
+                        candidate.sourceRelativePath,
+                        {
+                          replacementTrackId: target.id,
+                          trackNumber: target.number,
+                          title: target.title,
+                          version: target.version,
+                          artist: target.artist,
+                          date: target.sourceDate,
+                        },
+                      )
+                    }
+                  >
+                    Replace Track {target.number} · {target.title || "Untitled"}
+                  </button>
+                </div>
+              ),
+            )}
+          </div>
+        </section>
+      )}
+
+      {confirmedTrackReplacements.length > 0 &&
+        unresolvedTrackReplacementConflicts.length === 0 && (
+          <section
+            className="ingest-build-replacement-confirmed"
+            aria-label="Audio master replacement confirmed"
+          >
+            <div>
+              <span className="ingest-review-eyebrow">
+                Audio master replacement confirmed
+              </span>
+              <h3>Replacement target locked</h3>
+              <p>
+                The stable Library track identity will be preserved. The next
+                step is to preview the server-validated replacement update.
+              </p>
+            </div>
+            <div className="ingest-build-replacement-confirmed-list">
+              {confirmedTrackReplacements.map(({ candidate, target }) => (
+                <div
+                  className="ingest-build-replacement-confirmed-row"
+                  key={candidate.sourceRelativePath}
+                >
+                  <div>
+                    <strong>
+                      Track {target.number} · {target.title || "Untitled"}
+                    </strong>
+                    <small>
+                      New master: {candidate.sourceRelativePath}
+                    </small>
+                    <small>
+                      Preserve stable ID {target.id}; replace canonical audio
+                      and refresh source-derived waveform/playback assets.
+                    </small>
+                  </div>
+                  <span className="badge">Confirmed</span>
+                </div>
+              ))}
+            </div>
+            <strong className="ingest-build-replacement-next-step">
+              Next: Preview replacement update.
+            </strong>
+          </section>
+        )}
+
       <section className="ingest-build-plan-launcher">
         <div className="ingest-build-plan-launcher-copy">
           <span className="ingest-review-eyebrow">
@@ -6064,7 +6471,9 @@ function BuildReview({
           </span>
           <h3>
             {operation === "update"
-              ? "Preview this release update"
+              ? confirmedTrackReplacements.length > 0
+                ? "Preview this audio-master replacement"
+                : "Preview this release update"
               : "Preview this release build"}
           </h3>
           <p>
@@ -6081,8 +6490,10 @@ function BuildReview({
             disabled={
               previewLoading ||
               buildLoading ||
+              legacyReceiptMigrationRequired ||
               blockingSources.length > 0 ||
-              assignmentIssues.length > 0
+              assignmentIssues.length > 0 ||
+              unresolvedTrackReplacementConflicts.length > 0
             }
             onClick={onPreview}
           >
@@ -6093,7 +6504,9 @@ function BuildReview({
                   ? "Refresh update plan"
                   : "Refresh build plan"
                 : operation === "update"
-                  ? "Preview update plan"
+                  ? confirmedTrackReplacements.length > 0
+                    ? "Preview replacement update"
+                    : "Preview update plan"
                   : "Preview build plan"}
           </button>
           {preview && (
@@ -6802,6 +7215,46 @@ function BuildReview({
         </section>
       )}
 
+      {blockedPlanItems.length > 0 && (
+        <section
+          className="warning-panel ingest-blocked-destination-panel"
+          aria-label="Blocked build destinations"
+        >
+          <header>
+            <div>
+              <h4>Blocked destination needs attention</h4>
+              <p>
+                The server-validated plan cannot be applied until the
+                destination below is resolved. The exact reason is shown here
+                so you do not have to hunt through the filesystem table.
+              </p>
+            </div>
+            <span className="badge missing">
+              {blockedPlanItems.length} blocked
+            </span>
+          </header>
+          <ul className="ingest-warning-list">
+            {blockedPlanItems.map((item, index) => (
+              <li
+                key={`${item.destinationRelativePath}:${index}`}
+              >
+                <strong>{item.reason}</strong>{" "}
+                <code>{item.destinationRelativePath}</code>
+              </li>
+            ))}
+          </ul>
+          {blockedArtworkReplacement && onReviewArtwork && (
+            <button
+              type="button"
+              className="secondary"
+              onClick={onReviewArtwork}
+            >
+              Review Artwork &amp; files
+            </button>
+          )}
+        </section>
+      )}
+
       {preview && preview.warnings.length > 0 && (
         <section className="warning-panel ingest-review-plan-warnings">
           <header>
@@ -6859,7 +7312,10 @@ function BuildReview({
 
         {preview && (
           <>
-            <details className="ingest-review-details">
+            <details
+              className="ingest-review-details"
+              open={preview.summary.blockedCount > 0}
+            >
               <summary>
                 <span>Filesystem plan</span>
                 <span className="badge">
@@ -6976,6 +7432,7 @@ function BuildReview({
                 preview.summary.blockedCount > 0 ||
                 blockingSources.length > 0 ||
                 assignmentIssues.length > 0 ||
+                unresolvedTrackReplacementConflicts.length > 0 ||
                 buildLoading
               }
               onChange={(event) =>
@@ -6991,26 +7448,47 @@ function BuildReview({
             </span>
           </label>
 
-          <button
-            type="button"
-            className="primary-button danger-button"
-            disabled={
-              !confirmed ||
-              buildLoading ||
-              preview.summary.blockedCount > 0 ||
-              blockingSources.length > 0 ||
-              assignmentIssues.length > 0
-            }
-            onClick={onCreate}
-          >
-            {buildLoading
-              ? preview.operation === "update"
-                ? "Building update and waveforms…"
-                : "Building release and waveforms…"
-              : preview.operation === "update"
-                ? "Build release update"
-                : "Build release"}
-          </button>
+          <div className="ingest-build-execution-row">
+            <button
+              type="button"
+              className="primary-button danger-button"
+              disabled={
+                !confirmed ||
+                buildLoading ||
+                preview.summary.blockedCount > 0 ||
+                blockingSources.length > 0 ||
+                assignmentIssues.length > 0 ||
+                unresolvedTrackReplacementConflicts.length > 0
+              }
+              onClick={onCreate}
+            >
+              {buildLoading
+                ? preview.operation === "update"
+                  ? "Building update and waveforms…"
+                  : "Building release and waveforms…"
+                : preview.operation === "update"
+                  ? "Build release update"
+                  : "Build release"}
+            </button>
+            {buildLoading && (
+              <span className="ingest-build-progress-status">
+                {buildElapsedSeconds < 5
+                  ? "Server request active"
+                  : "Still processing"}
+                {waveformBuildJobCount > 0
+                  ? ` · ${waveformBuildJobCount} waveform job${
+                      waveformBuildJobCount === 1 ? "" : "s"
+                    } in this build`
+                  : preview.operation === "update"
+                    ? " · applying guarded Library update"
+                    : " · creating guarded Library release"}
+                {` · ${buildElapsedSeconds}s elapsed`}
+                {buildElapsedSeconds >= 15 && waveformBuildJobCount > 0
+                  ? " · waveform generation can take a little while"
+                  : ""}
+              </span>
+            )}
+          </div>
         </>
       )}
     </div>

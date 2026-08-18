@@ -10,7 +10,7 @@ const helpSource = readFileSync(new URL("../src/workflow-help-content.ts", impor
 test("keeps normal staging mechanics informational instead of warnings", () => {
   assert.match(sharedSource, /warnings: string\[\];[\s\S]*notes: string\[\];/);
   assert.match(serverSource, /warnings: \[\],[\s\S]*notes: operation === "create"/);
-  assert.match(serverSource, /Staging generates and validates Library waveform-peaks\.json/);
+  assert.match(serverSource, /Staging generates and validates Library waveform-peaks\.wfp/);
   assert.doesNotMatch(serverSource, /initial audio-player source/);
 });
 

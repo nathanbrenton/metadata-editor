@@ -27,6 +27,7 @@ test("Staging uses artwork-first rows with hover paths and compact readiness wor
   assert.match(appSource, /staging-artwork-column/);
   assert.match(appSource, /staging-release-artwork/);
   assert.match(appSource, /Library path: \$\{release\.relativePath\}/);
+  assert.match(appSource, /<th scope="col" className="staging-bubbles-column">Bubbles<\/th>/);
   assert.match(appSource, /<th scope="col">Metadata<\/th>/);
   assert.match(appSource, /<th scope="col">Update mode<\/th>/);
   const stagingTableStart = appSource.indexOf(

@@ -33,6 +33,9 @@ import {
   encodeUtf8WithoutBom,
 } from "./unicode-integrity.js";
 import {
+  pruneIgnoredPublicationJunk,
+} from "./publication-junk.js";
+import {
   advancePublishOperation,
   assertNoUnresolvedPublishOperation,
   publishOperationsRoot,
@@ -218,6 +221,38 @@ function sanitizeTrackMetadata(
   return track;
 }
 
+function publicReleaseMetadata(
+  plan: PublishPlan,
+  releaseValue: unknown,
+): Record<string, unknown> {
+  const metadata = sanitizeReleaseMetadata(releaseValue);
+  const numbering = isRecord(metadata.numbering)
+    ? { ...metadata.numbering }
+    : {};
+
+  numbering.track_total =
+    plan.publicSelection.includedTrackIds.length;
+  metadata.numbering = numbering;
+  return metadata;
+}
+
+function publicTrackMetadata(
+  plan: PublishPlan,
+  trackValue: unknown,
+): Record<string, unknown> {
+  const metadata = sanitizeTrackMetadata(trackValue);
+
+  if (isRecord(metadata.numbering)) {
+    metadata.numbering = {
+      ...metadata.numbering,
+      track_total:
+        plan.publicSelection.includedTrackIds.length,
+    };
+  }
+
+  return metadata;
+}
+
 function sanitizeTrackCredits(
   trackValue: unknown,
 ): Record<string, unknown> {
@@ -329,7 +364,8 @@ function publicTrackDocument(
     },
     id: trackId,
     releaseId: release.id,
-    metadata: sanitizeTrackMetadata(
+    metadata: publicTrackMetadata(
+      plan,
       isRecord(trackDocument.parsed)
         ? trackDocument.parsed.track
         : undefined,
@@ -352,6 +388,9 @@ function publicTrackDocument(
     },
     waveform: {
       href: plan.contract.trackResources.waveform.filename,
+      format: plan.contract.trackResources.waveform.format,
+      formatVersion:
+        plan.contract.trackResources.waveform.formatVersion,
       schemaVersion:
         plan.contract.trackResources.waveform.schemaVersion,
     },
@@ -367,6 +406,36 @@ function publicTrackDocument(
         }
       : {}),
   };
+}
+
+function selectedTracks(
+  plan: PublishPlan,
+  release: ReleaseScanResult,
+): ReleaseScanResult["tracks"] {
+  const included = new Set(
+    plan.publicSelection.includedTrackIds,
+  );
+
+  return release.tracks.filter((track) =>
+    included.has(track.id),
+  );
+}
+
+function selectedVideos(
+  plan: PublishPlan,
+  release: ReleaseScanResult,
+): NonNullable<ReleaseScanResult["videos"]> {
+  if (!plan.publicSelection.includeVideo) {
+    return [];
+  }
+
+  const included = new Set(
+    plan.publicSelection.includedVideoIds,
+  );
+
+  return (release.videos ?? []).filter((video) =>
+    included.has(video.id),
+  );
 }
 
 function publicVideoDocument(
@@ -400,9 +469,14 @@ function publicVideoDocument(
               video.posterTimeSeconds,
           }
         : {}),
-      ...(video.relatedTrackId
-        ? { relatedTrackId: video.relatedTrackId }
-        : {}),
+      ...(
+        video.relatedTrackId &&
+        plan.publicSelection.includedTrackIds.includes(
+          video.relatedTrackId,
+        )
+          ? { relatedTrackId: video.relatedTrackId }
+          : {}
+      ),
     },
     poster: {
       href: plan.contract.videoResources.poster.relativePath,
@@ -459,7 +533,8 @@ function publicReleaseDocument(
       version: 2,
     },
     id: release.id,
-    metadata: sanitizeReleaseMetadata(
+    metadata: publicReleaseMetadata(
+      plan,
       isRecord(releaseDocument.parsed)
         ? releaseDocument.parsed.release
         : undefined,
@@ -476,7 +551,7 @@ function publicReleaseDocument(
           },
         }
       : {}),
-    tracks: release.tracks.map((track) => ({
+    tracks: selectedTracks(plan, release).map((track) => ({
       id: track.id,
       href: path.posix.join(
         "tracks",
@@ -484,9 +559,9 @@ function publicReleaseDocument(
         trackMetadataFilename,
       ),
     })),
-    ...((release.videos?.length ?? 0) > 0
+    ...(selectedVideos(plan, release).length > 0
       ? {
-          videos: [...(release.videos ?? [])]
+          videos: [...selectedVideos(plan, release)]
             .sort((left, right) => {
               const leftOrder =
                 left.displayOrder ??
@@ -791,7 +866,7 @@ async function buildStagedRelease(
     ),
   );
 
-  for (const track of release.tracks) {
+  for (const track of selectedTracks(plan, release)) {
     const trackJsonPath = rootPath(
       stageReleasePath,
       path.posix.join(
@@ -812,7 +887,7 @@ async function buildStagedRelease(
     );
   }
 
-  for (const video of release.videos ?? []) {
+  for (const video of selectedVideos(plan, release)) {
     const videoJsonPath = rootPath(
       stageReleasePath,
       path.posix.join(
@@ -1217,6 +1292,9 @@ export async function publishReleasePackage(
   const canonicalPublishRoot = await ensurePublishRoot(
     publishRoot,
   );
+  await pruneIgnoredPublicationJunk(
+    canonicalPublishRoot,
+  );
   await assertNoUnresolvedPublishOperation(
     canonicalPublishRoot,
     releaseId,
@@ -1520,10 +1598,14 @@ export async function publishReleasePackage(
         : "build",
       resourceCount:
         publicationManifest.resources.length,
-      trackCount: release.tracks.length,
-      streamCount: release.tracks.length,
-      waveformCount: release.tracks.length,
-      videoCount: release.videos?.length ?? 0,
+      trackCount:
+        reviewedPlan.publicSelection.includedTrackIds.length,
+      streamCount:
+        reviewedPlan.publicSelection.includedTrackIds.length,
+      waveformCount:
+        reviewedPlan.publicSelection.includedTrackIds.length,
+      videoCount:
+        reviewedPlan.publicSelection.includedVideoIds.length,
       videoStreamCount: reviewedPlan.videoStreams.currentCount,
       artworkCount: reviewedPlan.items.filter(
         (item) =>

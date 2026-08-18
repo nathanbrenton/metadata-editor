@@ -56,6 +56,7 @@ export type PrepareReleaseVideoWebStreamsOptions = {
   processRunner?: VideoProcessRunner;
   now?: () => Date;
   operationId?: string;
+  includedVideoIds?: string[];
   onProgress?: (
     progress: MediaPreparationProgress,
   ) => void | Promise<void>;
@@ -584,13 +585,22 @@ export async function prepareReleaseVideoWebStreams(
       "The video preparation plan is stale. Refresh video readiness before preparing media.",
     );
   }
-  if (plan.summary.blockedCount > 0) {
+  const includedVideoIds = options.includedVideoIds
+    ? new Set(options.includedVideoIds)
+    : new Set(plan.items.map((item) => item.videoId));
+  const selectedItems = plan.items.filter((item) =>
+    includedVideoIds.has(item.videoId),
+  );
+
+  if (
+    selectedItems.some((item) => item.action === "blocked")
+  ) {
     throw new Error(
-      "Video preparation is blocked by one or more canonical video sources or required FFmpeg encoders.",
+      "Video preparation is blocked by one or more selected canonical video sources or required FFmpeg encoders.",
     );
   }
 
-  const itemsToPrepare = plan.items.filter(
+  const itemsToPrepare = selectedItems.filter(
     (item) =>
       item.action === "create" ||
       item.action === "replace",
@@ -624,7 +634,7 @@ export async function prepareReleaseVideoWebStreams(
       completedUnits,
       totalUnits,
       trackCount: 0,
-      videoCount: plan.items.length,
+      videoCount: selectedItems.length,
       updatedAt: new Date().toISOString(),
       ...progress,
     });
@@ -828,8 +838,13 @@ export async function prepareReleaseVideoWebStreams(
             { generatedAt: options.planGeneratedAt },
           );
         if (
-          verifiedPlan.summary.currentCount !==
-          verifiedPlan.summary.videoCount
+          verifiedPlan.items
+            .filter((item) => includedVideoIds.has(item.videoId))
+            .some(
+              (item) =>
+                item.action !== "none" ||
+                item.status !== "current",
+            )
         ) {
           throw new Error(
             "Prepared private video HLS derivatives did not validate as current after promotion.",

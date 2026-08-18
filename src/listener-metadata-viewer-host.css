@@ -1,0 +1,73 @@
+/* metadata-editor host integration for the shared listener metadata viewer. */
+.metadata-viewer__backdrop {
+  box-sizing: border-box;
+  padding:
+    max(8px, env(safe-area-inset-top))
+    max(8px, env(safe-area-inset-right))
+    max(82px, calc(env(safe-area-inset-bottom) + 74px))
+    max(8px, env(safe-area-inset-left));
+  place-items: start center;
+  overflow: hidden;
+}
+
+.metadata-viewer {
+  max-height: 100%;
+}
+
+/* Keep the transport dock usable while the metadata preview is open. */
+body:has(.metadata-viewer__backdrop)
+  .persistent-library-player {
+  z-index: 1200;
+  grid-template-areas:
+    "artwork identity time transport metadata";
+  grid-template-columns:
+    44px
+    minmax(0, 1fr)
+    max-content
+    auto
+    40px;
+  grid-template-rows: 54px;
+  gap: 8px 10px;
+  min-height: 0;
+  padding: 6px 10px;
+}
+
+body:has(.metadata-viewer__backdrop)
+  .persistent-library-player__waveform-region,
+body:has(.metadata-viewer__backdrop)
+  .persistent-library-player__volume-control {
+  display: none;
+}
+
+body:has(.metadata-viewer__backdrop)
+  .persistent-library-player__artwork {
+  grid-area: artwork;
+  width: 42px;
+  height: 42px;
+}
+
+body:has(.metadata-viewer__backdrop)
+  .persistent-library-player__copy {
+  grid-area: identity;
+}
+
+body:has(.metadata-viewer__backdrop)
+  .persistent-library-player__time {
+  grid-area: time;
+}
+
+body:has(.metadata-viewer__backdrop)
+  .persistent-library-player__transport {
+  grid-area: transport;
+}
+
+body:has(.metadata-viewer__backdrop)
+  .persistent-library-player__end-controls {
+  grid-area: metadata;
+}
+
+@media (max-width: 58rem) {
+  .persistent-library-player__end-controls {
+    display: none;
+  }
+}

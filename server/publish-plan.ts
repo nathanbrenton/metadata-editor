@@ -8,6 +8,12 @@ import {
 import path from "node:path";
 
 import {
+  WAVEFORM_BINARY_FILENAME,
+  WAVEFORM_BINARY_FORMAT,
+  WAVEFORM_BINARY_VERSION,
+} from "@hiplingo/media-player/waveform-binary";
+
+import {
   detectFfmpegCapabilities,
 } from "./ffmpeg-capabilities.js";
 import {
@@ -34,11 +40,15 @@ import {
   buildBrowserArtworkPlan,
 } from "./media-processing/browser-artwork.js";
 import {
+  readReleasePublicationSettings,
+} from "./publication-settings.js";
+import {
   scanReleaseById,
 } from "./scanner.js";
 import type {
   DiscoveredAsset,
   FfmpegCapabilities,
+  ReleaseScanResult,
 } from "./types.js";
 import {
   selectPreferredArtworkCandidate,
@@ -105,7 +115,7 @@ export type PublishPlan = {
   };
   contract: {
     name: "audio-player-public-package";
-    version: 5;
+    version: 6;
     catalogSchemaVersion: 1;
     mediaBaseUrl: "/media";
     trackResources: {
@@ -120,7 +130,9 @@ export type PublishPlan = {
       };
       waveform: {
         hrefField: "waveform.href";
-        filename: "waveform-peaks.json";
+        filename: typeof WAVEFORM_BINARY_FILENAME;
+        format: typeof WAVEFORM_BINARY_FORMAT;
+        formatVersion: typeof WAVEFORM_BINARY_VERSION;
         schemaVersion: number;
       };
     };
@@ -162,6 +174,15 @@ export type PublishPlan = {
     currentContentFingerprint: string;
     publishedContentFingerprint?: string;
     publishedAt?: string;
+  };
+  publicSelection: {
+    settingsRelativePath: string;
+    settingsExists: boolean;
+    settingsSha256?: string;
+    includeVideo: boolean;
+    trackSelectionMode: "all" | "selected";
+    includedTrackIds: string[];
+    includedVideoIds: string[];
   };
   planFingerprint: string;
   status: PublishPlanStatus;
@@ -351,6 +372,9 @@ function isPublishManagedDerivativeReferenceIssue(
       'track.assets.audio_playback points to "audio-playback.mp3",',
     ) ||
     issue.message.startsWith(
+      'track.assets.waveform_peaks points to "waveform-peaks.wfp",',
+    ) ||
+    issue.message.startsWith(
       'track.assets.waveform_peaks points to "waveform-peaks.json",',
     )
   );
@@ -362,6 +386,37 @@ function isPrivatePlaybackDerivativeIssue(
   return issue.code.startsWith(
     "derivative-playback-mp3-",
   );
+}
+
+function isIssueForExcludedPublicMember(
+  issue: LibraryValidationIssue,
+  release: ReleaseScanResult,
+  includedTrackIds: ReadonlySet<string>,
+  includedVideoIds: ReadonlySet<string>,
+): boolean {
+  const isWithin = (relativePath: string, ownerPath: string) =>
+    relativePath === ownerPath ||
+    relativePath.startsWith(`${ownerPath}/`);
+
+  for (const track of release.tracks) {
+    if (
+      !includedTrackIds.has(track.id) &&
+      isWithin(issue.relativePath, track.relativePath)
+    ) {
+      return true;
+    }
+  }
+
+  for (const video of release.videos ?? []) {
+    if (
+      !includedVideoIds.has(video.id) &&
+      isWithin(issue.relativePath, video.relativePath)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function issueFromValidation(
@@ -700,6 +755,50 @@ export async function buildPublishPlan(
     capabilities,
     { generatedAt },
   );
+  const publicationSettings =
+    await readReleasePublicationSettings(
+      mediaRoot,
+      release,
+    );
+  const includedTrackIds = new Set(
+    publicationSettings.includedTrackIds,
+  );
+  const selectedDerivativeItems = derivatives.items.filter(
+    (item) => includedTrackIds.has(item.trackId),
+  );
+  const selectedWebStreamItems = webStreams.items.filter(
+    (item) => includedTrackIds.has(item.trackId),
+  );
+  const includedVideoIds = new Set(
+    publicationSettings.includeVideo
+      ? (release.videos ?? [])
+          .filter(
+            (video) =>
+              !video.relatedTrackId ||
+              includedTrackIds.has(video.relatedTrackId),
+          )
+          .map((video) => video.id)
+      : [],
+  );
+  const selectedVideoItems = videoWebStreams.items.filter(
+    (item) => includedVideoIds.has(item.videoId),
+  );
+  const publicSelection: PublishPlan["publicSelection"] = {
+    settingsRelativePath:
+      publicationSettings.relativePath,
+    settingsExists: publicationSettings.exists,
+    ...(publicationSettings.sha256
+      ? { settingsSha256: publicationSettings.sha256 }
+      : {}),
+    includeVideo: publicationSettings.includeVideo,
+    trackSelectionMode:
+      publicationSettings.trackSelectionMode,
+    includedTrackIds:
+      publicationSettings.includedTrackIds,
+    includedVideoIds: selectedVideoItems.map(
+      (item) => item.videoId,
+    ),
+  };
   const playbackItems = derivatives.items.map(
     (item) => item.playback,
   );
@@ -718,7 +817,7 @@ export async function buildPublishPlan(
       (item) => item.action === "blocked",
     ).length,
   };
-  const waveformItems = derivatives.items.map(
+  const waveformItems = selectedDerivativeItems.map(
     (item) => item.waveform,
   );
   const waveforms = {
@@ -736,25 +835,55 @@ export async function buildPublishPlan(
       (item) => item.action === "blocked",
     ).length,
   };
+  const selectedWebStreams: WebStreamPlanSummary = {
+    trackCount: selectedWebStreamItems.length,
+    currentCount: selectedWebStreamItems.filter(
+      (item) => item.action === "none",
+    ).length,
+    createCount: selectedWebStreamItems.filter(
+      (item) => item.action === "create",
+    ).length,
+    replaceCount: selectedWebStreamItems.filter(
+      (item) => item.action === "replace",
+    ).length,
+    blockedCount: selectedWebStreamItems.filter(
+      (item) => item.action === "blocked",
+    ).length,
+  };
+  const selectedVideoStreams = {
+    videoCount: selectedVideoItems.length,
+    currentCount: selectedVideoItems.filter(
+      (item) => item.action === "none",
+    ).length,
+    createCount: selectedVideoItems.filter(
+      (item) => item.action === "create",
+    ).length,
+    replaceCount: selectedVideoItems.filter(
+      (item) => item.action === "replace",
+    ).length,
+    blockedCount: selectedVideoItems.filter(
+      (item) => item.action === "blocked",
+    ).length,
+  };
   const publicDerivatives = {
-    trackCount: derivatives.items.length,
-    videoCount: videoWebStreams.summary.videoCount,
+    trackCount: selectedDerivativeItems.length,
+    videoCount: selectedVideoStreams.videoCount,
     currentCount:
-      webStreams.summary.currentCount +
+      selectedWebStreams.currentCount +
       waveforms.currentCount +
-      videoWebStreams.summary.currentCount,
+      selectedVideoStreams.currentCount,
     createCount:
-      webStreams.summary.createCount +
+      selectedWebStreams.createCount +
       waveforms.createCount +
-      videoWebStreams.summary.createCount,
+      selectedVideoStreams.createCount,
     replaceCount:
-      webStreams.summary.replaceCount +
+      selectedWebStreams.replaceCount +
       waveforms.replaceCount +
-      videoWebStreams.summary.replaceCount,
+      selectedVideoStreams.replaceCount,
     blockedCount:
-      webStreams.summary.blockedCount +
+      selectedWebStreams.blockedCount +
       waveforms.blockedCount +
-      videoWebStreams.summary.blockedCount,
+      selectedVideoStreams.blockedCount,
   };
   const validationIssues = [
     ...validationReport.issues,
@@ -764,17 +893,46 @@ export async function buildPublishPlan(
   ].filter(
     (issue) =>
       !isPublishManagedDerivativeReferenceIssue(issue) &&
-      !isPrivatePlaybackDerivativeIssue(issue),
+      !isPrivatePlaybackDerivativeIssue(issue) &&
+      !isIssueForExcludedPublicMember(
+        issue,
+        release,
+        includedTrackIds,
+        includedVideoIds,
+      ),
   );
-  const issues: PublishPlanIssue[] =
-    validationIssues.map(issueFromValidation);
+  const issues: PublishPlanIssue[] = [
+    ...validationIssues.map(issueFromValidation),
+    ...publicationSettings.issues.map((issue) => ({
+      code: issue.code,
+      severity: "blocked" as const,
+      relativePath: issue.relativePath,
+      message: issue.message,
+      suggestion:
+        "Review and save the release public-media selection again.",
+    })),
+  ];
+
+  if (publicationSettings.includedTrackIds.length === 0) {
+    issues.push({
+      code: "public-track-selection-empty",
+      severity: "blocked",
+      relativePath: publicationSettings.relativePath,
+      message:
+        "A public release must include at least one canonical track.",
+      suggestion:
+        "Select at least one track for public inclusion before building the Web Package.",
+    });
+  }
   const items: PublishPlanItem[] = [];
   const metadataInputs: PublishMetadataInput[] = [];
   const metadataFiles = [
     ...release.metadataFiles.filter(
       (file) => file.filename === "release.toml" && file.exists,
     ),
-    ...release.tracks.flatMap((track) =>
+    ...release.tracks
+      .filter((track) => includedTrackIds.has(track.id))
+      .flatMap((track) =>
       track.metadataFiles.filter(
         (file) =>
           (file.filename === "track.toml" ||
@@ -782,7 +940,9 @@ export async function buildPublishPlan(
           file.exists,
       ),
     ),
-    ...(release.videos ?? []).flatMap((video) =>
+    ...(release.videos ?? [])
+      .filter((video) => includedVideoIds.has(video.id))
+      .flatMap((video) =>
       video.metadataFiles.filter(
         (file) =>
           file.filename === "video.toml" &&
@@ -894,7 +1054,7 @@ export async function buildPublishPlan(
     });
   }
 
-  for (const trackPlan of derivatives.items) {
+  for (const trackPlan of selectedDerivativeItems) {
     const trackDestination = path.posix.join(
       destinationReleaseRelativePath,
       "tracks",
@@ -1121,7 +1281,9 @@ export async function buildPublishPlan(
     });
   }
 
-  for (const video of release.videos ?? []) {
+  for (const video of (release.videos ?? []).filter(
+    (candidate) => includedVideoIds.has(candidate.id),
+  )) {
     const videoDestination = path.posix.join(
       destinationReleaseRelativePath,
       "videos",
@@ -1273,7 +1435,7 @@ export async function buildPublishPlan(
   };
   const contract: PublishPlan["contract"] = {
     name: "audio-player-public-package",
-    version: 5,
+    version: 6,
     catalogSchemaVersion: 1,
     mediaBaseUrl: "/media",
     trackResources: {
@@ -1289,7 +1451,9 @@ export async function buildPublishPlan(
       },
       waveform: {
         hrefField: "waveform.href",
-        filename: derivatives.profile.waveform.filename,
+        filename: WAVEFORM_BINARY_FILENAME,
+        format: WAVEFORM_BINARY_FORMAT,
+        formatVersion: WAVEFORM_BINARY_VERSION,
         schemaVersion:
           derivatives.profile.waveform.schemaVersion,
       },
@@ -1348,6 +1512,7 @@ export async function buildPublishPlan(
     destinationReleaseRelativePath,
     destinationReleaseExists: releaseDestinationExists,
     publication,
+    publicSelection,
     status: planStatus(issues),
     issues,
     metadataInputs,
@@ -1371,9 +1536,9 @@ export async function buildPublishPlan(
     },
     derivatives: publicDerivatives,
     libraryPlayback,
-    webStreams: webStreams.summary,
+    webStreams: selectedWebStreams,
     videoStreams: {
-      ...videoWebStreams.summary,
+      ...selectedVideoStreams,
       planFingerprint: videoWebStreams.planFingerprint,
       generatedAt: videoWebStreams.generatedAt,
     },

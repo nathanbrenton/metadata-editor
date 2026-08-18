@@ -29,18 +29,19 @@ const helpSource = await readFile(
 );
 
 test(
-  "Live exposes a simplified read-only comparison with deployment details available on demand",
+  "Live exposes a destination-aware read-only comparison with deployment details available on demand",
   () => {
     assert.match(appSource, /Live status/);
-    assert.match(appSource, /Live target/);
-    assert.match(appSource, /"Check Live"/);
+    assert.match(appSource, /Selected destination/);
+    assert.match(appSource, /Deployment destination/);
+    assert.match(appSource, /`Check \${activeDeploymentProfileLabel}`/);
     assert.match(
       appSource,
-      /className="primary"[\s\S]*?loadDeploymentSyncPlan\(\)[\s\S]*?"Check Live"/,
+      /className="primary"[\s\S]*?loadDeploymentSyncPlan\(\)[\s\S]*?activeDeploymentProfileLabel/,
     );
     assert.match(appSource, /Recheck Web Package/);
     assert.match(appSource, /changes to deploy/);
-    assert.match(appSource, /Live is up to date/);
+    assert.match(appSource, /is up to date/);
     assert.match(
       appSource,
       /deploymentAudit\.summary\.totalBytes/,
@@ -54,10 +55,11 @@ test(
       /incremental upload size depends on changed files/,
     );
     assert.ok(
-      appSource.indexOf('"Check Live"') <
+      appSource.indexOf('`Check ${activeDeploymentProfileLabel}`') <
         appSource.indexOf('className="publish-host-boundary"'),
-      "Check Live should be elevated into the always-visible Live status header",
+      "destination-aware Check action should stay above technical connection details",
     );
+    assert.match(appSource, /Production deployment is CLI-only/);
     assert.match(
       appSource,
       /\/api\/publish\/deployment-sync-plan/,

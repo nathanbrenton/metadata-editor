@@ -3,6 +3,7 @@ import {
   createHash,
 } from "node:crypto";
 import {
+  access,
   mkdtemp,
   mkdir,
   readFile,
@@ -83,7 +84,7 @@ async function createPublishedFixture(): Promise<{
       },
       contract: {
         name: "audio-player-public-package",
-        version: 5,
+        version: 6,
       },
       releaseId,
       publishedAt: "2026-08-10T12:00:00.000Z",
@@ -149,7 +150,7 @@ test(
     assert.ok(audit.candidateManifest);
     assert.equal(
       audit.candidateManifest?.publicPackageContract.versions[0],
-      5,
+      6,
     );
     assert.ok(
       audit.issues.some(
@@ -260,6 +261,164 @@ test(
           issue.message.includes("hash verification"),
       ),
     );
+  },
+);
+
+test(
+  "ignores a root Finder .DS_Store and excludes it from the deployment snapshot",
+  async (t) => {
+    const fixture = await createPublishedFixture();
+    t.after(async () => {
+      await rm(fixture.root, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    await writeFile(
+      path.join(fixture.root, ".DS_Store"),
+      "finder metadata",
+      "utf8",
+    );
+
+    const audit = await auditPublishedMediaDeployment(
+      fixture.root,
+    );
+
+    assert.equal(audit.summary.blockedCount, 0);
+    assert.equal(
+      audit.issues.some(
+        (issue) =>
+          issue.code === "unexpected-root-entry" &&
+          issue.relativePath === ".DS_Store",
+      ),
+      false,
+    );
+    assert.ok(audit.candidateManifest);
+    assert.equal(
+      audit.candidateManifest?.files.some(
+        (file) => file.path === ".DS_Store",
+      ),
+      false,
+    );
+  },
+);
+
+test(
+  "ignores nested operating-system and editor junk throughout the deployment snapshot",
+  async (t) => {
+    const fixture = await createPublishedFixture();
+    t.after(async () => {
+      await rm(fixture.root, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    const releaseRoot = path.dirname(fixture.releaseJsonPath);
+    await writeFile(
+      path.join(releaseRoot, ".DS_Store"),
+      "finder metadata",
+      "utf8",
+    );
+    await writeFile(
+      path.join(releaseRoot, "Thumbs.db"),
+      "windows metadata",
+      "utf8",
+    );
+    await writeFile(
+      path.join(releaseRoot, "._release.json"),
+      "appledouble",
+      "utf8",
+    );
+    await writeFile(
+      path.join(releaseRoot, ".release.json.swp"),
+      "editor swap",
+      "utf8",
+    );
+    await mkdir(
+      path.join(releaseRoot, "nested", "__MACOSX"),
+      { recursive: true },
+    );
+    await writeFile(
+      path.join(
+        releaseRoot,
+        "nested",
+        "__MACOSX",
+        "metadata.bin",
+      ),
+      "finder archive metadata",
+      "utf8",
+    );
+
+    const audit = await auditPublishedMediaDeployment(
+      fixture.root,
+    );
+
+    assert.equal(audit.summary.blockedCount, 0);
+    assert.ok(audit.candidateManifest);
+    for (const junkName of [
+      ".DS_Store",
+      "Thumbs.db",
+      "._release.json",
+      ".release.json.swp",
+      "metadata.bin",
+    ]) {
+      assert.equal(
+        audit.candidateManifest?.files.some((file) =>
+          file.path.endsWith(`/${junkName}`),
+        ),
+        false,
+      );
+    }
+  },
+);
+
+test(
+  "deployment-manifest refresh physically prunes ignored publication junk",
+  async (t) => {
+    const fixture = await createPublishedFixture();
+    t.after(async () => {
+      await rm(fixture.root, {
+        recursive: true,
+        force: true,
+      });
+    });
+
+    const releaseRoot = path.dirname(fixture.releaseJsonPath);
+    const rootFinderJunk = path.join(fixture.root, ".DS_Store");
+    const nestedArchiveJunk = path.join(
+      releaseRoot,
+      "nested",
+      "__MACOSX",
+      "metadata.bin",
+    );
+    const editorJunk = path.join(
+      releaseRoot,
+      ".release.json.swp",
+    );
+
+    await writeFile(rootFinderJunk, "finder metadata", "utf8");
+    await mkdir(path.dirname(nestedArchiveJunk), {
+      recursive: true,
+    });
+    await writeFile(
+      nestedArchiveJunk,
+      "finder archive metadata",
+      "utf8",
+    );
+    await writeFile(editorJunk, "editor swap", "utf8");
+
+    const audit =
+      await writePublishedMediaDeploymentManifest(
+        fixture.root,
+      );
+
+    assert.equal(audit.status, "ready");
+    assert.equal(audit.deployable, true);
+    await assert.rejects(access(rootFinderJunk), /ENOENT/);
+    await assert.rejects(access(nestedArchiveJunk), /ENOENT/);
+    await assert.rejects(access(editorJunk), /ENOENT/);
   },
 );
 

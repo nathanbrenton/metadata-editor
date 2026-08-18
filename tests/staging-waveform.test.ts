@@ -10,6 +10,10 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  decodeWaveformBinary,
+} from "../../packages/media-player/src/waveform-binary.js";
+
+import {
   writeStagingWaveform,
 } from "../server/media-processing/staging-waveform.js";
 
@@ -89,7 +93,7 @@ test(
     const masterPath =
       path.join(root, "audio-master.wav");
     const waveformPath =
-      path.join(root, "waveform-peaks.json");
+      path.join(root, "waveform-peaks.wfp");
 
     await writeFile(
       masterPath,
@@ -101,17 +105,9 @@ test(
       waveformPath,
     );
 
-    const waveform = JSON.parse(
-      await readFile(
-        waveformPath,
-        "utf8",
-      ),
-    ) as {
-      version: number;
-      peaksPerSecond: number;
-      peakCount: number;
-      peaks: unknown[];
-    };
+    const waveform = decodeWaveformBinary(
+      await readFile(waveformPath),
+    );
 
     assert.equal(waveform.version, 2);
     assert.equal(

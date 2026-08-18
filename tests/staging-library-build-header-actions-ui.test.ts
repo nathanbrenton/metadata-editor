@@ -33,7 +33,7 @@ test("existing-release Staging Build keeps the write gate in the workspace heade
   );
   assert.match(
     headerSource,
-    /Confirm waveform JSON-only build/,
+    /Confirm waveform-only build/,
   );
   assert.match(
     headerSource,
@@ -45,4 +45,22 @@ test("existing-release Staging Build keeps the write gate in the workspace heade
     workspaceSource,
     /staging-library-build-readiness/,
   );
+});
+
+
+test("existing-release Staging exposes explicit metadata editing and Library browsing actions", () => {
+  const workspaceSource = readFileSync(
+    new URL("../src/StagingLibraryBuildWorkspace.tsx", import.meta.url),
+    "utf8",
+  );
+  const appSource = readFileSync(
+    new URL("../src/App.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(workspaceSource, /onEditMetadata: \(\) => void/);
+  assert.match(workspaceSource, />\s*Edit metadata\s*</);
+  assert.match(workspaceSource, />\s*Open in Library\s*</);
+  assert.match(appSource, /onEditReleaseMetadata=\{\(releaseId\) =>[\s\S]*?openReleaseInLibrary\(releaseId\)/);
+  assert.match(appSource, /onOpenRelease=\{\(releaseId\) => \{[\s\S]*?openReleaseOverview\(releaseId\)/);
 });

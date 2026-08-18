@@ -61,7 +61,7 @@ test("documents Library video inspection, guarded preparation, and public-packag
   );
   assert.match(
     helpSource,
-    /contract v5 publishes ordered sanitized/,
+    /contract v6 publishes ordered sanitized/,
   );
   assert.match(
     helpSource,

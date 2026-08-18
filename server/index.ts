@@ -17,6 +17,12 @@ import {
 import path from "node:path";
 
 import {
+  WAVEFORM_BINARY_CONTENT_TYPE,
+  WAVEFORM_BINARY_FILENAME,
+  decodeWaveformPayload,
+} from "@hiplingo/media-player/waveform-binary";
+
+import {
   buildBlockingSourceStatuses,
   INGEST_DRAFT_SCHEMA_VERSION,
 } from "../shared/ingest-drafts.js";
@@ -98,6 +104,8 @@ import {
 import {
   defaultIngestOutputRoot,
   executeIngestReleaseBuild,
+  executeLegacyArtworkReceiptRepair,
+  executeLegacyIngestReceiptMigration,
   inspectIngestStagingTarget,
   parseIngestBuildDraft,
   prepareIngestReleaseBuild,
@@ -154,6 +162,9 @@ import {
 import {
   buildPublishPlan,
 } from "./publish-plan.js";
+import {
+  saveReleasePublicationSettings,
+} from "./publication-settings.js";
 import {
   publishReleasePackage,
 } from "./publish-writer.js";
@@ -887,31 +898,72 @@ async function sendLibraryWaveform(
     );
   }
 
-  const candidatePath = assertPathWithinRoot(
-    mediaRoot,
-    path.join(
-      mediaRoot,
-      track.relativePath,
-      "waveform-peaks.json",
-    ),
-  );
-  const canonicalPath = await realpath(candidatePath);
-  assertPathWithinRoot(mediaRoot, canonicalPath);
+  const candidates = [
+    {
+      filename: WAVEFORM_BINARY_FILENAME,
+      contentType: WAVEFORM_BINARY_CONTENT_TYPE,
+    },
+    {
+      filename: "waveform-peaks.json",
+      contentType: "application/json; charset=utf-8",
+    },
+  ] as const;
 
-  const fileStatus = await stat(canonicalPath);
-  if (!fileStatus.isFile()) {
+  let selected:
+    | { canonicalPath: string; contentType: string }
+    | null = null;
+
+  for (const candidate of candidates) {
+    const candidatePath = assertPathWithinRoot(
+      mediaRoot,
+      path.join(
+        mediaRoot,
+        track.relativePath,
+        candidate.filename,
+      ),
+    );
+
+    try {
+      const canonicalPath = await realpath(candidatePath);
+      assertPathWithinRoot(mediaRoot, canonicalPath);
+      const fileStatus = await stat(canonicalPath);
+
+      if (!fileStatus.isFile()) {
+        continue;
+      }
+
+      selected = {
+        canonicalPath,
+        contentType: candidate.contentType,
+      };
+      break;
+    } catch (error) {
+      const code =
+        error &&
+        typeof error === "object" &&
+        "code" in error
+          ? String(error.code)
+          : "";
+
+      if (code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+
+  if (!selected) {
     throw new Error(
-      "Waveform target is not a regular file.",
+      "Waveform data is not prepared for this Library track.",
     );
   }
 
-  const content = await readFile(canonicalPath, "utf8");
-  JSON.parse(content);
+  const content = await readFile(selected.canonicalPath);
+  decodeWaveformPayload(content);
 
   response.statusCode = 200;
   response.setHeader(
     "Content-Type",
-    "application/json; charset=utf-8",
+    selected.contentType,
   );
   response.setHeader(
     "Cache-Control",
@@ -1488,6 +1540,117 @@ const server = createServer(
             error instanceof Error
               ? error.message
               : "Unknown staging-target error",
+        });
+      }
+
+      return;
+    }
+
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/ingest/migrate-legacy-receipt"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          Array.isArray(body)
+        ) {
+          throw new Error(
+            "Legacy receipt migration request must be an object.",
+          );
+        }
+        const value = body as Record<string, unknown>;
+        if (
+          typeof value.releaseId !== "string" ||
+          typeof value.expectedFingerprint !== "string" ||
+          typeof value.confirmation !== "string"
+        ) {
+          throw new Error(
+            "Legacy receipt migration requires releaseId, expectedFingerprint, and confirmation.",
+          );
+        }
+
+        const outputRoot = await resolveIngestOutputRoot();
+        const receipt = await executeLegacyIngestReceiptMigration(
+          outputRoot,
+          value.releaseId,
+          value.expectedFingerprint,
+          value.confirmation,
+        );
+        const status = await inspectIngestStagingTarget(
+          outputRoot,
+          value.releaseId,
+        );
+
+        sendJson(response, 200, {
+          receipt,
+          status,
+        });
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown legacy receipt migration error",
+        });
+      }
+
+      return;
+    }
+
+    if (
+      request.method === "POST" &&
+      requestUrl.pathname ===
+        "/api/ingest/repair-legacy-artwork-receipt"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+        if (
+          typeof body !== "object" ||
+          body === null ||
+          Array.isArray(body)
+        ) {
+          throw new Error(
+            "Legacy artwork receipt repair request must be an object.",
+          );
+        }
+        const value = body as Record<string, unknown>;
+        if (
+          typeof value.releaseId !== "string" ||
+          typeof value.expectedFingerprint !== "string" ||
+          typeof value.confirmation !== "string"
+        ) {
+          throw new Error(
+            "Legacy artwork receipt repair requires releaseId, expectedFingerprint, and confirmation.",
+          );
+        }
+
+        const outputRoot = await resolveIngestOutputRoot();
+        const receipt = await executeLegacyArtworkReceiptRepair(
+          outputRoot,
+          value.releaseId,
+          value.expectedFingerprint,
+          value.confirmation,
+        );
+        const status = await inspectIngestStagingTarget(
+          outputRoot,
+          value.releaseId,
+        );
+
+        sendJson(response, 200, {
+          receipt,
+          status,
+        });
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown legacy artwork receipt repair error",
         });
       }
 
@@ -5687,6 +5850,102 @@ const server = createServer(
     }
 
     if (
+      request.method === "PUT" &&
+      requestUrl.pathname === "/api/publish/release-settings"
+    ) {
+      try {
+        const body = await readJsonBody(request);
+
+        if (typeof body !== "object" || body === null) {
+          sendJson(response, 400, {
+            error: "Expected a JSON object",
+          });
+          return;
+        }
+
+        const releaseId =
+          "releaseId" in body &&
+          typeof body.releaseId === "string"
+            ? body.releaseId
+            : undefined;
+        const includeVideo =
+          "includeVideo" in body &&
+          typeof body.includeVideo === "boolean"
+            ? body.includeVideo
+            : undefined;
+        const includedTrackIds =
+          "includedTrackIds" in body &&
+          Array.isArray(body.includedTrackIds) &&
+          body.includedTrackIds.every(
+            (value) => typeof value === "string",
+          )
+            ? body.includedTrackIds
+            : undefined;
+        const expectedSha256 =
+          "expectedSha256" in body &&
+          typeof body.expectedSha256 === "string"
+            ? body.expectedSha256
+            : undefined;
+
+        if (!releaseId) {
+          sendJson(response, 400, {
+            error: "releaseId is required",
+          });
+          return;
+        }
+        if (includeVideo === undefined) {
+          sendJson(response, 400, {
+            error: "includeVideo must be true or false",
+          });
+          return;
+        }
+        if (!includedTrackIds) {
+          sendJson(response, 400, {
+            error: "includedTrackIds must be an array of track IDs",
+          });
+          return;
+        }
+
+        const mediaRoot = await resolveMediaRoot();
+        const release = await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+        if (!release) {
+          sendJson(response, 404, {
+            error: "Release not found",
+          });
+          return;
+        }
+
+        const settings =
+          await saveReleasePublicationSettings(
+            mediaRoot,
+            release,
+            {
+              includeVideo,
+              includedTrackIds,
+              ...(expectedSha256
+                ? { expectedSha256 }
+                : {}),
+            },
+          );
+
+        sendJson(response, 200, { settings });
+      } catch (error) {
+        sendJson(response, 400, {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Unknown public-media selection error",
+        });
+      }
+
+      return;
+    }
+
+    if (
       request.method === "GET" &&
       requestUrl.pathname === "/api/publish/unpublish-plan"
     ) {
@@ -5959,9 +6218,7 @@ const server = createServer(
               scope === "playback"
                 ? plan.libraryPlayback.createCount > 0 ||
                   plan.libraryPlayback.replaceCount > 0
-                : plan.libraryPlayback.createCount > 0 ||
-                  plan.libraryPlayback.replaceCount > 0 ||
-                  plan.webStreams.createCount > 0 ||
+                : plan.webStreams.createCount > 0 ||
                   plan.webStreams.replaceCount > 0 ||
                   plan.waveforms.createCount > 0 ||
                   plan.waveforms.replaceCount > 0 ||
@@ -6037,9 +6294,18 @@ const server = createServer(
                   { generatedAt },
                 );
 
-              if (videoPlan.summary.blockedCount > 0) {
+              const includedVideoIds = new Set(
+                plan.publicSelection.includedVideoIds,
+              );
+              if (
+                videoPlan.items
+                  .filter((item) =>
+                    includedVideoIds.has(item.videoId),
+                  )
+                  .some((item) => item.action === "blocked")
+              ) {
                 throw new Error(
-                  "Video preparation is blocked by one or more canonical video sources or required FFmpeg encoders.",
+                  "Video preparation is blocked by one or more selected canonical video sources or required FFmpeg encoders.",
                 );
               }
 
@@ -6053,6 +6319,8 @@ const server = createServer(
                     planGeneratedAt:
                       videoPlan.generatedAt,
                     ffmpegCapabilities: capabilities,
+                    includedVideoIds:
+                      plan.publicSelection.includedVideoIds,
                   },
                 );
             }
@@ -6137,6 +6405,14 @@ const server = createServer(
           typeof body.operationId === "string"
             ? body.operationId
             : "";
+        const includedVideoIds =
+          "includedVideoIds" in body &&
+          Array.isArray(body.includedVideoIds) &&
+          body.includedVideoIds.every(
+            (value) => typeof value === "string",
+          )
+            ? body.includedVideoIds
+            : undefined;
 
         if (
           !releaseId ||
@@ -6172,6 +6448,9 @@ const server = createServer(
               planGeneratedAt,
               ...(operationId
                 ? { operationId }
+                : {}),
+              ...(includedVideoIds
+                ? { includedVideoIds }
                 : {}),
               onProgress:
                 recordMediaPreparationProgress,

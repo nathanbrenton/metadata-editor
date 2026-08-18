@@ -14,10 +14,6 @@ const stagingSource = await readFile(
   new URL("../src/IngestReleaseBuilder.tsx", import.meta.url),
   "utf8",
 );
-const waveformViewSource = await readFile(
-  new URL("../src/LibraryWaveformView.tsx", import.meta.url),
-  "utf8",
-);
 
 test("metadata-editor normalizes private playback items through the shared media contract", () => {
   assert.match(playerSource, /type PersistentPlaybackTrack = PlayableMediaItem<string>/);
@@ -47,8 +43,7 @@ test("metadata-editor normalizes private playback items through the shared media
 
   assert.match(stagingSource, /source: buildIngestAudioPreviewUrl\(/);
   assert.match(stagingSource, /releaseTitle: currentInspection\.candidate\.displayTitle/);
-  assert.match(waveformViewSource, /source: buildAudioPreviewUrl\(/);
-  assert.match(waveformViewSource, /selectedQueueTrack\.detail/);
+  assert.match(appSource, /waveformUrl: buildLibraryWaveformUrl\(/);
 
   assert.doesNotMatch(playerSource, /sourceUrl/);
   assert.doesNotMatch(playerSource, /subtitle:/);

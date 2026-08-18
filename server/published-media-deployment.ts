@@ -22,6 +22,10 @@ import {
 import {
   assertPathWithinRoot,
 } from "./media-root.js";
+import {
+  isIgnoredPublicationJunk,
+  pruneIgnoredPublicationJunk,
+} from "./publication-junk.js";
 
 export type PublishedMediaDeploymentIssue = {
   code: string;
@@ -246,6 +250,10 @@ async function walkRegularFiles(
       throw new Error(
         `Published media contains a symbolic link: ${entryRelativePath}`,
       );
+    }
+
+    if (isIgnoredPublicationJunk(entryRelativePath)) {
+      continue;
     }
 
     if (entry.isDirectory()) {
@@ -483,7 +491,8 @@ async function buildCandidateManifest(
   const deploymentFiles = filePaths
     .filter(
       (relativePath) =>
-        relativePath !== deploymentManifestFilename,
+        relativePath !== deploymentManifestFilename &&
+        !isIgnoredPublicationJunk(relativePath),
     );
   const files: PublishedMediaDeploymentFile[] = [];
 
@@ -603,6 +612,10 @@ export async function auditPublishedMediaDeployment(
     withFileTypes: true,
   });
   for (const entry of rootEntries) {
+    if (isIgnoredPublicationJunk(entry.name)) {
+      continue;
+    }
+
     if (entry.isSymbolicLink()) {
       issues.push({
         code: "root-symbolic-link",
@@ -1087,6 +1100,8 @@ async function atomicWriteJson(
 export async function writePublishedMediaDeploymentManifest(
   publishRoot: string,
 ): Promise<PublishedMediaDeploymentAudit> {
+  await pruneIgnoredPublicationJunk(publishRoot);
+
   const before = await auditPublishedMediaDeployment(
     publishRoot,
   );

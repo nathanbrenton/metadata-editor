@@ -85,7 +85,7 @@ async function createPublishedFixture(): Promise<{
       },
       contract: {
         name: "audio-player-public-package",
-        version: 5,
+        version: 6,
       },
       releaseId,
       publishedAt: "2026-08-11T06:00:00.000Z",

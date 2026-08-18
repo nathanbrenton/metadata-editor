@@ -18,6 +18,10 @@ const helpSource = readFileSync(
   new URL("../src/workflow-help-content.ts", import.meta.url),
   "utf8",
 );
+const appSource = readFileSync(
+  new URL("../src/App.tsx", import.meta.url),
+  "utf8",
+);
 
 test("Artwork & files exposes current Library artwork and one explicit replacement confirmation", () => {
   assert.match(builderSource, /existingArtwork=\{targetStatus\?\.existingArtwork \?\? \[\]\}/);
@@ -41,4 +45,12 @@ test("Workflow & Help documents artwork-only revisions and canonical artwork rep
   assert.match(helpSource, /current canonical Library front artwork/i);
   assert.match(helpSource, /Confirm artwork replacement/i);
   assert.match(helpSource, /No original audio needs to be resupplied/i);
+});
+test("Ingest lets an artwork-only revision reach Staging when an existing Library release is resolved", () => {
+  assert.match(appSource, /const artworkOnlyRevisionCandidate =/);
+  assert.match(appSource, /candidate\.imageCount > 0/);
+  assert.match(appSource, /artworkOnlyRevisionCandidate &&\s*!resolvedTargetRelease/);
+  assert.match(appSource, /candidate\.imageCount === 0 &&\s*!hasMetadataSidecar/);
+  assert.match(appSource, /Continue to Staging to assign this artwork/);
+  assert.match(appSource, /Artwork-only revisions must target an existing Library release/);
 });

@@ -19,7 +19,15 @@ test("defers the optional Library Waveform browser out of the initial applicatio
   );
   assert.match(
     appSource,
-    /import type \{[\s\S]*LibraryWaveformNavigationRequest[\s\S]*from "\.\/LibraryWaveformView\.js"/,
+    /const LibraryWaveformView = lazy\(async \(\) => \{/,
+  );
+  assert.match(
+    appSource,
+    /await import\(\s*\"\.\/LibraryWaveformView\.js\"\s*\)/,
+  );
+  assert.doesNotMatch(
+    appSource,
+    /LibraryWaveformNavigationRequest/,
   );
   assert.match(
     appSource,

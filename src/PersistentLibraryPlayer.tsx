@@ -27,7 +27,7 @@ import {
   type PersistentMediaElementController,
 } from "@hiplingo/media-player";
 import {
-  parseMediaWaveformData,
+  decodeMediaWaveformPayload,
   type MediaWaveformData,
   type WaveformColorMode,
 } from "./media-waveform.js";
@@ -316,7 +316,11 @@ export function usePersistentLibraryPlayback(): PersistentLibraryPlaybackControl
           );
         }
 
-        setWaveform(parseMediaWaveformData(await response.json()));
+        setWaveform(
+          decodeMediaWaveformPayload(
+            await response.arrayBuffer(),
+          ),
+        );
       })
       .catch((waveformLoadError) => {
         if (controller.signal.aborted) {
@@ -498,10 +502,20 @@ export function PersistentLibraryPlayerBar({
   playback,
   colorMode,
   onOpenLibraryWaveform,
+  metadataButtonRef,
+  metadataPreviewAvailable = false,
+  metadataPreviewLoading = false,
+  onOpenMetadataPreview,
 }: {
   playback: PersistentLibraryPlaybackController;
   colorMode: WaveformColorMode;
-  onOpenLibraryWaveform?: (releaseId: string) => void;
+  onOpenLibraryWaveform?: () => void;
+  metadataButtonRef?: RefObject<
+    HTMLButtonElement | null
+  >;
+  metadataPreviewAvailable?: boolean;
+  metadataPreviewLoading?: boolean;
+  onOpenMetadataPreview?: () => void;
 }) {
   const track = playback.currentTrack;
 
@@ -526,10 +540,10 @@ export function PersistentLibraryPlayerBar({
       artworkUrl={track?.artworkUrl ?? null}
       onArtworkClick={
         track?.releaseId && onOpenLibraryWaveform
-          ? () => onOpenLibraryWaveform(track.releaseId!)
+          ? onOpenLibraryWaveform
           : undefined
       }
-      artworkActionLabel="Open current release in Library Waveform view"
+      artworkActionLabel="Open current track in Library Waveform view"
       artworkFallback={<span>HL</span>}
       title={track?.title ?? "Ready to preview"}
       context={
@@ -581,6 +595,30 @@ export function PersistentLibraryPlayerBar({
           }
         />
       }
+      endControls={
+        onOpenMetadataPreview ? (
+          <button
+            ref={metadataButtonRef}
+            type="button"
+            className="persistent-library-player__metadata-button"
+            aria-label="Preview current track metadata as presented on Hiplingo"
+            title="Track information"
+            disabled={
+              !metadataPreviewAvailable ||
+              metadataPreviewLoading
+            }
+            onClick={
+              onOpenMetadataPreview
+            }
+          >
+            <span aria-hidden="true">
+              {metadataPreviewLoading
+                ? "…"
+                : "i"}
+            </span>
+          </button>
+        ) : null
+      }
       error={playback.error}
       ariaLabel="Persistent media player"
       classNames={{
@@ -601,6 +639,7 @@ export function PersistentLibraryPlayerBar({
         volumeIcon: "persistent-library-player__volume-icon",
         volumePopup: "persistent-library-player__volume-popup",
         volumeSlider: "persistent-library-player__volume-slider",
+        endControls: "persistent-library-player__end-controls",
         error: "persistent-library-player__error",
       }}
       />

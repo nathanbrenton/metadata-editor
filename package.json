@@ -20,6 +20,7 @@
     "tags:summarize": "scripts/player-tag-tests/summarize-probes.py",
     "audit:file-spec": "tsx scripts/audit-media-file-spec.ts",
     "audit:media-technical": "tsx scripts/audit-media-technical.ts",
+    "audit:public-v1": "tsx scripts/audit-publication-v1.ts",
     "repair:ingest-receipt-release-prefix": "tsx scripts/repair-ingest-receipt-release-prefix.ts",
     "verify:published-media": "tsx scripts/verify-published-media.ts",
     "manifest:published-media": "tsx scripts/write-published-media-deployment-manifest.ts",

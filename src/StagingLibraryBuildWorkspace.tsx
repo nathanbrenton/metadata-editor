@@ -79,12 +79,14 @@ function actionLabel(
 export function StagingLibraryBuildWorkspace({
   release,
   onBack,
+  onEditMetadata,
   onOpenLibrary,
   onLibraryChanged,
   onNotify,
 }: {
   release: StagingLibraryBuildRelease;
   onBack: () => void;
+  onEditMetadata: () => void;
   onOpenLibrary: () => void;
   onLibraryChanged: () => void | Promise<void>;
   onNotify: (
@@ -236,7 +238,7 @@ export function StagingLibraryBuildWorkspace({
             <>
               <label
                 className="staging-library-build-header-confirmation"
-                title="I confirm this build may create or replace waveform JSON only."
+                title="I confirm this build may create or replace waveform binary only."
               >
                 <input
                   type="checkbox"
@@ -246,7 +248,7 @@ export function StagingLibraryBuildWorkspace({
                     setConfirmed(event.target.checked)
                   }
                 />
-                <span>Confirm waveform JSON-only build</span>
+                <span>Confirm waveform-only build</span>
               </label>
               <button
                 type="button"
@@ -268,6 +270,13 @@ export function StagingLibraryBuildWorkspace({
           </button>
           <button
             type="button"
+            className="primary-button"
+            onClick={onEditMetadata}
+          >
+            Edit metadata
+          </button>
+          <button
+            type="button"
             onClick={onOpenLibrary}
           >
             Open in Library
@@ -283,7 +292,7 @@ export function StagingLibraryBuildWorkspace({
           <h3>Preview Library waveform build</h3>
           <p>
             Inspect the existing canonical audio masters and create or refresh
-            only <code>waveform-peaks.json</code>. This repair build does not
+            only <code>waveform-peaks.wfp</code>. This repair build does not
             replace masters, rewrite metadata, change artwork or numbering,
             create playback MP3s, or create HLS.
           </p>
@@ -369,7 +378,7 @@ export function StagingLibraryBuildWorkspace({
                       </td>
                       <td>
                         <code>
-                          waveform-peaks.json
+                          waveform-peaks.wfp
                         </code>
                       </td>
                       <td>

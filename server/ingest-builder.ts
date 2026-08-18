@@ -22,6 +22,10 @@ import {
   randomUUID,
 } from "node:crypto";
 import path from "node:path";
+
+import {
+  decodeWaveformBinary,
+} from "@hiplingo/media-player/waveform-binary";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -70,6 +74,9 @@ import { extractEmbeddedArtwork } from "./embedded-artwork.js";
 import {
   buildGeneratedTomlPreview,
 } from "./toml-preview.js";
+import {
+  scanReleaseById,
+} from "./scanner.js";
 import {
   inspectWaveformDocument,
 } from "./media-processing/plan.js";
@@ -351,6 +358,12 @@ function parseTrackDraft(
     );
   }
 
+  const replacementTrackId = optionalString(
+    value.replacementTrackId,
+    `Track ${index + 1} replacement target`,
+    255,
+  );
+
   return {
     sourceRelativePath: requireString(
       value.sourceRelativePath,
@@ -387,9 +400,11 @@ function parseTrackDraft(
       `Track ${index + 1} destination filename`,
       255,
     ),
+    ...(replacementTrackId
+      ? { replacementTrackId }
+      : {}),
   };
 }
-
 
 function parseVideoDraft(
   value: unknown,
@@ -1783,6 +1798,12 @@ export async function inspectIngestStagingTarget(
   }
 
   let existingReceipt: ExistingIngestReceipt | null = null;
+  let legacyReceiptMigration:
+    | Awaited<ReturnType<typeof prepareLegacyIngestReceiptMigration>>
+    | null = null;
+  let legacyArtworkReceiptRepair:
+    | Awaited<ReturnType<typeof prepareLegacyArtworkReceiptRepair>>
+    | null = null;
 
   if (exists) {
     const receiptPath = assertPathWithinRoot(
@@ -1796,6 +1817,29 @@ export async function inspectIngestStagingTarget(
           releasePath,
           releaseId,
         );
+      legacyArtworkReceiptRepair =
+        await prepareLegacyArtworkReceiptRepair(
+          canonicalOutputRoot,
+          releaseId,
+        );
+    } else {
+      const preparedMigration =
+        await prepareLegacyIngestReceiptMigrationInternal(
+          canonicalOutputRoot,
+          releaseId,
+        );
+      existingReceipt = preparedMigration.existingReceipt;
+      legacyReceiptMigration = {
+        releaseId: preparedMigration.releaseId,
+        releaseRelativePath:
+          preparedMigration.releaseRelativePath,
+        fingerprint: preparedMigration.fingerprint,
+        confirmationPhrase:
+          LEGACY_INGEST_RECEIPT_MIGRATION_CONFIRMATION,
+        trackCount: preparedMigration.summary.trackCount,
+        videoCount: preparedMigration.summary.videoCount,
+        copyCount: preparedMigration.summary.copyCount,
+      };
     }
   }
 
@@ -1940,6 +1984,31 @@ export async function inspectIngestStagingTarget(
     exists,
     operation: exists ? "update" : "create",
     releaseRelativePath,
+    ...(legacyReceiptMigration
+      ? {
+          legacyReceiptMigration: {
+            required: true as const,
+            fingerprint: legacyReceiptMigration.fingerprint,
+            confirmationPhrase:
+              legacyReceiptMigration.confirmationPhrase,
+            trackCount: legacyReceiptMigration.trackCount,
+            videoCount: legacyReceiptMigration.videoCount,
+            copyCount: legacyReceiptMigration.copyCount,
+          },
+        }
+      : {}),
+    ...(legacyArtworkReceiptRepair
+      ? {
+          legacyArtworkReceiptRepair: {
+            required: true as const,
+            fingerprint: legacyArtworkReceiptRepair.fingerprint,
+            confirmationPhrase:
+              LEGACY_ARTWORK_RECEIPT_REPAIR_CONFIRMATION,
+            artworkCount: legacyArtworkReceiptRepair.artworkCount,
+            destinations: legacyArtworkReceiptRepair.destinations,
+          },
+        }
+      : {}),
     ...(existingRelease ? { existingRelease } : {}),
     existingTracks: existingTracks.map((track) => ({
       id: track.id,
@@ -2206,6 +2275,994 @@ async function readExistingIngestReceipt(
     copies: rawValue.copies.map(
       parseExistingReceiptCopy,
     ),
+  };
+}
+
+
+export const LEGACY_INGEST_RECEIPT_MIGRATION_CONFIRMATION =
+  "MIGRATE_LEGACY_INGEST_RECEIPT";
+export const LEGACY_ARTWORK_RECEIPT_REPAIR_CONFIRMATION =
+  "BASELINE_LEGACY_ARTWORK_RECEIPT";
+
+type PreparedLegacyIngestReceiptMigration = {
+  releaseId: string;
+  releaseRelativePath: string;
+  fingerprint: string;
+  receiptContent: string;
+  existingReceipt: ExistingIngestReceipt;
+  summary: {
+    trackCount: number;
+    videoCount: number;
+    copyCount: number;
+  };
+};
+
+function legacyBaselineSourcePath(
+  releaseRelativePath: string,
+  destinationRelativePath: string,
+): string {
+  const withinRelease = withinReleasePath(
+    releaseRelativePath,
+    destinationRelativePath,
+  );
+
+  return `@library/${withinRelease}`;
+}
+
+function legacyTextValue(
+  data: Record<string, unknown>,
+  segments: string[],
+): string {
+  const value = readNestedRecordValue(data, segments);
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function legacySafeAuthoredPath(
+  value: string,
+  label: string,
+): string {
+  const normalized = value.replaceAll("\\", "/");
+
+  if (
+    normalized.startsWith("/") ||
+    /^[A-Za-z]:\//.test(normalized)
+  ) {
+    throw new Error(
+      `${label} must be a release-relative path, not an absolute path.`,
+    );
+  }
+
+  return normalizeRelativeDestination(normalized, label);
+}
+
+function legacyTrackNumber(
+  data: Record<string, unknown>,
+  trackId: string,
+): number {
+  const value = readNestedRecordValue(
+    data,
+    ["track", "numbering", "track_number"],
+  );
+
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 1
+  ) {
+    throw new Error(
+      `Legacy release migration requires a valid track.numbering.track_number for ${trackId}.`,
+    );
+  }
+
+  return value;
+}
+
+function legacyTrackArtworkRole(
+  trackRelativePath: string,
+  artworkRelativePath: string,
+): string {
+  const prefix = `${trackRelativePath}/artwork/`;
+  const normalized = artworkRelativePath.replaceAll("\\", "/");
+
+  if (!normalized.startsWith(prefix)) {
+    return "track_artwork";
+  }
+
+  const rolePath = normalized.slice(prefix.length);
+  const segments = rolePath.split("/").filter(Boolean);
+
+  if (segments.length <= 1) {
+    return "track_artwork";
+  }
+
+  switch (segments[0]?.toLowerCase()) {
+    case "front":
+      return "track_artwork";
+    case "back":
+      return "back_cover";
+    case "booklet":
+      return "booklet";
+    case "disc":
+      return "disc";
+    case "liner-notes":
+    case "liner_notes":
+      return "liner_notes";
+    case "thumbnail":
+      return "thumbnail";
+    case "promotional":
+      return "promotional";
+    case "alternate":
+      return "alternate";
+    default:
+      return "other";
+  }
+}
+
+function legacyReleaseArtworkRole(
+  releaseRelativePath: string,
+  artworkRelativePath: string,
+): string {
+  const prefix = `${releaseRelativePath}/artwork/`;
+  const normalized = artworkRelativePath.replaceAll("\\", "/");
+
+  if (!normalized.startsWith(prefix)) {
+    return "other";
+  }
+
+  const rolePath = normalized.slice(prefix.length);
+  const segments = rolePath.split("/").filter(Boolean);
+
+  if (segments.length <= 1) {
+    return "front_cover";
+  }
+
+  switch (segments[0]?.toLowerCase()) {
+    case "front":
+      return "front_cover";
+    case "back":
+      return "back_cover";
+    case "booklet":
+      return "booklet";
+    case "disc":
+      return "disc";
+    case "liner-notes":
+    case "liner_notes":
+      return "liner_notes";
+    case "thumbnail":
+      return "thumbnail";
+    case "promotional":
+      return "promotional";
+    case "alternate":
+      return "alternate";
+    default:
+      return "other";
+  }
+}
+
+async function discoverLegacyCanonicalArtworkCopies(
+  canonicalOutputRoot: string,
+  releasePath: string,
+  releaseRelativePath: string,
+  releaseId: string,
+  existingTracks: readonly ExistingReceiptTrack[],
+): Promise<ExistingReceiptCopy[]> {
+  const scan = await scanReleaseById(
+    canonicalOutputRoot,
+    releaseId,
+  );
+  if (!scan) {
+    throw new Error(
+      `Legacy artwork baseline could not scan release ${releaseId}.`,
+    );
+  }
+
+  const copies: ExistingReceiptCopy[] = [];
+  const seenStems = new Set<string>();
+
+  const addArtwork = async (
+    destinationRelativePath: string,
+    logicalRoles: string[],
+  ) => {
+    const stem = artworkDestinationStem(destinationRelativePath);
+    if (seenStems.has(stem)) {
+      throw new Error(
+        `Legacy artwork baseline found more than one canonical artwork-master file for ${stem}. Resolve the duplicate artwork masters before repairing the ingest receipt.`,
+      );
+    }
+    seenStems.add(stem);
+    copies.push(
+      await legacyBaselineCopy(
+        releasePath,
+        releaseRelativePath,
+        destinationRelativePath,
+        "image",
+        logicalRoles,
+      ),
+    );
+  };
+
+  for (const artwork of scan.artworkMasters) {
+    await addArtwork(
+      artwork.relativePath,
+      [
+        `release-artwork:${legacyReleaseArtworkRole(
+          releaseRelativePath,
+          artwork.relativePath,
+        )}`,
+      ],
+    );
+  }
+
+  const trackById = new Map(
+    existingTracks.map((track) => [track.id, track]),
+  );
+  for (const track of scan.tracks) {
+    const receiptTrack = trackById.get(track.id);
+    if (!receiptTrack) {
+      continue;
+    }
+
+    for (const artwork of track.artworkMasters) {
+      await addArtwork(
+        artwork.relativePath,
+        [
+          `track-artwork:${legacyTrackArtworkRole(
+            track.relativePath,
+            artwork.relativePath,
+          )}:${receiptTrack.sourceRelativePath}`,
+        ],
+      );
+    }
+  }
+
+  return copies;
+}
+
+async function verifyLegacyReceiptBaselineCopy(
+  releasePath: string,
+  releaseRelativePath: string,
+  copy: ExistingReceiptCopy,
+): Promise<void> {
+  const withinRelease = withinReleasePath(
+    releaseRelativePath,
+    copy.destinationRelativePath,
+  );
+  const target = assertPathWithinRoot(
+    releasePath,
+    path.join(
+      releasePath,
+      ...withinRelease.split("/"),
+    ),
+  );
+  const stats = await lstat(target);
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new Error(
+      `Legacy ingest receipt repair requires a regular tracked file: ${copy.destinationRelativePath}`,
+    );
+  }
+  const sha256 = await sha256File(target);
+  if (stats.size !== copy.bytes || sha256 !== copy.sourceSha256) {
+    throw new Error(
+      `Legacy ingest receipt repair stopped because a tracked Library file no longer matches its receipt: ${copy.destinationRelativePath}`,
+    );
+  }
+}
+
+async function legacyBaselineCopy(
+  releasePath: string,
+  releaseRelativePath: string,
+  destinationRelativePath: string,
+  mediaKind: IngestMediaKind,
+  logicalRoles: string[],
+): Promise<ExistingReceiptCopy> {
+  const withinRelease = withinReleasePath(
+    releaseRelativePath,
+    destinationRelativePath,
+  );
+  const target = assertPathWithinRoot(
+    releasePath,
+    path.join(
+      releasePath,
+      ...withinRelease.split("/"),
+    ),
+  );
+  const stats = await lstat(target);
+
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new Error(
+      `Legacy release migration requires a regular canonical file: ${destinationRelativePath}`,
+    );
+  }
+
+  return {
+    sourceRelativePath: legacyBaselineSourcePath(
+      releaseRelativePath,
+      destinationRelativePath,
+    ),
+    destinationRelativePath,
+    mediaKind,
+    logicalRoles,
+    bytes: stats.size,
+    sourceSha256: await sha256File(target),
+  };
+}
+
+async function prepareLegacyIngestReceiptMigrationInternal(
+  outputRoot: string,
+  releaseIdInput: string,
+): Promise<PreparedLegacyIngestReceiptMigration> {
+  const releaseId = requireReleaseId(releaseIdInput);
+  const canonicalOutputRoot = await realpath(outputRoot);
+  const releaseRelativePath = `releases/${releaseId}`;
+  const releasePath = assertPathWithinRoot(
+    canonicalOutputRoot,
+    path.join(canonicalOutputRoot, "releases", releaseId),
+  );
+  const releaseStats = await lstat(releasePath);
+
+  if (releaseStats.isSymbolicLink() || !releaseStats.isDirectory()) {
+    throw new Error(
+      `Legacy receipt migration requires a regular release directory: ${releaseRelativePath}`,
+    );
+  }
+
+  await assertSafeReleaseTree(releasePath);
+
+  const receiptPath = assertPathWithinRoot(
+    releasePath,
+    path.join(releasePath, "ingest-receipt.json"),
+  );
+  if (await pathExists(receiptPath)) {
+    throw new Error(
+      "This release already has ingest-receipt.json; legacy migration is not required.",
+    );
+  }
+
+  const releaseDocument = await readTomlRecordForUpdate(
+    releasePath,
+    releaseRelativePath,
+    `${releaseRelativePath}/release.toml`,
+  );
+  const authoredReleaseId = legacyTextValue(
+    releaseDocument.data,
+    ["release", "id"],
+  );
+  if (authoredReleaseId && authoredReleaseId !== releaseId) {
+    throw new Error(
+      `Legacy receipt migration found release.id ${authoredReleaseId}, expected ${releaseId}.`,
+    );
+  }
+
+  const releaseTitle = legacyTextValue(
+    releaseDocument.data,
+    ["release", "title"],
+  );
+  const releaseArtist = legacyTextValue(
+    releaseDocument.data,
+    ["release", "primary_artist", "name"],
+  );
+  const releaseDate = legacyTextValue(
+    releaseDocument.data,
+    ["release", "dates", "release"],
+  );
+  const releaseType = legacyTextValue(
+    releaseDocument.data,
+    ["release", "type"],
+  );
+
+  const tracks: ExistingReceiptTrack[] = [];
+  const videos: ExistingReceiptVideo[] = [];
+  const copyByDestination = new Map<string, ExistingReceiptCopy>();
+
+  const addCopy = async (
+    destinationRelativePath: string,
+    mediaKind: IngestMediaKind,
+    logicalRoles: string[],
+  ) => {
+    const existing = copyByDestination.get(destinationRelativePath);
+    if (existing) {
+      if (existing.mediaKind !== mediaKind) {
+        throw new Error(
+          `Legacy receipt migration found conflicting media kinds for ${destinationRelativePath}.`,
+        );
+      }
+      existing.logicalRoles = Array.from(
+        new Set([...existing.logicalRoles, ...logicalRoles]),
+      );
+      return;
+    }
+
+    copyByDestination.set(
+      destinationRelativePath,
+      await legacyBaselineCopy(
+        releasePath,
+        releaseRelativePath,
+        destinationRelativePath,
+        mediaKind,
+        logicalRoles,
+      ),
+    );
+  };
+
+  const releaseArtwork = readNestedRecordValue(
+    releaseDocument.data,
+    ["release", "artwork"],
+  );
+  if (Array.isArray(releaseArtwork)) {
+    for (const artwork of releaseArtwork) {
+      if (!isRecord(artwork)) {
+        continue;
+      }
+      const masterPath =
+        typeof artwork.master_path === "string"
+          ? artwork.master_path.trim()
+          : "";
+      if (!masterPath) {
+        continue;
+      }
+      const role =
+        typeof artwork.role === "string" && artwork.role.trim()
+          ? artwork.role.trim()
+          : "front_cover";
+      const destinationRelativePath = `${releaseRelativePath}/${legacySafeAuthoredPath(
+        masterPath,
+        "Legacy release artwork path",
+      )}`;
+      await addCopy(
+        destinationRelativePath,
+        "image",
+        [`release-artwork:${role}`],
+      );
+    }
+  }
+
+  const tracksRoot = assertPathWithinRoot(
+    releasePath,
+    path.join(releasePath, "tracks"),
+  );
+  if (await pathExists(tracksRoot)) {
+    const trackEntries = await readdir(tracksRoot, { withFileTypes: true });
+    for (const entry of trackEntries
+      .filter((candidate) => candidate.isDirectory())
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      const trackId = entry.name;
+      const trackRelativePath = `${releaseRelativePath}/tracks/${trackId}`;
+      const trackDocument = await readTomlRecordForUpdate(
+        releasePath,
+        releaseRelativePath,
+        `${trackRelativePath}/track.toml`,
+      );
+      const authoredTrackId = legacyTextValue(
+        trackDocument.data,
+        ["track", "id"],
+      );
+      if (authoredTrackId && authoredTrackId !== trackId) {
+        throw new Error(
+          `Legacy receipt migration found track.id ${authoredTrackId}, expected directory ID ${trackId}.`,
+        );
+      }
+
+      const audioMaster = legacyTextValue(
+        trackDocument.data,
+        ["track", "assets", "audio_master"],
+      );
+      if (!audioMaster) {
+        throw new Error(
+          `Legacy receipt migration requires track.assets.audio_master for ${trackId}.`,
+        );
+      }
+      const audioDestination = `${trackRelativePath}/${legacySafeAuthoredPath(
+        audioMaster,
+        `Legacy audio-master path for ${trackId}`,
+      )}`;
+      const sourceRelativePath = legacyBaselineSourcePath(
+        releaseRelativePath,
+        audioDestination,
+      );
+
+      tracks.push({
+        id: trackId,
+        number: legacyTrackNumber(trackDocument.data, trackId),
+        title: legacyTextValue(trackDocument.data, ["track", "title"]),
+        version: legacyTextValue(trackDocument.data, ["track", "version"]),
+        artist:
+          legacyTextValue(
+            trackDocument.data,
+            ["track", "primary_artist", "name"],
+          ) || releaseArtist,
+        sourceDate: legacyTextValue(
+          trackDocument.data,
+          ["track", "dates", "release"],
+        ),
+        sourceRelativePath,
+        destinationRelativePath: audioDestination,
+      });
+      await addCopy(
+        audioDestination,
+        "audio",
+        ["audio-master", "audio-player-source"],
+      );
+
+      const trackArtwork = legacyTextValue(
+        trackDocument.data,
+        ["track", "assets", "artwork", "master"],
+      );
+      if (trackArtwork) {
+        const artworkDestination = `${trackRelativePath}/${legacySafeAuthoredPath(
+          trackArtwork,
+          `Legacy track artwork path for ${trackId}`,
+        )}`;
+        const role = legacyTrackArtworkRole(
+          trackRelativePath,
+          artworkDestination,
+        );
+        await addCopy(
+          artworkDestination,
+          "image",
+          [`track-artwork:${role}:${sourceRelativePath}`],
+        );
+      }
+    }
+  }
+
+  const videosRoot = assertPathWithinRoot(
+    releasePath,
+    path.join(releasePath, "videos"),
+  );
+  if (await pathExists(videosRoot)) {
+    const videoEntries = await readdir(videosRoot, { withFileTypes: true });
+    for (const entry of videoEntries
+      .filter((candidate) => candidate.isDirectory())
+      .sort((left, right) => left.name.localeCompare(right.name))) {
+      const videoId = entry.name;
+      const videoRelativePath = `${releaseRelativePath}/videos/${videoId}`;
+      const videoDocument = await readTomlRecordForUpdate(
+        releasePath,
+        releaseRelativePath,
+        `${videoRelativePath}/video.toml`,
+      );
+      const authoredVideoId = legacyTextValue(
+        videoDocument.data,
+        ["video", "id"],
+      );
+      if (authoredVideoId && authoredVideoId !== videoId) {
+        throw new Error(
+          `Legacy receipt migration found video.id ${authoredVideoId}, expected directory ID ${videoId}.`,
+        );
+      }
+      const masterPath = legacyTextValue(
+        videoDocument.data,
+        ["video", "master_path"],
+      );
+      if (!masterPath) {
+        throw new Error(
+          `Legacy receipt migration requires video.master_path for ${videoId}.`,
+        );
+      }
+      const destinationRelativePath = `${videoRelativePath}/${legacySafeAuthoredPath(
+        masterPath,
+        `Legacy video-master path for ${videoId}`,
+      )}`;
+      const sourceRelativePath = legacyBaselineSourcePath(
+        releaseRelativePath,
+        destinationRelativePath,
+      );
+      const relatedTrackId = legacyTextValue(
+        videoDocument.data,
+        ["video", "related_track_id"],
+      );
+      videos.push({
+        id: videoId,
+        title: legacyTextValue(videoDocument.data, ["video", "title"]),
+        videoType:
+          legacyTextValue(videoDocument.data, ["video", "type"]) || "other",
+        sourceRelativePath,
+        destinationRelativePath,
+        ...(relatedTrackId ? { relatedTrackId } : {}),
+      });
+      await addCopy(destinationRelativePath, "video", ["video-master"]);
+    }
+  }
+
+  for (const discoveredArtwork of
+    await discoverLegacyCanonicalArtworkCopies(
+      canonicalOutputRoot,
+      releasePath,
+      releaseRelativePath,
+      releaseId,
+      tracks,
+    )) {
+    const existing = copyByDestination.get(
+      discoveredArtwork.destinationRelativePath,
+    );
+    if (existing) {
+      existing.logicalRoles = Array.from(
+        new Set([
+          ...existing.logicalRoles,
+          ...discoveredArtwork.logicalRoles,
+        ]),
+      );
+      continue;
+    }
+
+    copyByDestination.set(
+      discoveredArtwork.destinationRelativePath,
+      discoveredArtwork,
+    );
+  }
+
+  tracks.sort(
+    (left, right) => left.number - right.number || left.id.localeCompare(right.id),
+  );
+  const copies = Array.from(copyByDestination.values()).sort(
+    (left, right) =>
+      left.destinationRelativePath.localeCompare(right.destinationRelativePath),
+  );
+
+  const raw: Record<string, unknown> = {
+    schema: {
+      name: "metadata-editor-ingest-receipt",
+      version: 3,
+    },
+    candidate: {
+      id: "legacy-library-baseline",
+      relativePath: "@library",
+      kind: "folder",
+    },
+    release: {
+      id: releaseId,
+      relativePath: releaseRelativePath,
+      title: releaseTitle,
+      artist: releaseArtist,
+      date: releaseDate,
+      type: releaseType,
+    },
+    tracks,
+    videos,
+    copies,
+    copyReceipts: copies.map((copy) => ({
+      sourceRelativePath: copy.sourceRelativePath,
+      destinationRelativePath: copy.destinationRelativePath,
+      mediaKind: copy.mediaKind,
+      logicalRoles: copy.logicalRoles,
+      bytes: copy.bytes,
+      sourceSha256: copy.sourceSha256,
+      destinationSha256: copy.sourceSha256,
+    })),
+    migration: {
+      kind: "legacy-library-baseline",
+      source: "current-canonical-library",
+      note:
+        "Created from the verified canonical Library state because this release predates ingest receipts.",
+    },
+    createdBy: {
+      application: "metadata-editor",
+      workflow: "legacy-ingest-receipt-migration-v1",
+    },
+  };
+  const receiptContent = `${JSON.stringify(raw, null, 2)}\n`;
+  const fingerprint = createHash("sha256")
+    .update(receiptContent)
+    .digest("hex");
+
+  return {
+    releaseId,
+    releaseRelativePath,
+    fingerprint,
+    receiptContent,
+    existingReceipt: {
+      raw,
+      tracks,
+      videos,
+      copies,
+    },
+    summary: {
+      trackCount: tracks.length,
+      videoCount: videos.length,
+      copyCount: copies.length,
+    },
+  };
+}
+
+export async function prepareLegacyIngestReceiptMigration(
+  outputRoot: string,
+  releaseId: string,
+): Promise<{
+  releaseId: string;
+  releaseRelativePath: string;
+  fingerprint: string;
+  confirmationPhrase: string;
+  trackCount: number;
+  videoCount: number;
+  copyCount: number;
+}> {
+  const prepared = await prepareLegacyIngestReceiptMigrationInternal(
+    outputRoot,
+    releaseId,
+  );
+
+  return {
+    releaseId: prepared.releaseId,
+    releaseRelativePath: prepared.releaseRelativePath,
+    fingerprint: prepared.fingerprint,
+    confirmationPhrase: LEGACY_INGEST_RECEIPT_MIGRATION_CONFIRMATION,
+    trackCount: prepared.summary.trackCount,
+    videoCount: prepared.summary.videoCount,
+    copyCount: prepared.summary.copyCount,
+  };
+}
+
+export async function executeLegacyIngestReceiptMigration(
+  outputRoot: string,
+  releaseId: string,
+  expectedFingerprint: string,
+  confirmation: string,
+): Promise<{
+  releaseId: string;
+  releaseRelativePath: string;
+  fingerprint: string;
+  trackCount: number;
+  videoCount: number;
+  copyCount: number;
+}> {
+  if (confirmation !== LEGACY_INGEST_RECEIPT_MIGRATION_CONFIRMATION) {
+    throw new Error(
+      `Legacy ingest-receipt migration requires confirmation ${LEGACY_INGEST_RECEIPT_MIGRATION_CONFIRMATION}.`,
+    );
+  }
+
+  const prepared = await prepareLegacyIngestReceiptMigrationInternal(
+    outputRoot,
+    releaseId,
+  );
+  if (prepared.fingerprint !== expectedFingerprint) {
+    throw new Error(
+      "The legacy release changed after migration review. Refresh the staging target and review the migration again.",
+    );
+  }
+
+  const canonicalOutputRoot = await realpath(outputRoot);
+  const releasePath = assertPathWithinRoot(
+    canonicalOutputRoot,
+    path.join(canonicalOutputRoot, "releases", prepared.releaseId),
+  );
+  const receiptPath = assertPathWithinRoot(
+    releasePath,
+    path.join(releasePath, "ingest-receipt.json"),
+  );
+  await writeTextFile(receiptPath, prepared.receiptContent);
+
+  return {
+    releaseId: prepared.releaseId,
+    releaseRelativePath: prepared.releaseRelativePath,
+    fingerprint: prepared.fingerprint,
+    trackCount: prepared.summary.trackCount,
+    videoCount: prepared.summary.videoCount,
+    copyCount: prepared.summary.copyCount,
+  };
+}
+
+type PreparedLegacyArtworkReceiptRepair = {
+  releaseId: string;
+  releaseRelativePath: string;
+  fingerprint: string;
+  receiptContent: string;
+  artworkCount: number;
+  destinations: string[];
+};
+
+async function prepareLegacyArtworkReceiptRepairInternal(
+  outputRoot: string,
+  releaseIdInput: string,
+  verifyTrackedCopies = false,
+): Promise<PreparedLegacyArtworkReceiptRepair | null> {
+  const releaseId = requireReleaseId(releaseIdInput);
+  const canonicalOutputRoot = await realpath(outputRoot);
+  const releaseRelativePath = `releases/${releaseId}`;
+  const releasePath = assertPathWithinRoot(
+    canonicalOutputRoot,
+    path.join(canonicalOutputRoot, "releases", releaseId),
+  );
+  await assertSafeReleaseTree(releasePath);
+
+  const existingReceipt = await readExistingIngestReceipt(
+    releasePath,
+    releaseId,
+  );
+  const migration = existingReceipt.raw.migration;
+  if (
+    !isRecord(migration) ||
+    migration.kind !== "legacy-library-baseline"
+  ) {
+    return null;
+  }
+
+  if (verifyTrackedCopies) {
+    for (const copy of existingReceipt.copies) {
+      await verifyLegacyReceiptBaselineCopy(
+        releasePath,
+        releaseRelativePath,
+        copy,
+      );
+    }
+  }
+
+  const discoveredArtwork =
+    await discoverLegacyCanonicalArtworkCopies(
+      canonicalOutputRoot,
+      releasePath,
+      releaseRelativePath,
+      releaseId,
+      existingReceipt.tracks,
+    );
+  const trackedDestinations = new Set(
+    existingReceipt.copies.map(
+      (copy) => copy.destinationRelativePath,
+    ),
+  );
+  const missingArtwork = discoveredArtwork.filter(
+    (copy) => !trackedDestinations.has(copy.destinationRelativePath),
+  );
+
+  if (missingArtwork.length === 0) {
+    return null;
+  }
+
+  const mergedCopies = [
+    ...existingReceipt.copies,
+    ...missingArtwork,
+  ].sort((left, right) =>
+    left.destinationRelativePath.localeCompare(
+      right.destinationRelativePath,
+    ),
+  );
+  const existingCopyReceipts = Array.isArray(
+    existingReceipt.raw.copyReceipts,
+  )
+    ? existingReceipt.raw.copyReceipts
+    : [];
+  const existingCopyReceiptDestinations = new Set(
+    existingCopyReceipts.flatMap((value) =>
+      isRecord(value) && typeof value.destinationRelativePath === "string"
+        ? [value.destinationRelativePath]
+        : [],
+    ),
+  );
+  const raw: Record<string, unknown> = {
+    ...existingReceipt.raw,
+    copies: mergedCopies.map((copy) => ({
+      sourceRelativePath: copy.sourceRelativePath,
+      destinationRelativePath: copy.destinationRelativePath,
+      mediaKind: copy.mediaKind,
+      logicalRoles: copy.logicalRoles,
+      bytes: copy.bytes,
+      sourceSha256: copy.sourceSha256,
+    })),
+    copyReceipts: [
+      ...existingCopyReceipts,
+      ...missingArtwork
+        .filter(
+          (copy) =>
+            !existingCopyReceiptDestinations.has(
+              copy.destinationRelativePath,
+            ),
+        )
+        .map((copy) => ({
+          sourceRelativePath: copy.sourceRelativePath,
+          destinationRelativePath: copy.destinationRelativePath,
+          mediaKind: copy.mediaKind,
+          logicalRoles: copy.logicalRoles,
+          bytes: copy.bytes,
+          sourceSha256: copy.sourceSha256,
+          destinationSha256: copy.sourceSha256,
+        })),
+    ],
+    migration: {
+      ...migration,
+      artworkReceiptRepair: {
+        kind: "legacy-canonical-artwork-baseline",
+        count: missingArtwork.length,
+      },
+    },
+  };
+  const receiptContent = `${JSON.stringify(raw, null, 2)}\n`;
+  const fingerprint = createHash("sha256")
+    .update(receiptContent)
+    .digest("hex");
+
+  return {
+    releaseId,
+    releaseRelativePath,
+    fingerprint,
+    receiptContent,
+    artworkCount: missingArtwork.length,
+    destinations: missingArtwork.map(
+      (copy) => copy.destinationRelativePath,
+    ),
+  };
+}
+
+export async function prepareLegacyArtworkReceiptRepair(
+  outputRoot: string,
+  releaseId: string,
+): Promise<{
+  releaseId: string;
+  releaseRelativePath: string;
+  fingerprint: string;
+  confirmationPhrase: string;
+  artworkCount: number;
+  destinations: string[];
+} | null> {
+  const prepared = await prepareLegacyArtworkReceiptRepairInternal(
+    outputRoot,
+    releaseId,
+  );
+  if (!prepared) {
+    return null;
+  }
+
+  return {
+    releaseId: prepared.releaseId,
+    releaseRelativePath: prepared.releaseRelativePath,
+    fingerprint: prepared.fingerprint,
+    confirmationPhrase:
+      LEGACY_ARTWORK_RECEIPT_REPAIR_CONFIRMATION,
+    artworkCount: prepared.artworkCount,
+    destinations: prepared.destinations,
+  };
+}
+
+export async function executeLegacyArtworkReceiptRepair(
+  outputRoot: string,
+  releaseId: string,
+  expectedFingerprint: string,
+  confirmation: string,
+): Promise<{
+  releaseId: string;
+  releaseRelativePath: string;
+  fingerprint: string;
+  artworkCount: number;
+  destinations: string[];
+}> {
+  if (confirmation !== LEGACY_ARTWORK_RECEIPT_REPAIR_CONFIRMATION) {
+    throw new Error(
+      `Legacy artwork receipt repair requires confirmation ${LEGACY_ARTWORK_RECEIPT_REPAIR_CONFIRMATION}.`,
+    );
+  }
+
+  const prepared = await prepareLegacyArtworkReceiptRepairInternal(
+    outputRoot,
+    releaseId,
+    true,
+  );
+  if (!prepared) {
+    throw new Error(
+      "This release has no missing legacy artwork receipt entries to repair.",
+    );
+  }
+  if (prepared.fingerprint !== expectedFingerprint) {
+    throw new Error(
+      "The canonical Library artwork or tracked legacy receipt changed after repair review. Refresh Staging and review the repair again.",
+    );
+  }
+
+  const canonicalOutputRoot = await realpath(outputRoot);
+  const releasePath = assertPathWithinRoot(
+    canonicalOutputRoot,
+    path.join(canonicalOutputRoot, "releases", prepared.releaseId),
+  );
+  const receiptPath = assertPathWithinRoot(
+    releasePath,
+    path.join(releasePath, "ingest-receipt.json"),
+  );
+  await writeTextFileReplacing(receiptPath, prepared.receiptContent);
+
+  return {
+    releaseId: prepared.releaseId,
+    releaseRelativePath: prepared.releaseRelativePath,
+    fingerprint: prepared.fingerprint,
+    artworkCount: prepared.artworkCount,
+    destinations: prepared.destinations,
   };
 }
 
@@ -2903,12 +3960,9 @@ async function prepareStagingWaveforms(
 
       if (waveformCurrent) {
         try {
-          const waveformDocument = JSON.parse(
-            await readFile(
-              existingWaveformPath,
-              "utf8",
-            ),
-          ) as unknown;
+          const waveformDocument = decodeWaveformBinary(
+            await readFile(existingWaveformPath),
+          );
           waveformCurrent =
             inspectWaveformDocument(
               waveformDocument,
@@ -5199,12 +6253,12 @@ export async function prepareIngestReleaseBuild(
         ? [
             "Source audio is copied byte-for-byte; embedded metadata is not rewritten.",
             "Canonical audio is stored as audio-master.<original-extension> while retaining the source container extension.",
-            "Staging generates and validates Library waveform-peaks.json from each canonical audio master during the guarded build. Private playback MP3s and website HLS streams remain separate preparation jobs.",
+            "Staging generates and validates Library waveform-peaks.wfp from each canonical audio master during the guarded build. Private playback MP3s and website HLS streams remain separate preparation jobs.",
             "Probe-verified video is copied byte-for-byte into videos/<stable-id>/video-master.<original-extension> with a companion video.toml; public video streaming derivatives are not generated yet.",
           ]
         : [
             "Existing authored metadata and stable track IDs are preserved. Existing Library tracks omitted from the current ingest candidate remain untouched automatically.",
-            "An explicit Replace canonical audio choice may supersede one verified master; private playback MP3 and HLS derivatives are invalidated, while waveform-peaks.json is regenerated from the new canonical master inside this guarded Staging build.",
+            "An explicit Replace canonical audio choice may supersede one verified master; private playback MP3 and HLS derivatives are invalidated, while waveform-peaks.wfp is regenerated from the new canonical master inside this guarded Staging build.",
             "Track directory IDs remain stable when the displayed track order changes or canonical audio is replaced.",
             "New artwork can be added from a later ingest candidate. Replacing occupied canonical artwork requires explicit confirmation and preserves unrelated authored metadata.",
             "New canonical videos may be added to an existing release and existing verified videos are preserved when absent from the current candidate. Canonical video replacement remains a separate reviewed workflow.",

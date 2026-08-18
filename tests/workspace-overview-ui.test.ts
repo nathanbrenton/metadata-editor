@@ -44,7 +44,7 @@ test("Library offers in-session Rows Cards Tiles and Waveform views without a re
   assert.match(appSource, /\["rows", "Rows", "Dense column view"\]/);
   assert.match(appSource, /\["cards", "Cards", "Expanded release cards"\]/);
   assert.match(appSource, /\["tiles", "Tiles", "Artwork-first browsing"\]/);
-  assert.match(appSource, /\["waveform", "Waveform", "Single-release artwork and waveform player"\]/);
+  assert.match(appSource, /\["waveform", "Waveform", "Now Playing waveform and oscilloscope"\]/);
   assert.match(appSource, /Metadata complete/);
   assert.match(appSource, /Library ready/);
   assert.doesNotMatch(appSource, />\s*View metadata\s*<\/button>/);
@@ -52,7 +52,23 @@ test("Library offers in-session Rows Cards Tiles and Waveform views without a re
   assert.match(styleSource, /\.library-release-list--tiles/);
 });
 
-test("Web Package keeps Ready Check read-only and compact", () => {
+test("Library release detail keeps readiness in the sidebar and hides idle read-only status chrome", () => {
+  assert.doesNotMatch(appSource, /<MetadataReadinessPanel/);
+  assert.match(appSource, /showComplete/);
+  assert.match(appSource, />\s*Metadata ✓\s*</);
+  assert.doesNotMatch(appSource, /No filesystem writes/);
+  assert.doesNotMatch(appSource, /Mode:\{" "\}/);
+  assert.match(
+    appSource,
+    /\{\(isMetadataEmpty \|\| dirtyCount > 0\) && \(/,
+  );
+  assert.match(
+    appSource,
+    /editMode\s*\?\s*"Done editing"\s*:\s*"Edit metadata"/,
+  );
+});
+
+test("Web Package keeps header status actionable and compact", () => {
   const start = appSource.indexOf("function PublishWorkspace");
   const end = appSource.indexOf("function IngestView", start);
 
@@ -61,12 +77,117 @@ test("Web Package keeps Ready Check read-only and compact", () => {
 
   const publishSource = appSource.slice(start, end);
 
-  assert.match(publishSource, /badge warning publish-read-only-status/);
-  assert.match(publishSource, />\s*Ready Check · read-only\s*<\/span>/);
-  assert.match(publishSource, /Ready Check is read-only/);
+  assert.match(
+    publishSource,
+    /presentation="web-package-header"/,
+  );
+  assert.doesNotMatch(
+    publishSource,
+    /badge warning publish-read-only-status/,
+  );
+  assert.doesNotMatch(
+    publishSource,
+    /Ready Check · read-only/,
+  );
+  assert.match(
+    publishSource,
+    /Target comparison · read-only/,
+  );
   assert.doesNotMatch(
     publishSource,
     /<div className="workflow-workspace-notice planned">\s*<strong>Preflight planning is read-only<\/strong>/,
   );
-  assert.match(helpSource, /amber Ready Check · read-only status/);
+  assert.doesNotMatch(
+    helpSource,
+    /amber Ready Check · read-only status/,
+  );
+  assert.match(
+    helpSource,
+    /non-blocking technical advisories appear as neutral technical notes/,
+  );
+});
+
+test("Library release selection opens a browsing overview before the metadata editor", () => {
+  assert.match(
+    appSource,
+    /useState<"overview" \| "metadata">\("overview"\)/,
+  );
+  assert.match(
+    appSource,
+    /function LibraryReleaseOverview/,
+  );
+  assert.match(
+    appSource,
+    /className="library-release-overview"/,
+  );
+  assert.match(
+    appSource,
+    />\s*Edit metadata\s*<\/button>/,
+  );
+  assert.match(
+    appSource,
+    /openReleaseOverview\(releaseId\)/,
+  );
+  assert.match(
+    appSource,
+    /openReleaseMetadata\(releaseId\)/,
+  );
+  assert.match(
+    appSource,
+    /selectedReleaseDetailMode === "metadata" \? \(/,
+  );
+  assert.match(
+    appSource,
+    /selectedReleaseDetailMode === "overview" \? \(/,
+  );
+  assert.match(
+    styleSource,
+    /\.library-release-overview-hero/,
+  );
+  assert.match(
+    helpSource,
+    /browsing-oriented Release overview/,
+  );
+});
+
+test("Release overview uses track artwork as the play/pause control", () => {
+  assert.match(
+    appSource,
+    /library-release-overview-track-artwork-button/,
+  );
+  assert.match(
+    appSource,
+    /library-release-overview-track-play-indicator/,
+  );
+  assert.match(
+    appSource,
+    /aria-label=\{`\$\{isPlaying \? "Pause" : "Play"\} \$\{title\}`\}/,
+  );
+  assert.match(
+    appSource,
+    /playback\.toggleTrack\(\s*trackKey,\s*playbackQueue,/,
+  );
+  assert.doesNotMatch(
+    appSource,
+    />\s*\{isPlaying \? "Pause" : "Play"\}\s*<\/button>/,
+  );
+  assert.match(
+    styleSource,
+    /\.library-release-overview-track-artwork-button/,
+  );
+  assert.match(appSource, /data-selected=\{isSelected \? "true" : "false"\}/);
+  assert.match(appSource, /data-playing=\{isPlaying \? "true" : "false"\}/);
+  assert.match(
+    appSource,
+    /onDoubleClick=[\s\S]*?playback\.playQueue\(\{[\s\S]*?autoplay:\s*true/,
+  );
+  assert.match(appSource, /event\.stopPropagation\(\)/);
+  assert.match(
+    styleSource,
+    /li\[data-playable="true"\][\s\S]*?user-select:\s*none;/,
+  );
+  assert.match(
+    styleSource,
+    /li\[data-playing="true"\]:hover[\s\S]*?background:\s*var\(--library-track-playing-bg\)/,
+  );
 });

@@ -161,7 +161,16 @@ test(
               trackPath,
               "track.toml",
             ),
-            '[track]\nid = "track"\n',
+            [
+              "[track]",
+              'id = "track"',
+              'title = "Second Light"',
+              "",
+              "[track.numbering]",
+              "track_number = 2",
+              "disc_number = 1",
+              "",
+            ].join("\n"),
           ),
           writeFile(
             path.join(
@@ -218,6 +227,9 @@ test(
           )?.exists,
           true,
         );
+        assert.equal(track.title, "Second Light");
+        assert.equal(track.trackNumber, 2);
+        assert.equal(track.discNumber, 1);
         assert.deepEqual(
           track.audioMasters.map(
             (asset) => asset.filename,

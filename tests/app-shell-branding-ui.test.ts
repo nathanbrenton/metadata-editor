@@ -52,16 +52,27 @@ test("Workflow Help documents global logo home plus contextual back navigation",
   assert.match(helpContentSource, /Hiplingo logo at the far left/);
   assert.match(
     helpContentSource,
-    /global home control and always returns to the Library landing workspace/,
+    /Hiplingo logo at the far left of the application header to return to the Library landing workspace/,
   );
   assert.match(helpContentSource, /contextual Back to editor control/);
 });
 
-test("release detail has an explicit Back to Library arrow in addition to the global logo", () => {
+test("release detail returns through the Library workflow step without a redundant back arrow", () => {
+  assert.doesNotMatch(
+    appSource,
+    /aria-label="Back to Library"/,
+  );
   assert.match(
     appSource,
-    /className="metadata-detail-back-button"[\s\S]*aria-label="Back to Library"[\s\S]*<span aria-hidden="true">←<\/span>/,
+    /aria-label="Back to ingest candidates"/,
   );
   assert.match(appSource, /const returnToLibrary = \(\) =>/);
-  assert.match(helpContentSource, /explicit left-arrow Back to Library control/);
+  assert.match(
+    appSource,
+    /if \(view === "library"\) \{\s*returnToLibrary\(\);\s*return;/,
+  );
+  assert.match(
+    helpContentSource,
+    /click Library in the workflow navigation to return to the Library browser context that opened it/,
+  );
 });

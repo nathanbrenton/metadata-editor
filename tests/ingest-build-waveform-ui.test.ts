@@ -76,6 +76,29 @@ test("guarded Staging execution writes waveforms before Library promotion", () =
   );
   assert.match(
     helpSource,
-    /waveform-peaks\.json[\s\S]*?before the update is promoted/i,
+    /waveform-peaks\.wfp[\s\S]*?before the update is promoted/i,
+  );
+});
+
+test("Staging build shows honest live activity text while guarded waveform work runs", () => {
+  assert.match(
+    builderSource,
+    /buildElapsedSeconds[\s\S]*?window\.setInterval\(updateElapsed, 1000\)/,
+  );
+  assert.match(
+    builderSource,
+    /Server request active[\s\S]*?Still processing/,
+  );
+  assert.match(
+    builderSource,
+    /waveformBuildJobCount[\s\S]*?waveform job/,
+  );
+  assert.match(
+    builderSource,
+    /buildElapsedSeconds}s elapsed/,
+  );
+  assert.doesNotMatch(
+    builderSource,
+    /% complete|percent complete/i,
   );
 });

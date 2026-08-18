@@ -279,6 +279,21 @@ export type IngestStagingTargetStatus = {
   exists: boolean;
   operation: IngestBuildOperation;
   releaseRelativePath: string;
+  legacyReceiptMigration?: {
+    required: true;
+    fingerprint: string;
+    confirmationPhrase: string;
+    trackCount: number;
+    videoCount: number;
+    copyCount: number;
+  };
+  legacyArtworkReceiptRepair?: {
+    required: true;
+    fingerprint: string;
+    confirmationPhrase: string;
+    artworkCount: number;
+    destinations: string[];
+  };
   existingRelease?: {
     title: string;
     artist: string;

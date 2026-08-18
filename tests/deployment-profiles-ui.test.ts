@@ -29,10 +29,22 @@ const readmeSource = await readFile(
 );
 
 test(
-  "Live keeps deployment profiles behind connection details with the production alias boundary ready",
+  "Live keeps Local sandbox and Production visible with the safer sandbox selected first",
   () => {
     assert.match(appSource, /Connection & deployment details/);
+    assert.match(appSource, /publish-live-target-strip/);
     assert.match(appSource, /Published media deployment profiles/);
+    assert.match(
+      appSource,
+      /loadDeploymentTargetStatus\("local-sandbox"\)/,
+    );
+    assert.match(appSource, /Browser deploy/);
+    assert.match(appSource, /CLI deploy/);
+    assert.ok(
+      appSource.indexOf('className="publish-live-target-strip"') <
+        appSource.indexOf('className="publish-host-boundary"'),
+      "destination selector should be visible before technical connection details",
+    );
     assert.match(profileSource, /label: "Local sandbox"/);
     assert.match(profileSource, /label: "Production"/);
     assert.match(

@@ -11,6 +11,10 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  encodeWaveformBinary,
+} from "../../packages/media-player/src/waveform-binary.js";
+
+import {
   buildMediaProcessingPlan,
   inspectWaveformDocument,
 } from "../server/media-processing/plan.js";
@@ -241,6 +245,62 @@ test(
 );
 
 test(
+  "plans a compact waveform migration when only legacy JSON exists",
+  async () => {
+    await withTemporaryLibrary(
+      async (
+        mediaRoot,
+        _releasePath,
+        trackPath,
+      ) => {
+        await writeFile(
+          path.join(
+            trackPath,
+            "audio-master.wav",
+          ),
+          createPcm16Wav(),
+        );
+        await writeFile(
+          path.join(
+            trackPath,
+            "waveform-peaks.json",
+          ),
+          JSON.stringify({ legacy: true }),
+        );
+
+        const release =
+          await scanOnlyRelease(mediaRoot);
+        const plan =
+          await buildMediaProcessingPlan(
+            mediaRoot,
+            release,
+            readyCapabilities,
+            {
+              generatedAt:
+                "2026-07-21T01:10:00.000Z",
+            },
+          );
+        const waveform =
+          plan.items[0]?.waveform;
+
+        assert.ok(waveform);
+        assert.equal(
+          waveform.filename,
+          "waveform-peaks.wfp",
+        );
+        assert.equal(waveform.action, "create");
+        assert.match(
+          waveform.checks
+            .map((check) => check.message)
+            .join(" "),
+          /Legacy waveform-peaks\.json.*compact waveform-peaks\.wfp.*only waveform copied into the public package/i,
+        );
+      },
+    );
+  },
+);
+
+test(
   "recognizes current derivatives and marks them stale after the master changes",
   async () => {
     await withTemporaryLibrary(
@@ -259,7 +319,7 @@ test(
         );
         const waveformPath = path.join(
           trackPath,
-          "waveform-peaks.json",
+          "waveform-peaks.wfp",
         );
         const wav = createPcm16Wav();
 
@@ -270,12 +330,12 @@ test(
         );
         await writeFile(
           waveformPath,
-          `${JSON.stringify(
+          encodeWaveformBinary(
             generateWaveformPeaksFromWav(
               wav,
               400,
             ),
-          )}\n`,
+          ),
         );
 
         const oldDate = new Date(

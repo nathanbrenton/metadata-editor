@@ -5,6 +5,10 @@ import {
 import path from "node:path";
 
 import {
+  decodeWaveformBinary,
+} from "@hiplingo/media-player/waveform-binary";
+
+import {
   assertPathWithinRoot,
 } from "../media-root.js";
 import type {
@@ -174,10 +178,10 @@ export function inspectWaveformDocument(
       valid: false,
       checks: [
         {
-          code: "invalid-waveform-json",
+          code: "invalid-waveform-binary",
           status: "warning",
           message:
-            "The waveform file does not contain a JSON object.",
+            "The waveform payload does not contain a valid waveform document.",
         },
       ],
     };
@@ -331,7 +335,7 @@ export function inspectWaveformDocument(
       code: "waveform-profile-current",
       status: "pass",
       message:
-        "The waveform JSON matches the active analysis profile.",
+        "The waveform binary matches the active analysis profile.",
     });
   }
 
@@ -353,11 +357,10 @@ async function inspectExistingWaveform(
   try {
     const content = await readFile(
       libraryPath(mediaRoot, relativePath),
-      "utf8",
     );
 
     return inspectWaveformDocument(
-      JSON.parse(content) as unknown,
+      decodeWaveformBinary(content),
       expected,
     );
   } catch (error) {
@@ -365,12 +368,12 @@ async function inspectExistingWaveform(
       valid: false,
       checks: [
         {
-          code: "unreadable-waveform-json",
+          code: "unreadable-waveform-binary",
           status: "warning",
           message:
             error instanceof Error
-              ? `Unable to read waveform JSON: ${error.message}`
-              : "Unable to read waveform JSON.",
+              ? `Unable to read compact waveform: ${error.message}`
+              : "Unable to read compact waveform.",
         },
       ],
     };
@@ -746,6 +749,15 @@ async function buildWaveformPlan(
     mediaRoot,
     relativePath,
   );
+  const legacyJson = !existing.exists
+    ? await inspectFile(
+        mediaRoot,
+        derivativeRelativePath(
+          track,
+          "waveform-peaks.json",
+        ),
+      )
+    : null;
 
   if (existing.check) {
     return buildBlockedDerivative(
@@ -846,7 +858,9 @@ async function buildWaveformPlan(
       code: "waveform-missing",
       status: "warning",
       message:
-        "waveform-peaks.json does not exist and is planned for creation.",
+        legacyJson?.exists && !legacyJson.check
+          ? "Legacy waveform-peaks.json is still readable during migration; compact waveform-peaks.wfp is planned for creation and will be the only waveform copied into the public package."
+          : "waveform-peaks.wfp does not exist and is planned for creation.",
     });
   } else if (olderThanMaster) {
     checks.push({
@@ -896,10 +910,10 @@ async function buildWaveformPlan(
     action: state.action,
     reason:
       state.action === "create"
-        ? "Waveform JSON is missing."
+        ? "Waveform binary is missing."
         : state.action === "replace"
-          ? "Waveform JSON is stale or does not match the active profile."
-          : "Waveform JSON is current.",
+          ? "Waveform binary is stale or does not match the active profile."
+          : "Waveform binary is current.",
     exists: existing.exists,
     ...(existing.sizeBytes === undefined
       ? {}

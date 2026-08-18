@@ -16,7 +16,13 @@ test("Library exposes Releases and first-class Artists without inventing a sixth
   assert.match(appSource, /hiplingo-artwork-fallback/);
   assert.match(appSource, /src=\{hiplingoLogoUrl\}/);
   assert.doesNotMatch(appSource, /No artist photos yet/);
-  assert.match(appSource, /Associated releases/);
+  assert.match(appSource, /selectedArtistId=\{selectedLibraryArtistId\}/);
+  assert.match(appSource, /onSelectedArtistIdChange=\{setSelectedLibraryArtistId\}/);
+  assert.match(appSource, /releases=\{associatedReleases\}/);
+  assert.match(appSource, /heading=\{`\$\{selectedArtist\.displayName\} releases`\}/);
+  assert.match(appSource, /viewMode=\{artistReleaseViewMode\}/);
+  assert.match(appSource, /onViewModeChange=\{setArtistReleaseViewMode\}/);
+  assert.match(appSource, /library-artist-release-browser-section/);
   assert.match(styleSource, /\.library-entity-switcher/);
   assert.match(styleSource, /\.library-artist-roster/);
   assert.match(helpSource, /first-class Artist identities/);
@@ -26,4 +32,36 @@ test("Library exposes Releases and first-class Artists without inventing a sixth
 test("Artist migration is explicit plan/apply CLI work and not part of application startup", () => {
   assert.match(packageSource, /"migrate:artists": "tsx scripts\/migrate-artists\.ts"/);
   assert.doesNotMatch(appSource, /migrate-artists/);
+});
+
+
+test("Library metadata drill-down preserves the browser context that opened it", () => {
+  assert.match(appSource, /const returnToLibraryContext = useCallback/);
+  assert.match(appSource, /onBack=\{returnToLibraryContext\}/);
+
+  const start = appSource.indexOf(
+    "const returnToLibraryContext",
+  );
+  const end = appSource.indexOf(
+    "const returnToLibraryHome",
+    start,
+  );
+
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+
+  const contextSource = appSource.slice(start, end);
+
+  assert.doesNotMatch(
+    contextSource,
+    /setLibraryEntityView/,
+  );
+  assert.doesNotMatch(
+    contextSource,
+    /setLibraryReleaseViewMode/,
+  );
+  assert.doesNotMatch(
+    contextSource,
+    /setArtistReleaseViewMode/,
+  );
 });

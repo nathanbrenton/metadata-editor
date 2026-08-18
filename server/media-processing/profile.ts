@@ -1,13 +1,17 @@
 import { createHash } from "node:crypto";
 
 import {
+  WAVEFORM_BINARY_FILENAME,
+} from "@hiplingo/media-player/waveform-binary";
+
+import {
   DEFAULT_WAVEFORM_PEAKS_PER_SECOND,
   WAVEFORM_FFT_SIZE,
   WAVEFORM_FREQUENCY_BANDS,
   WAVEFORM_NORMALIZATION_PERCENTILE,
 } from "./waveform-generator.js";
 
-export const MEDIA_PROCESSING_PROFILE_VERSION = 1;
+export const MEDIA_PROCESSING_PROFILE_VERSION = 2;
 
 export type MediaProcessingProfile = {
   version: number;
@@ -19,7 +23,7 @@ export type MediaProcessingProfile = {
     id3v2Version: 3;
   };
   waveform: {
-    filename: "waveform-peaks.json";
+    filename: typeof WAVEFORM_BINARY_FILENAME;
     schemaVersion: 2;
     peaksPerSecond: number;
     fftSize: number;
@@ -42,7 +46,7 @@ export function buildMediaProcessingProfile(
       id3v2Version: 3,
     },
     waveform: {
-      filename: "waveform-peaks.json",
+      filename: WAVEFORM_BINARY_FILENAME,
       schemaVersion: 2,
       peaksPerSecond,
       fftSize: WAVEFORM_FFT_SIZE,

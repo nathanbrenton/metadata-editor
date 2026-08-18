@@ -1,4 +1,7 @@
-import type { WaveformPeak } from "@hiplingo/media-player";
+import {
+  decodeWaveformPayload,
+  type WaveformPeak,
+} from "@hiplingo/media-player";
 
 export {
   WAVEFORM_COLOR_OPTIONS,
@@ -31,7 +34,7 @@ export function parseMediaWaveformData(
     value === null ||
     Array.isArray(value)
   ) {
-    throw new Error("Waveform data is not a JSON object.");
+    throw new Error("Waveform data is not an object.");
   }
 
   const record = value as Record<string, unknown>;
@@ -79,4 +82,12 @@ export function parseMediaWaveformData(
     peakCount: record.peakCount,
     peaks: normalizedPeaks,
   };
+}
+
+export function decodeMediaWaveformPayload(
+  value: ArrayBuffer | Uint8Array,
+): MediaWaveformData {
+  return parseMediaWaveformData(
+    decodeWaveformPayload(value),
+  );
 }

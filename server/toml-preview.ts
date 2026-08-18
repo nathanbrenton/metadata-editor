@@ -138,6 +138,10 @@ function buildReleaseDocuments(
     },
 
     settings: {
+      publication: {
+        include_video: false,
+      },
+
       files: {
         missing_optional_file_policy:
           "notice",

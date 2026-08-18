@@ -79,7 +79,7 @@ async function createLibraryRelease(
   );
 
   const masterPath = path.join(trackPath, "audio-master.wav");
-  const waveformPath = path.join(trackPath, "waveform-peaks.json");
+  const waveformPath = path.join(trackPath, "waveform-peaks.wfp");
 
   await writeFile(masterPath, createPcm16Wav());
 

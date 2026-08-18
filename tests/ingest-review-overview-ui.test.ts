@@ -109,6 +109,37 @@ test(
   },
 );
 
+
+test(
+  "surfaces blocked destination reasons and routes artwork conflicts back to Artwork & files",
+  () => {
+    assert.match(
+      builderSource,
+      /const blockedPlanItems = preview\?\.items\.filter/,
+    );
+    assert.match(
+      builderSource,
+      /Blocked destination needs attention/,
+    );
+    assert.match(
+      builderSource,
+      /<strong>\{item\.reason\}<\/strong>/,
+    );
+    assert.match(
+      builderSource,
+      /Review Artwork &amp; files/,
+    );
+    assert.match(
+      builderSource,
+      /onReviewArtwork=\{\(\) => onStepChange\(4\)\}/,
+    );
+    assert.match(
+      builderSource,
+      /open=\{preview\.summary\.blockedCount > 0\}[\s\S]*Filesystem plan/,
+    );
+  },
+);
+
 test(
   "documents the release-first Build workflow",
   () => {

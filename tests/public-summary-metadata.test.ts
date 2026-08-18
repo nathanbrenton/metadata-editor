@@ -56,7 +56,11 @@ test("metadata editor renders registered multiline scalar fields as textarea", (
 test("release publication preserves approved release.description in sanitized metadata", () => {
   assert.match(
     publisherSource,
-    /metadata:\s*sanitizeReleaseMetadata/,
+    /function publicReleaseMetadata[\s\S]*const metadata = sanitizeReleaseMetadata\(releaseValue\)/,
+  );
+  assert.match(
+    publisherSource,
+    /metadata:\s*publicReleaseMetadata\(/,
   );
   assert.doesNotMatch(
     publisherSource,

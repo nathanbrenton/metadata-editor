@@ -1092,6 +1092,36 @@ async function validateAssets(
     ] as const;
 
     for (const [fieldPath, authoredPath] of assetPaths) {
+      if (
+        fieldPath === "track.assets.waveform_peaks" &&
+        authoredPath === "waveform-peaks.json"
+      ) {
+        const compactWaveformPath = assertPathWithinRoot(
+          mediaRoot,
+          path.join(
+            mediaRoot,
+            track.relativePath,
+            "waveform-peaks.wfp",
+          ),
+        );
+
+        try {
+          const compactStats = await lstat(compactWaveformPath);
+          if (
+            compactStats.isFile() &&
+            !compactStats.isSymbolicLink()
+          ) {
+            // Migration compatibility: an older track.toml may still name
+            // waveform-peaks.json after the compact canonical derivative has
+            // been prepared. Do not make that stale private pointer block the
+            // public package; new Staging output authors waveform-peaks.wfp.
+            continue;
+          }
+        } catch {
+          // Fall through to normal validation of the legacy authored path.
+        }
+      }
+
       issues.push(
         ...(await validateReferencedAsset(
           mediaRoot,
@@ -1365,6 +1395,10 @@ function validateUnexpectedFiles(
       ) ||
       /^audio-master\.[^.]+$/i.test(filename) ||
       /^audio-playback\.[^.]+$/i.test(filename) ||
+      filename === "waveform-peaks.wfp" ||
+      // Temporary migration allowance: old Library snapshots may retain the
+      // oversized JSON derivative after the compact canonical WFP is created.
+      // New builds never generate or publish this legacy file.
       filename === "waveform-peaks.json" ||
       /^artwork-master\.[^.]+$/i.test(filename) ||
       lower.endsWith(".md") ||

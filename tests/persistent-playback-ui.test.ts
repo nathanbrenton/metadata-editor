@@ -22,6 +22,13 @@ const styleSource = await readFile(
   new URL("../src/styles.css", import.meta.url),
   "utf8",
 );
+const sharedNowPlayingStyleSource = await readFile(
+  new URL(
+    "../../packages/media-player/src/compact-now-playing-bar.css",
+    import.meta.url,
+  ),
+  "utf8",
+);
 const stagingSource = await readFile(
   new URL("../src/IngestReleaseBuilder.tsx", import.meta.url),
   "utf8",
@@ -113,7 +120,8 @@ test("persistent footer accepts host-provided waveform URLs and renders the shar
   assert.match(playerSource, /type PersistentPlaybackTrack = PlayableMediaItem<string>/);
   assert.match(playerSource, /currentTrack\?\.waveformUrl\?\.trim\(\)/);
   assert.match(playerSource, /fetch\(waveformUrl/);
-  assert.match(playerSource, /parseMediaWaveformData/);
+  assert.match(playerSource, /decodeMediaWaveformPayload/);
+  assert.match(playerSource, /await response\.arrayBuffer\(\)/);
   assert.match(playerSource, /<CompactNowPlayingBar/);
   assert.match(playerSource, /waveformPeaks=\{playback\.waveform\?\.peaks \?\? null\}/);
   assert.match(playerSource, /waveform: "persistent-library-player__waveform"/);
@@ -127,6 +135,12 @@ test("application menu owns the waveform palette selector used by the footer", (
   assert.match(waveformMenuSource, /value=\{colorMode\}/);
   assert.match(appSource, /<LazyWaveformColorMenuCard/);
   assert.match(appSource, /colorMode=\{waveformColorMode\}/);
+  assert.match(appSource, /<h2>Browsing Accent<\/h2>/);
+  assert.match(appSource, /Library browsing accent/);
+  assert.match(appSource, /Gray is the default/);
+  assert.match(appSource, /INTERFACE_ACCENT_OPTIONS/);
+  assert.match(appSource, /metadata-editor\.interface-accent-v1/);
+  assert.match(appSource, /dataset\.interfaceAccent/);
   assert.match(helpSource, /3Band, RGB, Blue, and Monochrome/);
 });
 
@@ -136,7 +150,7 @@ test("persistent footer matches the wide metadata-editor canvas", () => {
     styleSource,
     /\.persistent-library-player \{[\s\S]*width: min\(92rem, 100%\)/,
   );
-  assert.match(styleSource, /\.persistent-library-player__waveform/);
+  assert.match(sharedNowPlayingStyleSource, /\.shared-now-playing__waveform/);
   assert.match(helpSource, /fixed full-width player footer/);
 });
 
@@ -171,14 +185,32 @@ test("persistent footer consumes the shared compact Now Playing presentation", (
   assert.match(playerSource, /onArtworkClick=\{/);
   assert.match(
     playerSource,
-    /artworkActionLabel="Open current release in Library Waveform view"/,
+    /artworkActionLabel="Open current track in Library Waveform view"/,
   );
-  assert.doesNotMatch(playerSource, /endControls=\{/);
+  assert.match(playerSource, /endControls=\{/);
+  assert.match(
+    playerSource,
+    /persistent-library-player__metadata-button/,
+  );
+  assert.match(
+    playerSource,
+    /aria-label="Preview current track metadata as presented on Hiplingo"/,
+  );
   assert.doesNotMatch(playerSource, /MediaTransportIcon/);
   assert.doesNotMatch(playerSource, /formatPlaybackTime/);
   assert.doesNotMatch(playerSource, /⏮|⏭|❚❚/);
-  assert.match(styleSource, /grid-template-areas:[\s\S]*"artwork identity time waveform transport volume"/);
-  assert.match(styleSource, /\.persistent-library-player__transport-icon svg/);
+  assert.match(
+    sharedNowPlayingStyleSource,
+    /grid-template-areas:[\s\S]*"artwork identity time waveform transport volume"/,
+  );
+  assert.match(
+    sharedNowPlayingStyleSource,
+    /\.shared-now-playing__transport-icon svg/,
+  );
+  assert.match(
+    appSource,
+    /@hiplingo\/media-player\/compact-now-playing-bar\.css/,
+  );
   assert.match(helpSource, /compact Now Playing presentation structure come from the shared/);
 });
 
@@ -259,10 +291,10 @@ test("persistent footer consumes the shared volume interaction and perceptual cu
   assert.match(sharedVolumeSource, /max="100"/);
   assert.match(sharedVolumeSource, /return normalized \* normalized/);
   assert.match(
-    styleSource,
-    /\.persistent-library-player__volume-popup/,
+    sharedNowPlayingStyleSource,
+    /\.shared-volume-control__popup/,
   );
-  assert.match(styleSource, /rotate\(-90deg\)/);
+  assert.match(sharedNowPlayingStyleSource, /rotate\(-90deg\)/);
 });
 
 test("persistent playback initializes the shared media analyser before playback starts", () => {

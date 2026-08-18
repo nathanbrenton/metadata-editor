@@ -20,6 +20,11 @@ import {
 } from "node:fs";
 
 import {
+  decodeWaveformBinary,
+  encodeWaveformBinary,
+} from "@hiplingo/media-player/waveform-binary";
+
+import {
   detectFfmpegCapabilities,
 } from "../ffmpeg-capabilities.js";
 import {
@@ -173,6 +178,9 @@ function isPreparableMissingDerivativeReference(
       'track.assets.audio_playback points to "audio-playback.mp3",',
     ) ||
     issue.message.startsWith(
+      'track.assets.waveform_peaks points to "waveform-peaks.wfp",',
+    ) ||
+    issue.message.startsWith(
       'track.assets.waveform_peaks points to "waveform-peaks.json",',
     )
   );
@@ -198,6 +206,7 @@ function hashPreparationPlan(
   mediaPlan: MediaProcessingPlan,
   webStreamPlan: WebStreamPlan,
   browserArtworkPlan: BrowserArtworkPlan,
+  includedTrackIds?: ReadonlySet<string>,
 ): string {
   return createHash("sha256")
     .update(JSON.stringify({
@@ -215,7 +224,13 @@ function hashPreparationPlan(
         sourceSha256: browserArtworkPlan.sourceSha256,
         profileSha256: browserArtworkPlan.profileSha256,
       },
-      tracks: mediaPlan.items.map((item) => ({
+      tracks: mediaPlan.items
+        .filter(
+          (item) =>
+            !includedTrackIds ||
+            includedTrackIds.has(item.trackId),
+        )
+        .map((item) => ({
         trackId: item.trackId,
         trackRelativePath: item.trackRelativePath,
         master: item.master,
@@ -762,8 +777,10 @@ async function stageWaveform(
   const expected = buildMediaProcessingProfile(
     plan.profile.waveform.peaksPerSecond,
   ).waveform;
+  const encodedWaveform = encodeWaveformBinary(waveform);
+  const decodedWaveform = decodeWaveformBinary(encodedWaveform);
   const inspection = inspectWaveformDocument(
-    waveform,
+    decodedWaveform,
     expected,
   );
 
@@ -777,10 +794,10 @@ async function stageWaveform(
 
   await writeFile(
     stagePath,
-    `${JSON.stringify(waveform, null, 2)}\n`,
+    encodedWaveform,
     { mode: 0o600 },
   );
-  await assertRegularFile(stagePath, "Prepared waveform JSON");
+  await assertRegularFile(stagePath, "Prepared waveform binary");
 }
 
 async function stageBrowserArtwork(
@@ -1106,28 +1123,43 @@ export async function prepareReleaseMedia(
     mediaRoot,
     release,
   );
-  const blockedPublicDerivative = mediaPlan.items.some(
-    (track) =>
-      track.master.status !== "ready" ||
-      track.waveform.action === "blocked",
-  ) ||
-    webStreamPlan.summary.blockedCount > 0 ||
+  const publicationTrackIds = new Set(
+    reviewedPlan.publicSelection.includedTrackIds,
+  );
+  const preparationTrackIds = scope === "all"
+    ? publicationTrackIds
+    : new Set(mediaPlan.items.map((item) => item.trackId));
+  const blockedPublicDerivative = mediaPlan.items
+    .filter((track) => preparationTrackIds.has(track.trackId))
+    .some(
+      (track) =>
+        track.master.status !== "ready" ||
+        track.waveform.action === "blocked",
+    ) ||
+    webStreamPlan.items
+      .filter((stream) => preparationTrackIds.has(stream.trackId))
+      .some((stream) => stream.action === "blocked") ||
     browserArtworkPlan.status === "blocked";
 
   if (scope === "all" && blockedPublicDerivative) {
     throw new Error(
-      "Media preparation is blocked by the canonical source, HLS stream, waveform, or browser-artwork plan.",
+      "Media preparation is blocked by a selected public track source, HLS stream, waveform, or browser-artwork plan.",
     );
   }
 
   const itemsToPrepare = preparationItems(mediaPlan).filter(
-    ({ derivative }) =>
-      scope === "all" ||
-      derivative.kind === "playback-mp3",
+    ({ track, derivative }) =>
+      preparationTrackIds.has(track.trackId) &&
+      (
+        scope === "all" ||
+        derivative.kind === "playback-mp3"
+      ),
   );
   const streamsToPrepare =
     scope === "all"
-      ? streamPreparationItems(webStreamPlan)
+      ? streamPreparationItems(webStreamPlan).filter(
+          (stream) => preparationTrackIds.has(stream.trackId),
+        )
       : [];
   const artworkNeedsPreparation =
     scope === "all" &&
@@ -1151,11 +1183,12 @@ export async function prepareReleaseMedia(
     mediaPlan,
     webStreamPlan,
     browserArtworkPlan,
+    preparationTrackIds,
   );
   const operationId =
     options.operationId ??
     `media-preparation-${randomUUID()}`;
-  const trackCount = mediaPlan.items.length;
+  const trackCount = preparationTrackIds.size;
   const totalUnits =
     streamsToPrepare.length +
     itemsToPrepare.length +
@@ -1511,6 +1544,7 @@ export async function prepareReleaseMedia(
         planBeforePromotion,
         webStreamsBeforePromotion,
         browserArtworkBeforePromotion,
+        preparationTrackIds,
       ) !== mediaPlanFingerprint
     ) {
       throw new Error(
@@ -1596,8 +1630,15 @@ export async function prepareReleaseMedia(
         if (
           incompletePreparedFiles.length > 0 ||
           (scope === "all" &&
-            verifiedWebStreams.summary.currentCount !==
-              verifiedWebStreams.summary.trackCount) ||
+            verifiedWebStreams.items
+              .filter((stream) =>
+                preparationTrackIds.has(stream.trackId),
+              )
+              .some(
+                (stream) =>
+                  stream.action !== "none" ||
+                  stream.status !== "current",
+              )) ||
           (artworkNeedsPreparation &&
             verifiedBrowserArtwork.status !== "current")
         ) {

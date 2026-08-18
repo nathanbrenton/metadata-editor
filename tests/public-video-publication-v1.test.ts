@@ -27,8 +27,8 @@ const readmeSource = readFileSync(
   "utf8",
 );
 
-test("public package contract v5 plans ordered video metadata, poster, and HLS resources", () => {
-  assert.match(planSource, /name: "audio-player-public-package";\s*version: 5;/);
+test("public package contract v6 plans ordered video metadata, poster, and HLS resources", () => {
+  assert.match(planSource, /name: "audio-player-public-package";\s*version: 6;/);
   assert.match(planSource, /videoResources: \{/);
   assert.match(planSource, /poster: \{/);
   assert.match(planSource, /relativePath: "stream\/poster\.png"/);
@@ -56,7 +56,8 @@ test("publisher generates richer video.json with poster and excludes canonical v
   assert.match(writerSource, /relatedTrackId: video\.relatedTrackId/);
   assert.match(writerSource, /poster: \{/);
   assert.match(writerSource, /videoResources\.poster\.relativePath/);
-  assert.match(writerSource, /videos:\s*\[\.\.\.\(release\.videos \?\? \[\]\)\]/);
+  assert.match(writerSource, /videos:\s*\[\.\.\.selectedVideos\(plan, release\)\]/);
+  assert.match(writerSource, /plan\.publicSelection\.includeVideo/);
   assert.match(writerSource, /left\.displayOrder/);
   assert.match(writerSource, /lower\.startsWith\("video-master\."\)/);
   assert.match(writerSource, /"video\.toml"/);
@@ -79,9 +80,9 @@ test("Publish UI prepares video media while batch preparation includes poster-aw
 });
 
 test("documentation records public video presentation resources while canonical masters stay private", () => {
-  assert.match(helpSource, /public-package contract v5 publishes ordered sanitized video\.json, poster\.png/);
+  assert.match(helpSource, /public-package contract v6 publishes ordered sanitized video\.json, poster\.png/);
   assert.match(helpSource, /Prepare video media/);
-  assert.match(readmeSource, /Publish contract v5 plans a host-ready audio\/video layout/);
+  assert.match(readmeSource, /Publish contract v6 plans a host-ready audio\/video layout/);
   assert.match(readmeSource, /videos\/<video-id>\//);
   assert.match(readmeSource, /poster\.png/);
   assert.match(readmeSource, /private `stream-info\.json` preparation sidecars/);

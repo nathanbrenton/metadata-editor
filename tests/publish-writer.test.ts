@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   access,
+  cp,
   mkdir,
   mkdtemp,
   readFile,
@@ -15,11 +16,22 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  encodeWaveformBinary,
+} from "../../packages/media-player/src/waveform-binary.js";
+
+import {
   buildPublishPlan,
 } from "../server/publish-plan.js";
 import {
   publishReleasePackage,
 } from "../server/publish-writer.js";
+import {
+  readReleasePublicationSettings,
+  saveReleasePublicationSettings,
+} from "../server/publication-settings.js";
+import {
+  scanReleaseById,
+} from "../server/scanner.js";
 import {
   listPublishOperations,
 } from "../server/publish-operations.js";
@@ -30,6 +42,10 @@ import {
   buildWebStreamProfile,
   hashWebStreamProfile,
 } from "../server/media-processing/web-stream.js";
+import {
+  buildVideoWebStreamInfo,
+  buildVideoWebStreamPlan,
+} from "../server/media-processing/video-web-stream.js";
 import type {
   FfmpegCapabilities,
 } from "../server/types.js";
@@ -65,6 +81,11 @@ const readyCapabilities: FfmpegCapabilities = {
     })),
   ],
   checkedAt: "2026-08-09T20:00:00.000Z",
+};
+
+const videoReadyCapabilities: FfmpegCapabilities = {
+  ...readyCapabilities,
+  encoders: ["libmp3lame", "aac", "libx264"],
 };
 
 function createPcm16Wav(): Buffer {
@@ -223,7 +244,7 @@ async function createFixture(): Promise<{
   );
   const waveformPath = path.join(
     trackPath,
-    "waveform-peaks.json",
+    "waveform-peaks.wfp",
   );
   const wav = createPcm16Wav();
   const waveform = generateWaveformPeaksFromWav(wav);
@@ -232,7 +253,7 @@ async function createFixture(): Promise<{
   await writeFile(playbackPath, Buffer.from("private mp3"));
   await writeFile(
     waveformPath,
-    `${JSON.stringify(waveform, null, 2)}\n`,
+    encodeWaveformBinary(waveform),
   );
   await writeFile(
     path.join(trackPath, "track.toml"),
@@ -254,7 +275,7 @@ async function createFixture(): Promise<{
       "[track.assets]",
       'audio_master = "audio-master.wav"',
       'audio_playback = "audio-playback.mp3"',
-      'waveform_peaks = "waveform-peaks.json"',
+      'waveform_peaks = "waveform-peaks.wfp"',
       "",
       "[track.credit_sources]",
       'file = "track-credits.toml"',
@@ -379,6 +400,190 @@ async function createFixture(): Promise<{
   };
 }
 
+async function addCurrentVideo(
+  fixture: Awaited<ReturnType<typeof createFixture>>,
+): Promise<string> {
+  const videoId = "video_writer-test";
+  const releasePath = path.join(
+    fixture.mediaRoot,
+    "releases",
+    fixture.releaseId,
+  );
+  const videoPath = path.join(
+    releasePath,
+    "videos",
+    videoId,
+  );
+  const masterPath = path.join(
+    videoPath,
+    "video-master.mp4",
+  );
+
+  await mkdir(videoPath, { recursive: true });
+  await writeFile(masterPath, Buffer.from("canonical private video"));
+  await writeFile(
+    path.join(videoPath, "video.toml"),
+    [
+      "[schema]",
+      'name = "video-metadata"',
+      "version = 3",
+      "",
+      "[video]",
+      `id = "${videoId}"`,
+      'title = "Writer Test Video"',
+      'type = "visualizer"',
+      'master_path = "video-master.mp4"',
+      `related_track_id = "${fixture.trackId}"`,
+      "display_order = 1",
+      "poster_time_seconds = 0",
+      "",
+    ].join("\n"),
+  );
+
+  const release = await scanReleaseById(
+    fixture.mediaRoot,
+    fixture.releaseId,
+  );
+  assert.ok(release);
+  const plan = await buildVideoWebStreamPlan(
+    fixture.mediaRoot,
+    release,
+    videoReadyCapabilities,
+    { generatedAt: "2026-08-09T20:02:00.000Z" },
+  );
+  const item = plan.items.find(
+    (candidate) => candidate.videoId === videoId,
+  );
+  assert.ok(item?.master);
+
+  const streamPath = path.join(videoPath, "stream");
+  await mkdir(streamPath, { recursive: true });
+  await writeFile(
+    path.join(streamPath, "index.m3u8"),
+    [
+      "#EXTM3U",
+      "#EXT-X-VERSION:7",
+      "#EXT-X-INDEPENDENT-SEGMENTS",
+      '#EXT-X-MAP:URI="init.mp4"',
+      "#EXTINF:3.000000,",
+      "segment-00001.m4s",
+      "#EXT-X-ENDLIST",
+      "",
+    ].join("\n"),
+  );
+  await writeFile(
+    path.join(streamPath, "init.mp4"),
+    Buffer.from("video init"),
+  );
+  await writeFile(
+    path.join(streamPath, "segment-00001.m4s"),
+    Buffer.from("video segment"),
+  );
+  await writeFile(
+    path.join(streamPath, "poster.png"),
+    Buffer.from("video poster"),
+  );
+  await writeFile(
+    path.join(streamPath, "stream-info.json"),
+    `${JSON.stringify(
+      buildVideoWebStreamInfo(
+        videoId,
+        item.master,
+        plan.profile,
+        plan.generatedAt,
+      ),
+      null,
+      2,
+    )}\n`,
+  );
+
+  return videoId;
+}
+
+async function addSecondTrack(
+  fixture: Awaited<ReturnType<typeof createFixture>>,
+): Promise<string> {
+  const secondTrackId = "artist_02_omitted-track";
+  const releasePath = path.join(
+    fixture.mediaRoot,
+    "releases",
+    fixture.releaseId,
+  );
+  const firstTrackPath = path.join(
+    releasePath,
+    "tracks",
+    fixture.trackId,
+  );
+  const secondTrackPath = path.join(
+    releasePath,
+    "tracks",
+    secondTrackId,
+  );
+
+  await cp(firstTrackPath, secondTrackPath, { recursive: true });
+
+  const replaceInFile = async (
+    filePath: string,
+    replacements: Array<[string, string]>,
+  ) => {
+    let content = await readFile(filePath, "utf8");
+    for (const [from, to] of replacements) {
+      content = content.replaceAll(from, to);
+    }
+    await writeFile(filePath, content, "utf8");
+  };
+
+  await replaceInFile(
+    path.join(firstTrackPath, "track.toml"),
+    [["track_total = 1", "track_total = 2"]],
+  );
+  await replaceInFile(
+    path.join(secondTrackPath, "track.toml"),
+    [
+      [fixture.trackId, secondTrackId],
+      ['title = "Public Track"', 'title = "Omitted Track"'],
+      ["track_number = 1", "track_number = 2"],
+      ["track_total = 1", "track_total = 2"],
+    ],
+  );
+  await replaceInFile(
+    path.join(secondTrackPath, "track-credits.toml"),
+    [[fixture.trackId, secondTrackId]],
+  );
+  await replaceInFile(
+    path.join(secondTrackPath, "track-production-notes.toml"),
+    [[fixture.trackId, secondTrackId]],
+  );
+  await replaceInFile(
+    path.join(secondTrackPath, "stream", "stream-info.json"),
+    [[fixture.trackId, secondTrackId]],
+  );
+  await replaceInFile(
+    fixture.releaseTomlPath,
+    [["track_total = 1", "track_total = 2"]],
+  );
+
+  const oldDate = new Date("2026-08-09T20:00:00.000Z");
+  const newDate = new Date("2026-08-09T20:01:00.000Z");
+  await utimes(
+    path.join(secondTrackPath, "audio-master.wav"),
+    oldDate,
+    oldDate,
+  );
+  await utimes(
+    path.join(secondTrackPath, "audio-playback.mp3"),
+    newDate,
+    newDate,
+  );
+  await utimes(
+    path.join(secondTrackPath, "waveform-peaks.wfp"),
+    newDate,
+    newDate,
+  );
+
+  return secondTrackId;
+}
+
 async function listFiles(
   root: string,
   relativePath = "",
@@ -493,8 +698,29 @@ test("builds a sanitized HLS public package without canonical/private files", as
     );
     assert.ok(
       files.includes(
-        `tracks/${fixture.trackId}/waveform-peaks.json`,
+        `tracks/${fixture.trackId}/waveform-peaks.wfp`,
       ),
+    );
+    assert.deepEqual(
+      await readFile(
+        path.join(
+          publicRelease,
+          "tracks",
+          fixture.trackId,
+          "waveform-peaks.wfp",
+        ),
+      ),
+      await readFile(
+        path.join(
+          fixture.mediaRoot,
+          "releases",
+          fixture.releaseId,
+          "tracks",
+          fixture.trackId,
+          "waveform-peaks.wfp",
+        ),
+      ),
+      "publication must copy the prepared canonical waveform bytes unchanged",
     );
     assert.ok(
       files.includes("artwork/front/artwork.jpg"),
@@ -571,8 +797,13 @@ test("builds a sanitized HLS public package without canonical/private files", as
     assert.equal(trackJson.stream.href, "stream/index.m3u8");
     assert.equal(
       trackJson.waveform.href,
-      "waveform-peaks.json",
+      "waveform-peaks.wfp",
     );
+    assert.equal(
+      trackJson.waveform.format,
+      "hiplingo-waveform-binary",
+    );
+    assert.equal(trackJson.waveform.formatVersion, 1);
     assert.equal(
       trackJson.artwork.href,
       "artwork/front/artwork.png",
@@ -665,6 +896,291 @@ test("builds a sanitized HLS public package without canonical/private files", as
   }
 });
 
+test("rebuilding after track deselection removes stale public track derivatives", async () => {
+  const fixture = await createFixture();
+
+  try {
+    const omittedTrackId = await addSecondTrack(fixture);
+    const initialPlan = await reviewedPlan(
+      fixture,
+      "2026-08-09T21:10:00.000Z",
+    );
+
+    assert.notEqual(initialPlan.status, "blocked");
+    assert.deepEqual(
+      initialPlan.publicSelection.includedTrackIds,
+      [fixture.trackId, omittedTrackId],
+    );
+    assert.equal(initialPlan.publicSelection.includeVideo, false);
+
+    await publishReleasePackage(
+      fixture.mediaRoot,
+      fixture.publishRoot,
+      fixture.releaseId,
+      {
+        expectedPublishPlanFingerprint:
+          initialPlan.planFingerprint,
+        publishPlanGeneratedAt: initialPlan.generatedAt,
+        ffmpegCapabilities: readyCapabilities,
+      },
+    );
+
+    const omittedPublicPath = path.join(
+      fixture.publishRoot,
+      "releases",
+      fixture.releaseId,
+      "tracks",
+      omittedTrackId,
+    );
+    await access(omittedPublicPath);
+
+    const release = await scanReleaseById(
+      fixture.mediaRoot,
+      fixture.releaseId,
+    );
+    assert.ok(release);
+    const settings = await readReleasePublicationSettings(
+      fixture.mediaRoot,
+      release,
+    );
+    assert.ok(settings.sha256);
+    await saveReleasePublicationSettings(
+      fixture.mediaRoot,
+      release,
+      {
+        includeVideo: false,
+        includedTrackIds: [fixture.trackId],
+        expectedSha256: settings.sha256,
+      },
+    );
+
+    const updatePlan = await reviewedPlan(
+      fixture,
+      "2026-08-09T21:11:00.000Z",
+    );
+    assert.equal(
+      updatePlan.publication.state,
+      "update-available",
+    );
+    assert.deepEqual(
+      updatePlan.publicSelection.includedTrackIds,
+      [fixture.trackId],
+    );
+    assert.equal(
+      updatePlan.items.some((item) =>
+        item.trackId === omittedTrackId,
+      ),
+      false,
+    );
+
+    const receipt = await publishReleasePackage(
+      fixture.mediaRoot,
+      fixture.publishRoot,
+      fixture.releaseId,
+      {
+        expectedPublishPlanFingerprint:
+          updatePlan.planFingerprint,
+        publishPlanGeneratedAt: updatePlan.generatedAt,
+        ffmpegCapabilities: readyCapabilities,
+      },
+    );
+
+    assert.equal(receipt.trackCount, 1);
+    await assert.rejects(
+      access(omittedPublicPath),
+      /ENOENT/,
+    );
+
+    const releaseJson = JSON.parse(
+      await readFile(
+        path.join(
+          fixture.publishRoot,
+          "releases",
+          fixture.releaseId,
+          "release.json",
+        ),
+        "utf8",
+      ),
+    ) as {
+      metadata?: { numbering?: { track_total?: number } };
+      tracks?: Array<{ id: string }>;
+    };
+    assert.deepEqual(
+      releaseJson.tracks?.map((track) => track.id),
+      [fixture.trackId],
+    );
+    assert.equal(
+      releaseJson.metadata?.numbering?.track_total,
+      1,
+    );
+  } finally {
+    await rm(fixture.temporaryRoot, {
+      recursive: true,
+      force: true,
+    });
+  }
+});
+
+test("rebuilding after video publication is disabled removes stale public video derivatives", async () => {
+  const fixture = await createFixture();
+
+  try {
+    const videoId = await addCurrentVideo(fixture);
+    const release = await scanReleaseById(
+      fixture.mediaRoot,
+      fixture.releaseId,
+    );
+    assert.ok(release);
+    const initialSettings = await readReleasePublicationSettings(
+      fixture.mediaRoot,
+      release,
+    );
+    assert.ok(initialSettings.sha256);
+    await saveReleasePublicationSettings(
+      fixture.mediaRoot,
+      release,
+      {
+        includeVideo: true,
+        includedTrackIds: [fixture.trackId],
+        expectedSha256: initialSettings.sha256,
+      },
+    );
+
+    const enabledPlan = await buildPublishPlan(
+      fixture.mediaRoot,
+      fixture.publishRoot,
+      fixture.releaseId,
+      {
+        generatedAt: "2026-08-09T21:12:00.000Z",
+        ffmpegCapabilities: videoReadyCapabilities,
+      },
+    );
+    assert.notEqual(enabledPlan.status, "blocked");
+    assert.equal(enabledPlan.publicSelection.includeVideo, true);
+    assert.deepEqual(
+      enabledPlan.publicSelection.includedVideoIds,
+      [videoId],
+    );
+
+    await publishReleasePackage(
+      fixture.mediaRoot,
+      fixture.publishRoot,
+      fixture.releaseId,
+      {
+        expectedPublishPlanFingerprint:
+          enabledPlan.planFingerprint,
+        publishPlanGeneratedAt: enabledPlan.generatedAt,
+        ffmpegCapabilities: videoReadyCapabilities,
+      },
+    );
+
+    const publicVideoPath = path.join(
+      fixture.publishRoot,
+      "releases",
+      fixture.releaseId,
+      "videos",
+      videoId,
+    );
+    await access(publicVideoPath);
+
+    const currentRelease = await scanReleaseById(
+      fixture.mediaRoot,
+      fixture.releaseId,
+    );
+    assert.ok(currentRelease);
+    const enabledSettings = await readReleasePublicationSettings(
+      fixture.mediaRoot,
+      currentRelease,
+    );
+    assert.ok(enabledSettings.sha256);
+    await saveReleasePublicationSettings(
+      fixture.mediaRoot,
+      currentRelease,
+      {
+        includeVideo: false,
+        includedTrackIds: [fixture.trackId],
+        expectedSha256: enabledSettings.sha256,
+      },
+    );
+
+    const disabledPlan = await buildPublishPlan(
+      fixture.mediaRoot,
+      fixture.publishRoot,
+      fixture.releaseId,
+      {
+        generatedAt: "2026-08-09T21:13:00.000Z",
+        ffmpegCapabilities: videoReadyCapabilities,
+      },
+    );
+    assert.equal(
+      disabledPlan.publication.state,
+      "update-available",
+    );
+    assert.equal(disabledPlan.publicSelection.includeVideo, false);
+    assert.deepEqual(
+      disabledPlan.publicSelection.includedVideoIds,
+      [],
+    );
+    assert.equal(
+      disabledPlan.items.some((item) =>
+        item.videoId === videoId,
+      ),
+      false,
+    );
+
+    const receipt = await publishReleasePackage(
+      fixture.mediaRoot,
+      fixture.publishRoot,
+      fixture.releaseId,
+      {
+        expectedPublishPlanFingerprint:
+          disabledPlan.planFingerprint,
+        publishPlanGeneratedAt: disabledPlan.generatedAt,
+        ffmpegCapabilities: videoReadyCapabilities,
+      },
+    );
+
+    assert.equal(receipt.videoCount, 0);
+    await assert.rejects(access(publicVideoPath), /ENOENT/);
+
+    const publicRelease = JSON.parse(
+      await readFile(
+        path.join(
+          fixture.publishRoot,
+          "releases",
+          fixture.releaseId,
+          "release.json",
+        ),
+        "utf8",
+      ),
+    ) as { videos?: Array<{ id: string }> };
+    assert.equal("videos" in publicRelease, false);
+
+    const publicManifest = JSON.parse(
+      await readFile(
+        path.join(
+          fixture.publishRoot,
+          "releases",
+          fixture.releaseId,
+          "publication-manifest.json",
+        ),
+        "utf8",
+      ),
+    ) as { resources?: Array<{ videoId?: string }> };
+    assert.equal(
+      publicManifest.resources?.some(
+        (resource) => resource.videoId === videoId,
+      ),
+      false,
+    );
+  } finally {
+    await rm(fixture.temporaryRoot, {
+      recursive: true,
+      force: true,
+    });
+  }
+});
+
 test("updates a public release as a complete snapshot and removes obsolete files", async () => {
   const fixture = await createFixture();
 
@@ -695,6 +1211,13 @@ test("updates a public release as a complete snapshot and removes obsolete files
       "obsolete-public-file.txt",
     );
     await writeFile(obsoletePath, "obsolete");
+    const legacyWaveformPath = path.join(
+      publicRelease,
+      "tracks",
+      fixture.trackId,
+      "waveform-peaks.json",
+    );
+    await writeFile(legacyWaveformPath, '{"legacy":true}\n');
 
     const releaseToml = await readFile(
       fixture.releaseTomlPath,
@@ -742,6 +1265,9 @@ test("updates a public release as a complete snapshot and removes obsolete files
     assert.equal(receipt.mode, "update");
     await assert.rejects(
       access(obsoletePath),
+    );
+    await assert.rejects(
+      access(legacyWaveformPath),
     );
 
     const catalog = JSON.parse(

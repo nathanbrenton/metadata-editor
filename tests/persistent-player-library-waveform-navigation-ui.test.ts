@@ -23,73 +23,80 @@ const readmeSource = await readFile(
   "utf8",
 );
 
-test("footer artwork opens the current release Waveform view", () => {
+test("footer artwork opens the current track Waveform view", () => {
   assert.match(
     playerSource,
-    /onOpenLibraryWaveform\?: \(releaseId: string\) => void/,
+    /onOpenLibraryWaveform\?: \(\) => void/,
   );
   assert.match(playerSource, /onArtworkClick=\{/);
   assert.match(
     playerSource,
-    /artworkActionLabel="Open current release in Library Waveform view"/,
+    /track\?\.releaseId && onOpenLibraryWaveform/,
   );
   assert.match(
     playerSource,
-    /onOpenLibraryWaveform\(track\.releaseId!\)/,
+    /\? onOpenLibraryWaveform\s*:\s*undefined/,
+  );
+  assert.match(
+    playerSource,
+    /artworkActionLabel="Open current track in Library Waveform view"/,
   );
   assert.doesNotMatch(
     playerSource,
     /persistent-library-player__waveform-view-button/,
   );
-  assert.doesNotMatch(playerSource, />\s*Release waveform\s*</);
+  assert.doesNotMatch(
+    playerSource,
+    />\s*Release waveform\s*</,
+  );
 });
 
-test("footer shortcut returns to Library Waveform view for the active release", () => {
+test("footer shortcut opens the main Library Waveform without a second selection model", () => {
   assert.match(
     appSource,
-    /import type \{[\s\S]*LibraryWaveformNavigationRequest[\s\S]*from "\.\/LibraryWaveformView\.js"/,
+    /const openCurrentTrackInLibraryWaveform/,
   );
   assert.match(
     appSource,
-    /libraryWaveformNavigationRequestIdRef\.current \+= 1/,
+    /setLibraryEntityView\("releases"\)/,
   );
   assert.match(
     appSource,
-    /const openCurrentReleaseInLibraryWaveform/,
-  );
-  assert.match(appSource, /navigateWorkflowView\("library"\)/);
-  assert.match(
-    appSource,
-    /waveformNavigationRequest=\{[\s\S]*libraryWaveformNavigationRequest/,
+    /setLibraryReleaseViewMode\("waveform"\)/,
   );
   assert.match(
     appSource,
-    /onViewModeChange\("waveform"\)/,
+    /navigateWorkflowView\("library"\)/,
+  );
+  assert.match(
+    appSource,
+    /onOpenLibraryWaveform=\{\s*openCurrentTrackInLibraryWaveform\s*\}/,
   );
   assert.doesNotMatch(
     appSource,
-    /metadata-editor\.library-release-view/,
-  );
-  assert.match(
-    appSource,
-    /navigationRequest=\{waveformNavigationRequest\}/,
+    /LibraryWaveformNavigationRequest|libraryWaveformNavigationRequest|navigationRequest=\{/,
   );
   assert.match(
     waveformSource,
-    /export type LibraryWaveformNavigationRequest/,
+    /const track = playback\.currentTrack;/,
   );
-  assert.match(
+  assert.doesNotMatch(
     waveformSource,
-    /navigationRequest\?\.requestId/,
-  );
-  assert.match(
-    waveformSource,
-    /setSelectedReleaseId\(releaseId\)/,
+    /LibraryWaveformNavigationRequest|navigationRequest|selectedReleaseId|selectedTrackId/,
   );
 });
 
-test("documentation identifies footer artwork as the temporary Waveform shortcut", () => {
-  assert.match(helpSource, /footer artwork itself is the temporary explicit shortcut/);
-  assert.match(helpSource, /opens that release in the single-release Waveform view/);
-  assert.match(readmeSource, /footer artwork is the temporary Waveform shortcut/);
+test("documentation identifies footer artwork as a current-track Waveform shortcut", () => {
+  assert.match(
+    helpSource,
+    /opens the Waveform view for that same persistent current track/,
+  );
+  assert.match(
+    readmeSource,
+    /footer artwork is the temporary Waveform shortcut for Library-backed current tracks/,
+  );
+  assert.doesNotMatch(
+    readmeSource,
+    /previous\/next release browsing|single-release Waveform viewer/,
+  );
 });

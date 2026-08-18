@@ -1,5 +1,11 @@
 import { hiplingoLogoUrl } from "@hiplingo/brand";
 import {
+  ListenerMetadataViewer,
+  type ListenerMetadataRelease,
+  type ListenerMetadataTrack,
+  type MetadataVerbosity,
+} from "@hiplingo/media-player";
+import {
   Fragment,
   lazy,
   Suspense,
@@ -24,6 +30,12 @@ import {
   getPlayableTrackIds,
   trackHasAudioPreview,
 } from "./audio-preview.js";
+import {
+  buildLibraryMetadataPreview,
+} from "./library-metadata-preview.js";
+import "@hiplingo/media-player/compact-now-playing-bar.css";
+import "@hiplingo/media-player/listener-metadata-viewer.css";
+import "./listener-metadata-viewer-host.css";
 
 import {
   PersistentLibraryPlayerBar,
@@ -37,10 +49,6 @@ import {
   type WaveformColorMode,
 } from "./media-waveform.js";
 import { buildLibraryWaveformUrl } from "./library-waveform.js";
-
-import type {
-  LibraryWaveformNavigationRequest,
-} from "./LibraryWaveformView.js";
 
 import {
   buildIngestAudioPreviewUrl,
@@ -133,6 +141,7 @@ import {
 } from "./metadata-tab-routing.js";
 
 import {
+  defaultTrackOverviewFieldPaths,
   getDefaultTrackOverviewFieldOrder,
   getMissingTrackOverviewFieldPresentation,
   isDefaultTrackIdentityFieldPath,
@@ -402,6 +411,9 @@ type DiscoveredAsset = {
 type TrackScanResult = {
   id: string;
   relativePath: string;
+  title?: string;
+  trackNumber?: number;
+  discNumber?: number;
   metadataFiles: MetadataFileStatus[];
   audioMasters: DiscoveredAsset[];
   playbackAudio?: DiscoveredAsset[];
@@ -654,6 +666,15 @@ type PublishPlan = {
     currentContentFingerprint: string;
     publishedContentFingerprint?: string;
     publishedAt?: string;
+  };
+  publicSelection: {
+    settingsRelativePath: string;
+    settingsExists: boolean;
+    settingsSha256?: string;
+    includeVideo: boolean;
+    trackSelectionMode: "all" | "selected";
+    includedTrackIds: string[];
+    includedVideoIds: string[];
   };
   planFingerprint: string;
   status: "ready" | "warning" | "blocked";
@@ -974,6 +995,13 @@ type PublishFleetRelease = {
   audioStreamNeedsPreparation: boolean;
   videoStreamNeedsPreparation: boolean;
   waveformNeedsPreparation: boolean;
+  publicSelection?: {
+    includeVideo: boolean;
+    publicTrackCount: number;
+    libraryTrackCount: number;
+    publicVideoCount: number;
+    libraryVideoCount: number;
+  };
 };
 
 type ArtistPublicationPlan = {
@@ -1350,6 +1378,23 @@ type ApplicationView =
   | "compatibility"
   | "help";
 
+type InterfaceAccentMode =
+  | "gray"
+  | "purple"
+  | "blue";
+
+const INTERFACE_ACCENT_STORAGE_KEY =
+  "metadata-editor.interface-accent-v1";
+
+const INTERFACE_ACCENT_OPTIONS: Array<{
+  value: InterfaceAccentMode;
+  label: string;
+}> = [
+  { value: "gray", label: "Gray" },
+  { value: "purple", label: "Purple" },
+  { value: "blue", label: "Blue" },
+];
+
 type WorkflowHelpReturnTarget = {
   applicationView: Exclude<
     ApplicationView,
@@ -1438,6 +1483,17 @@ type ReadinessNavigationTarget =
       tab: ReleaseMetadataTab;
       field: RequiredFieldIssue;
     };
+
+type MetadataEditorFocusTarget = {
+  scopeId: string;
+  tab: ReleaseMetadataTab;
+  tomlPath?: string;
+};
+
+type PendingMetadataFocusRequest =
+  MetadataEditorFocusTarget & {
+    releaseId: string;
+  };
 
 type CompatibilityStatusFilter =
   | "all"
@@ -1713,15 +1769,50 @@ export function App() {
     useState<ApplicationView>("library");
   const [libraryReleaseViewMode, setLibraryReleaseViewMode] =
     useState<LibraryReleaseViewMode>("tiles");
+  const [artistReleaseViewMode, setArtistReleaseViewMode] =
+    useState<LibraryReleaseViewMode>("tiles");
+  const [selectedReleaseDetailMode, setSelectedReleaseDetailMode] =
+    useState<"overview" | "metadata">("overview");
+  const [
+    pendingMetadataFocus,
+    setPendingMetadataFocus,
+  ] = useState<PendingMetadataFocusRequest | null>(
+    null,
+  );
   const [libraryEntityView, setLibraryEntityView] =
     useState<LibraryEntityView>("releases");
+  const [selectedLibraryArtistId, setSelectedLibraryArtistId] =
+    useState<string | null>(null);
   const libraryPlayback =
     usePersistentLibraryPlayback();
+
+  const metadataPreviewButtonRef =
+    useRef<HTMLButtonElement | null>(null);
+
   const [
-    libraryWaveformNavigationRequest,
-    setLibraryWaveformNavigationRequest,
-  ] = useState<LibraryWaveformNavigationRequest | null>(null);
-  const libraryWaveformNavigationRequestIdRef = useRef(0);
+    libraryMetadataPreviewOpen,
+    setLibraryMetadataPreviewOpen,
+  ] = useState(false);
+
+  const [
+    libraryMetadataPreviewVerbosity,
+    setLibraryMetadataPreviewVerbosity,
+  ] = useState<MetadataVerbosity>(
+    "summary",
+  );
+
+  const [
+    libraryMetadataPreviewLoading,
+    setLibraryMetadataPreviewLoading,
+  ] = useState(false);
+
+  const [
+    libraryMetadataPreviewData,
+    setLibraryMetadataPreviewData,
+  ] = useState<{
+    release: ListenerMetadataRelease;
+    track: ListenerMetadataTrack;
+  } | null>(null);
   const [waveformColorMode, setWaveformColorMode] =
     useState<WaveformColorMode>(() => {
       try {
@@ -1735,6 +1826,21 @@ export function App() {
           : "3band";
       } catch {
         return "3band";
+      }
+    });
+  const [interfaceAccentMode, setInterfaceAccentMode] =
+    useState<InterfaceAccentMode>(() => {
+      try {
+        const stored = window.localStorage.getItem(
+          INTERFACE_ACCENT_STORAGE_KEY,
+        );
+        return INTERFACE_ACCENT_OPTIONS.some(
+          (option) => option.value === stored,
+        )
+          ? stored as InterfaceAccentMode
+          : "gray";
+      } catch {
+        return "gray";
       }
     });
   const [
@@ -1814,6 +1920,22 @@ export function App() {
       // Waveform color persistence is optional UI convenience.
     }
   };
+  const chooseInterfaceAccentMode = (mode: InterfaceAccentMode) => {
+    setInterfaceAccentMode(mode);
+    try {
+      window.localStorage.setItem(
+        INTERFACE_ACCENT_STORAGE_KEY,
+        mode,
+      );
+    } catch {
+      // Accent persistence is optional UI convenience.
+    }
+  };
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.interfaceAccent =
+      interfaceAccentMode;
+  }, [interfaceAccentMode]);
   // Admin mode is opt-in and never survives a page load or restored page.
   const [showAdminTools, setShowAdminTools] =
     useState(false);
@@ -1992,6 +2114,181 @@ export function App() {
     },
     [],
   );
+
+  const openReleaseOverview = useCallback(async (
+    releaseId: string,
+  ) => {
+    setSelectedReleaseDetailMode("overview");
+    await openReleaseDetail(releaseId);
+  }, [openReleaseDetail]);
+
+  const openReleaseMetadata = useCallback(async (
+    releaseId: string,
+  ) => {
+    setSelectedReleaseDetailMode("metadata");
+    await openReleaseDetail(releaseId);
+  }, [openReleaseDetail]);
+
+
+  const openCurrentTrackMetadataPreview =
+    useCallback(async () => {
+      const currentTrack =
+        libraryPlayback.currentTrack;
+
+      if (
+        !currentTrack?.releaseId ||
+        !currentTrack.trackId
+      ) {
+        return;
+      }
+
+      const release =
+        scan?.releases.find(
+          (candidate) =>
+            candidate.id ===
+            currentTrack.releaseId,
+        );
+
+      if (!release) {
+        notify(
+          "Track metadata preview is available for Library-backed tracks.",
+          "info",
+        );
+        return;
+      }
+
+      setLibraryMetadataPreviewLoading(
+        true,
+      );
+
+      try {
+        let detail =
+          selectedReleaseDetail
+            ?.releaseId ===
+          release.id
+            ? selectedReleaseDetail
+            : null;
+
+        if (!detail) {
+          const query =
+            new URLSearchParams({
+              release:
+                release.id,
+            });
+
+          const response =
+            await fetch(
+              `/api/library/release-detail?${query.toString()}`,
+            );
+
+          const result =
+            (await response.json()) as
+              | ReleaseMetadataDetail
+              | {
+                  error?: string;
+                };
+
+          if (!response.ok) {
+            throw new Error(
+              "error" in result
+                ? result.error ??
+                    `Detail request failed: HTTP ${response.status}`
+                : `Detail request failed: HTTP ${response.status}`,
+            );
+          }
+
+          detail =
+            result as
+              ReleaseMetadataDetail;
+        }
+
+        const preview =
+          buildLibraryMetadataPreview({
+            detail,
+            release: {
+              id:
+                release.id,
+              title:
+                resolveReleaseDisplayTitle(
+                  release.releaseTitle,
+                  formatReleaseTitle(
+                    release.id,
+                  ),
+                ),
+              artist:
+                release.primaryArtistName
+                  ?.trim() ||
+                null,
+              releaseDate:
+                release.releaseDate
+                  ?.slice(0, 10) ??
+                null,
+            },
+            trackId:
+              currentTrack.trackId,
+            trackTitle:
+              currentTrack.title,
+            trackArtist:
+              currentTrack.artist ??
+              null,
+            waveform:
+              libraryPlayback.waveform
+                ? {
+                    sampleRate:
+                      libraryPlayback
+                        .waveform
+                        .sampleRate,
+                    sourceChannels:
+                      libraryPlayback
+                        .waveform
+                        .sourceChannels,
+                    bitsPerSample:
+                      libraryPlayback
+                        .waveform
+                        .bitsPerSample,
+                    peaksPerSecond:
+                      libraryPlayback
+                        .waveform
+                        .peaksPerSecond,
+                    durationSeconds:
+                      libraryPlayback
+                        .waveform
+                        .durationSeconds,
+                  }
+                : null,
+          });
+
+        setLibraryMetadataPreviewVerbosity(
+          "summary",
+        );
+
+        setLibraryMetadataPreviewData(
+          preview,
+        );
+
+        setLibraryMetadataPreviewOpen(
+          true,
+        );
+      } catch (previewError) {
+        notify(
+          previewError
+            instanceof Error
+            ? previewError.message
+            : "Unable to prepare the public-style metadata preview.",
+          "error",
+        );
+      } finally {
+        setLibraryMetadataPreviewLoading(
+          false,
+        );
+      }
+    }, [
+      libraryPlayback.currentTrack,
+      libraryPlayback.waveform,
+      notify,
+      scan,
+      selectedReleaseDetail,
+    ]);
 
   const refreshLibrary = useCallback(async (
     announce = false,
@@ -2251,20 +2548,24 @@ export function App() {
     setMenuOpen(false);
   }, []);
 
-  const openCurrentReleaseInLibraryWaveform = useCallback((
-    releaseId: string,
-  ) => {
-    libraryWaveformNavigationRequestIdRef.current += 1;
-    setLibraryWaveformNavigationRequest({
-      releaseId,
-      requestId: libraryWaveformNavigationRequestIdRef.current,
-    });
+  const openCurrentTrackInLibraryWaveform = useCallback(() => {
+    setLibraryEntityView("releases");
+    setLibraryReleaseViewMode("waveform");
     navigateWorkflowView("library");
   }, [navigateWorkflowView]);
+
+  const returnToLibraryContext = useCallback(() => {
+    setWorkflowHelpReturnTarget(null);
+    setSelectedReleaseDetail(null);
+    setApplicationView("library");
+    setMenuOpen(false);
+  }, []);
 
   const returnToLibraryHome = useCallback(() => {
     setWorkflowHelpReturnTarget(null);
     setSelectedReleaseDetail(null);
+    setSelectedLibraryArtistId(null);
+    setLibraryEntityView("releases");
     setApplicationView("library");
     setMenuOpen(false);
   }, []);
@@ -2274,8 +2575,35 @@ export function App() {
   ) => {
     setApplicationView("library");
     setSelectedReleaseDetail(null);
-    await openReleaseDetail(releaseId);
-  }, [openReleaseDetail]);
+    await openReleaseMetadata(releaseId);
+  }, [openReleaseMetadata]);
+
+  const openReleaseMetadataAtTarget = useCallback(async (
+    releaseId: string,
+    target: MetadataEditorFocusTarget,
+  ) => {
+    setPendingMetadataFocus({
+      releaseId,
+      ...target,
+    });
+    await openReleaseInLibrary(releaseId);
+  }, [openReleaseInLibrary]);
+
+  const openArtistInLibrary = useCallback((
+    artistId: string,
+  ) => {
+    setSelectedReleaseDetail(null);
+    setSelectedReleaseDetailMode("overview");
+    setLibraryEntityView("artists");
+    setSelectedLibraryArtistId(artistId);
+    setApplicationView("library");
+    setMenuOpen(false);
+  }, []);
+
+  const clearPendingMetadataFocus =
+    useCallback(() => {
+      setPendingMetadataFocus(null);
+    }, []);
 
   const summary = useMemo(() => {
     if (!scan) {
@@ -2366,7 +2694,8 @@ export function App() {
 
   return (
     <main>
-      {selectedReleaseDetail ? (
+      {selectedReleaseDetail &&
+      selectedReleaseDetailMode === "metadata" ? (
         <ReleaseMetadataDetailView
           detail={selectedReleaseDetail}
           release={
@@ -2387,9 +2716,7 @@ export function App() {
           }
           onNotify={notify}
           workflowLocations={workflowLocations}
-          onBack={() =>
-            setSelectedReleaseDetail(null)
-          }
+          onBack={returnToLibraryContext}
           onReleaseRenamed={async (releaseId) => {
             await refreshLibrary();
             await openReleaseDetail(releaseId);
@@ -2408,6 +2735,15 @@ export function App() {
           playback={libraryPlayback}
           waveformColorMode={waveformColorMode}
           onWaveformColorModeChange={chooseWaveformColorMode}
+          initialFocusTarget={
+            pendingMetadataFocus?.releaseId ===
+            selectedReleaseDetail.releaseId
+              ? pendingMetadataFocus
+              : null
+          }
+          onInitialFocusHandled={
+            clearPendingMetadataFocus
+          }
         />
       ) : (
         <>
@@ -2528,6 +2864,35 @@ export function App() {
                 />
               </Suspense>
 
+              <section className="menu-card menu-card--interface-accent">
+                <div className="menu-interface-accent-heading">
+                  <h2>Browsing Accent</h2>
+                  <span className="menu-beta-badge">Beta</span>
+                </div>
+                <label className="menu-interface-accent-control">
+                  <span>Library row color</span>
+                  <select
+                    aria-label="Library browsing accent"
+                    value={interfaceAccentMode}
+                    onChange={(event) =>
+                      chooseInterfaceAccentMode(
+                        event.target.value as InterfaceAccentMode,
+                      )
+                    }
+                  >
+                    {INTERFACE_ACCENT_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="menu-meta">
+                  Gray is the default. Applies to hover, selected,
+                  and playing states in Library release tracks.
+                </p>
+              </section>
+
               <section className="menu-card">
                 <h2>Admin</h2>
                 <label className="admin-toggle">
@@ -2641,6 +3006,8 @@ export function App() {
               inspection={ingestInspection}
               identitySeed={ingestIdentityOverride}
               releases={scan?.releases ?? []}
+              artists={scan?.artists ?? []}
+              metadataRegistry={metadataRegistry}
               inspectionError={
                 ingestInspectionError
               }
@@ -2657,9 +3024,21 @@ export function App() {
               onBackToInspection={() =>
                 navigateWorkflowView("ingest")
               }
-              onOpenRelease={(releaseId) =>
+              onEditReleaseMetadata={(releaseId) =>
                 void openReleaseInLibrary(releaseId)
               }
+              onEditMetadataTarget={(releaseId, target) =>
+                void openReleaseMetadataAtTarget(
+                  releaseId,
+                  target,
+                )
+              }
+              onOpenArtist={openArtistInLibrary}
+              onOpenRelease={(releaseId) => {
+                setApplicationView("library");
+                setSelectedReleaseDetail(null);
+                void openReleaseOverview(releaseId);
+              }}
               onLibraryChanged={() =>
                 refreshLibrary(true)
               }
@@ -2713,38 +3092,58 @@ export function App() {
                     value={libraryEntityView}
                     onChange={(nextView) => {
                       setLibraryEntityView(nextView);
-                      if (nextView === "artists") {
-                        setSelectedReleaseDetail(null);
-                        setDetailError(null);
-                      }
+                      setSelectedReleaseDetail(null);
+                      setDetailError(null);
                     }}
+                    loading={loading}
+                    onRescan={() =>
+                      void refreshLibrary(true)
+                    }
                   />
-                  <div className="library-workspace-local-actions">
-                    <button
-                      type="button"
-                      disabled={loading}
-                      onClick={() =>
-                        void refreshLibrary(true)
-                      }
-                      title="Rescan the canonical Library from disk. Use this after external filesystem changes or when you need to force reconciliation."
-                    >
-                      {loading ? "Rescanning…" : "Rescan Library"}
-                    </button>
-                  </div>
 
-                  {libraryEntityView === "artists" ? (
+                  {selectedReleaseDetail &&
+                  selectedReleaseDetailMode === "overview" ? (
+                    <LibraryReleaseOverview
+                      detail={selectedReleaseDetail}
+                      release={
+                        scan.releases.find(
+                          (release) =>
+                            release.id === selectedReleaseDetail.releaseId,
+                        ) ?? null
+                      }
+                      technicalSummary={mediaTechnicalByRelease.get(
+                        selectedReleaseDetail.releaseId,
+                      )}
+                      playback={libraryPlayback}
+                      onEditMetadata={() =>
+                        setSelectedReleaseDetailMode("metadata")
+                      }
+                    />
+                  ) : libraryEntityView === "artists" ? (
                     <LibraryArtistRoster
                       artists={scan.artists}
                       releases={scan.releases}
+                      selectedArtistId={selectedLibraryArtistId}
+                      onSelectedArtistIdChange={setSelectedLibraryArtistId}
                       onLibraryChanged={() => refreshLibrary()}
+                      onOpenRelease={(releaseId) => {
+                        void openReleaseOverview(releaseId);
+                      }}
                       onNotify={notify}
+                      showAdminTools={showAdminTools}
+                      technicalAudit={mediaTechnicalAudit}
+                      technicalByRelease={mediaTechnicalByRelease}
+                      playback={libraryPlayback}
+                      waveformColorMode={waveformColorMode}
+                      viewMode={artistReleaseViewMode}
+                      onViewModeChange={setArtistReleaseViewMode}
                     />
                   ) : (
                     <LibraryReleaseBrowser
                       releases={scan.releases}
                       onLibraryChanged={refreshLibrary}
-                      onOpenMetadata={(releaseId) =>
-                        void openReleaseDetail(releaseId)
+                      onOpenRelease={(releaseId) =>
+                        void openReleaseOverview(releaseId)
                       }
                       showAdminTools={showAdminTools}
                       onNotify={notify}
@@ -2752,9 +3151,6 @@ export function App() {
                       technicalByRelease={mediaTechnicalByRelease}
                       playback={libraryPlayback}
                       waveformColorMode={waveformColorMode}
-                      waveformNavigationRequest={
-                        libraryWaveformNavigationRequest
-                      }
                       viewMode={libraryReleaseViewMode}
                       onViewModeChange={setLibraryReleaseViewMode}
                     />
@@ -2771,18 +3167,76 @@ export function App() {
 
               {detailLoading && (
                 <p className="message">
-                  Loading metadata detail…
+                  Loading release…
                 </p>
               )}
             </>
           )}
         </>
       )}
+      <ListenerMetadataViewer
+        isOpen={
+          libraryMetadataPreviewOpen
+        }
+        verbosity={
+          libraryMetadataPreviewVerbosity
+        }
+        onVerbosityChange={
+          setLibraryMetadataPreviewVerbosity
+        }
+        audiophileMode={false}
+        developerMode={false}
+        release={
+          libraryMetadataPreviewData
+            ?.release ??
+          null
+        }
+        track={
+          libraryMetadataPreviewData
+            ?.track ??
+          null
+        }
+        triggerRef={
+          metadataPreviewButtonRef
+        }
+        onClose={() =>
+          setLibraryMetadataPreviewOpen(
+            false,
+          )
+        }
+      />
+
       <PersistentLibraryPlayerBar
         playback={libraryPlayback}
         colorMode={waveformColorMode}
         onOpenLibraryWaveform={
-          openCurrentReleaseInLibraryWaveform
+          openCurrentTrackInLibraryWaveform
+        }
+        metadataButtonRef={
+          metadataPreviewButtonRef
+        }
+        metadataPreviewAvailable={
+          Boolean(
+            libraryPlayback
+              .currentTrack
+              ?.releaseId &&
+            libraryPlayback
+              .currentTrack
+              .trackId &&
+            scan?.releases.some(
+              (release) =>
+                release.id ===
+                libraryPlayback
+                  .currentTrack
+                  ?.releaseId,
+            ),
+          )
+        }
+        metadataPreviewLoading={
+          libraryMetadataPreviewLoading
+        }
+        onOpenMetadataPreview={
+          openCurrentTrackMetadataPreview
         }
       />
 
@@ -2797,7 +3251,8 @@ export function App() {
         </p>
 
         <p className="footer-links">
-          {!selectedReleaseDetail && (
+          {(!selectedReleaseDetail ||
+            selectedReleaseDetailMode === "overview") && (
             <>
               <button
                 type="button"
@@ -4910,10 +5365,19 @@ function TechnicalHealthBadge({
 
 function TechnicalAuditSummaryBadge({
   audit,
+  presentation = "standard",
 }: {
   audit: MediaTechnicalAuditState;
+  presentation?: "standard" | "web-package-header";
 }) {
+  const isWebPackageHeader =
+    presentation === "web-package-header";
+
   if (audit.loading && !audit.result) {
+    if (isWebPackageHeader) {
+      return null;
+    }
+
     return (
       <span
         className="badge technical-contract-badge"
@@ -4925,6 +5389,10 @@ function TechnicalAuditSummaryBadge({
   }
 
   if (!audit.result) {
+    if (isWebPackageHeader) {
+      return null;
+    }
+
     return (
       <span
         className={`badge ${audit.error ? "warning" : ""} technical-contract-badge`}
@@ -4940,6 +5408,46 @@ function TechnicalAuditSummaryBadge({
     healthSummary.ready +
     healthSummary.review +
     healthSummary.blocked;
+
+  if (isWebPackageHeader) {
+    if (healthSummary.blocked > 0) {
+      const blockedLabel =
+        healthSummary.blocked === 1
+          ? "1 technical block"
+          : `${healthSummary.blocked} technical blocks`;
+
+      return (
+        <span
+          className="badge error technical-contract-badge"
+          title={technicalContractTitle(contract)}
+        >
+          {blockedLabel}
+        </span>
+      );
+    }
+
+    if (healthSummary.review > 0) {
+      const noteLabel =
+        healthSummary.review === 1
+          ? "1 technical note"
+          : `${healthSummary.review} technical notes`;
+
+      return (
+        <span
+          className="badge preview technical-contract-badge"
+          title={[
+            "Non-blocking technical advisory; Web Package readiness is unchanged.",
+            technicalContractTitle(contract),
+          ].join(" ")}
+        >
+          {noteLabel}
+        </span>
+      );
+    }
+
+    return null;
+  }
+
   const tone =
     healthSummary.blocked > 0
       ? "error"
@@ -5161,15 +5669,395 @@ function TechnicalReleaseInspector({
   );
 }
 
+type StagingCompletionReminder = {
+  key: string;
+  label: string;
+  title: string;
+  priority: number;
+  tone: "asset" | "metadata";
+  target:
+    | {
+        kind: "metadata";
+        focus: MetadataEditorFocusTarget;
+      }
+    | {
+        kind: "artist";
+        artistId: string;
+      };
+};
+
+const STAGING_COMPLETION_VISIBLE_LIMIT = 5;
+
+function sortStagingCompletionReminders(
+  reminders: StagingCompletionReminder[],
+): StagingCompletionReminder[] {
+  return [...reminders].sort((left, right) => {
+    return left.priority - right.priority ||
+      left.label.localeCompare(
+        right.label,
+        undefined,
+        { sensitivity: "base" },
+      );
+  });
+}
+
+const stagingReleaseCompletionFieldPaths = [
+  "release.description",
+  "release.genres",
+] as const;
+
+function readStagingReminderPathValue(
+  parsed: Record<string, unknown>,
+  path: string,
+): unknown {
+  let current: unknown = parsed;
+
+  for (const segment of path.split(".")) {
+    if (
+      typeof current !== "object" ||
+      current === null ||
+      Array.isArray(current) ||
+      !(segment in current)
+    ) {
+      return undefined;
+    }
+
+    current = (
+      current as Record<string, unknown>
+    )[segment];
+  }
+
+  return current;
+}
+
+function hasStagingReminderValue(
+  value: unknown,
+): boolean {
+  if (typeof value === "string") {
+    return value.trim().length > 0;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+
+  if (typeof value === "boolean") {
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+
+  return value !== undefined && value !== null;
+}
+
+function stagingReminderFieldLabel(
+  fields: readonly MetadataFieldDefinition[],
+  tomlPath: string,
+  fallback: string,
+): string {
+  return (
+    fields.find(
+      (field) => field.tomlPath === tomlPath,
+    )?.label ?? fallback
+  );
+}
+
+function buildStagingCompletionReminders({
+  release,
+  artist,
+  detail,
+  metadataRegistry,
+}: {
+  release: ReleaseScanResult;
+  artist: ArtistScanResult | null;
+  detail: ReleaseMetadataDetail | null;
+  metadataRegistry: readonly MetadataFieldDefinition[];
+}): StagingCompletionReminder[] {
+  const reminders: StagingCompletionReminder[] = [];
+
+  if (release.artworkMasters.length === 0) {
+    reminders.push({
+      key: "asset:release-artwork",
+      label: "Album art",
+      title: "Album art is missing. Open the release Artwork editor.",
+      priority: 10,
+      tone: "asset",
+      target: {
+        kind: "metadata",
+        focus: {
+          scopeId: "release",
+          tab: "artwork",
+        },
+      },
+    });
+  }
+
+  if (artist) {
+    if (!artist.bio?.trim()) {
+      reminders.push({
+        key: "asset:artist-bio",
+        label: "Artist bio",
+        title: `Artist bio is missing for ${artist.displayName}. Open the Artist workspace.`,
+        priority: 11,
+        tone: "asset",
+        target: {
+          kind: "artist",
+          artistId: artist.id,
+        },
+      });
+    }
+
+    const existingArtistPhotos =
+      artist.assets.filter(
+        (asset) => asset.exists,
+      );
+
+    if (!artist.primaryAssetId) {
+      reminders.push({
+        key: "asset:artist-photo",
+        label:
+          existingArtistPhotos.length > 0
+            ? "Primary artist photo"
+            : "Artist photo",
+        title:
+          existingArtistPhotos.length > 0
+            ? `Choose a Primary Artist photo for ${artist.displayName}.`
+            : `Artist photo is missing for ${artist.displayName}.`,
+        priority: 12,
+        tone: "asset",
+        target: {
+          kind: "artist",
+          artistId: artist.id,
+        },
+      });
+    }
+  }
+
+  if (!detail) {
+    return sortStagingCompletionReminders(
+      reminders,
+    );
+  }
+
+  const releaseDocument =
+    detail.documents.find(
+      (document) =>
+        document.scope === "release" &&
+        document.filename === "release.toml",
+    ) ?? null;
+
+  if (releaseDocument) {
+    for (const path of stagingReleaseCompletionFieldPaths) {
+      if (
+        hasStagingReminderValue(
+          readStagingReminderPathValue(
+            releaseDocument.parsed,
+            path,
+          ),
+        )
+      ) {
+        continue;
+      }
+
+      const fallback =
+        path === "release.description"
+          ? "Release description"
+          : "Genres";
+      const label = stagingReminderFieldLabel(
+        metadataRegistry,
+        path,
+        fallback,
+      );
+
+      reminders.push({
+        key: `metadata:${path}`,
+        label,
+        title: `Add ${label} in release metadata.`,
+        priority: 20,
+        tone: "metadata",
+        target: {
+          kind: "metadata",
+          focus: {
+            scopeId: "release",
+            tab: "overview",
+            tomlPath: path,
+          },
+        },
+      });
+    }
+  }
+
+  for (const path of defaultTrackOverviewFieldPaths) {
+    const missingTrackIds = release.tracks
+      .filter((track) => {
+        const document =
+          detail.documents.find(
+            (candidate) =>
+              candidate.scope === "track" &&
+              candidate.trackId === track.id &&
+              candidate.filename === "track.toml",
+          );
+
+        return Boolean(
+          document &&
+            !hasStagingReminderValue(
+              readStagingReminderPathValue(
+                document.parsed,
+                path,
+              ),
+            ),
+        );
+      })
+      .map((track) => track.id);
+
+    if (missingTrackIds.length === 0) {
+      continue;
+    }
+
+    const fallbackLabels: Record<string, string> = {
+      "track.audio.bpm": "BPM",
+      "track.audio.key": "Key",
+      "track.audio.camelot_key": "Camelot Key",
+      "track.audio.time_signature": "Time Signature",
+      "track.audio.tuning_hz": "Tuning Reference",
+    };
+    const compactLabels: Record<string, string> = {
+      "track.audio.time_signature": "Time Sig",
+      "track.audio.tuning_hz": "Tuning",
+    };
+    const fullLabel = stagingReminderFieldLabel(
+      metadataRegistry,
+      path,
+      fallbackLabels[path] ?? path,
+    );
+    const compactLabel =
+      compactLabels[path] ?? fullLabel;
+
+    reminders.push({
+      key: `metadata:${path}`,
+      label:
+        missingTrackIds.length > 1
+          ? `${compactLabel} ×${missingTrackIds.length}`
+          : compactLabel,
+      title:
+        missingTrackIds.length > 1
+          ? `${fullLabel} is missing on ${missingTrackIds.length} tracks. Open the first missing track field.`
+          : `${fullLabel} is missing. Open the track field.`,
+      priority: 30,
+      tone: "metadata",
+      target: {
+        kind: "metadata",
+        focus: {
+          scopeId: missingTrackIds[0],
+          tab: "overview",
+          tomlPath: path,
+        },
+      },
+    });
+  }
+
+  if (metadataRegistry.length > 0) {
+    const readiness = buildMetadataReadiness({
+      release,
+      documents: detail.documents,
+      fields: metadataRegistry,
+    });
+
+    const alreadyRepresentedPaths = new Set(
+      reminders.flatMap((reminder) => {
+        if (
+          reminder.target.kind !== "metadata" ||
+          !reminder.target.focus.tomlPath
+        ) {
+          return [];
+        }
+
+        return [reminder.target.focus.tomlPath];
+      }),
+    );
+
+    const groupedRequired = new Map<
+      string,
+      {
+        field: RequiredFieldIssue;
+        scopeId: string;
+        count: number;
+      }
+    >();
+
+    for (const scope of readiness.scopes) {
+      for (const field of scope.missingRequiredFields) {
+        if (alreadyRepresentedPaths.has(field.tomlPath)) {
+          continue;
+        }
+
+        const current = groupedRequired.get(
+          field.tomlPath,
+        );
+
+        if (current) {
+          current.count += 1;
+          continue;
+        }
+
+        groupedRequired.set(field.tomlPath, {
+          field,
+          scopeId: scope.id,
+          count: 1,
+        });
+      }
+    }
+
+    for (const {
+      field,
+      scopeId,
+      count,
+    } of groupedRequired.values()) {
+      reminders.push({
+        key: `required:${field.tomlPath}`,
+        label:
+          count > 1
+            ? `${field.label} ×${count}`
+            : field.label,
+        title:
+          count > 1
+            ? `${field.label} is required and missing in ${count} scopes. Open the first missing field.`
+            : `${field.label} is required and missing.`,
+        priority: 25,
+        tone: "metadata",
+        target: {
+          kind: "metadata",
+          focus: {
+            scopeId,
+            tab: field.tab,
+            tomlPath: field.tomlPath,
+          },
+        },
+      });
+    }
+  }
+
+  return sortStagingCompletionReminders(
+    reminders,
+  );
+}
+
 function StagingWorkspace({
   inspection,
   identitySeed,
   releases,
+  artists,
+  metadataRegistry,
   inspectionError,
   inputsRefreshing,
   onRefreshInputs,
   onChooseCandidate,
   onBackToInspection,
+  onEditReleaseMetadata,
+  onEditMetadataTarget,
+  onOpenArtist,
   onOpenRelease,
   onLibraryChanged,
   onReleaseCreated,
@@ -5179,11 +6067,19 @@ function StagingWorkspace({
   inspection: IngestCandidateInspection | null;
   identitySeed: IngestDraftIdentitySeed | null;
   releases: ReleaseScanResult[];
+  artists: ArtistScanResult[];
+  metadataRegistry: MetadataFieldDefinition[];
   inspectionError: string | null;
   inputsRefreshing: boolean;
   onRefreshInputs: () => void;
   onChooseCandidate: () => void;
   onBackToInspection: () => void;
+  onEditReleaseMetadata: (releaseId: string) => void;
+  onEditMetadataTarget: (
+    releaseId: string,
+    target: MetadataEditorFocusTarget,
+  ) => void;
+  onOpenArtist: (artistId: string) => void;
   onOpenRelease: (releaseId: string) => void;
   onLibraryChanged: () => void | Promise<void>;
   onReleaseCreated: (
@@ -5201,6 +6097,77 @@ function StagingWorkspace({
     () => sortLibraryReleases(releases, sortMode),
     [releases, sortMode],
   );
+  const [
+    reminderDetailsByReleaseId,
+    setReminderDetailsByReleaseId,
+  ] = useState<Record<string, ReleaseMetadataDetail>>({});
+  const [
+    reminderDetailsLoading,
+    setReminderDetailsLoading,
+  ] = useState(false);
+
+  useEffect(() => {
+    if (releases.length === 0) {
+      setReminderDetailsByReleaseId({});
+      setReminderDetailsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    setReminderDetailsLoading(true);
+
+    void Promise.all(
+      releases.map(async (release) => {
+        try {
+          const query = new URLSearchParams({
+            release: release.id,
+          });
+          const response = await fetch(
+            `/api/library/release-detail?${query.toString()}`,
+            {
+              signal: controller.signal,
+            },
+          );
+
+          if (!response.ok) {
+            return null;
+          }
+
+          const detail =
+            (await response.json()) as ReleaseMetadataDetail;
+
+          return [release.id, detail] as const;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((entries) => {
+      if (cancelled) {
+        return;
+      }
+
+      setReminderDetailsByReleaseId(
+        Object.fromEntries(
+          entries.filter(
+            (
+              entry,
+            ): entry is readonly [
+              string,
+              ReleaseMetadataDetail,
+            ] => entry !== null,
+          ),
+        ),
+      );
+      setReminderDetailsLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [releases]);
 
   const [selectedBuildReleaseId, setSelectedBuildReleaseId] =
     useState<string | null>(null);
@@ -5244,6 +6211,9 @@ function StagingWorkspace({
         <StagingLibraryBuildWorkspace
           release={selectedBuildRelease}
           onBack={() => setSelectedBuildReleaseId(null)}
+          onEditMetadata={() =>
+            onEditReleaseMetadata(selectedBuildRelease.id)
+          }
           onOpenLibrary={() =>
             onOpenRelease(selectedBuildRelease.id)
           }
@@ -5251,6 +6221,23 @@ function StagingWorkspace({
           onNotify={onNotify}
         />
       </Suspense>
+    );
+  }
+
+  function openStagingCompletionReminder(
+    releaseId: string,
+    reminder: StagingCompletionReminder,
+  ) {
+    if (reminder.target.kind === "metadata") {
+      onEditMetadataTarget(
+        releaseId,
+        reminder.target.focus,
+      );
+      return;
+    }
+
+    onOpenArtist(
+      reminder.target.artistId,
     );
   }
 
@@ -5342,6 +6329,7 @@ function StagingWorkspace({
               <tr>
                 <th scope="col" className="staging-artwork-column">Artwork</th>
                 <th scope="col">Release</th>
+                <th scope="col" className="staging-bubbles-column">Bubbles</th>
                 <th scope="col" className="numeric">Tracks</th>
                 <th scope="col" className="numeric">Audio masters</th>
                 <th scope="col" className="numeric">Videos</th>
@@ -5352,7 +6340,7 @@ function StagingWorkspace({
             <tbody>
               {releases.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="workflow-empty-cell">
+                  <td colSpan={8} className="workflow-empty-cell">
                     No staged release workspaces were found in the configured library root.
                   </td>
                 </tr>
@@ -5381,6 +6369,37 @@ function StagingWorkspace({
                     ) ??
                     selectPreferredReleaseArtwork(
                       release.artworkMasters,
+                    );
+                  const releaseArtist =
+                    artists.find(
+                      (artist) =>
+                        artist.id ===
+                          release.primaryArtistId ||
+                        (
+                          release.primaryArtistName &&
+                          artist.displayName ===
+                            release.primaryArtistName
+                        ),
+                    ) ?? null;
+                  const reminderDetail =
+                    reminderDetailsByReleaseId[
+                      release.id
+                    ] ?? null;
+                  const completionReminders =
+                    buildStagingCompletionReminders({
+                      release,
+                      artist: releaseArtist,
+                      detail: reminderDetail,
+                      metadataRegistry,
+                    });
+                  const visibleCompletionReminders =
+                    completionReminders.slice(
+                      0,
+                      STAGING_COMPLETION_VISIBLE_LIMIT,
+                    );
+                  const hiddenCompletionReminders =
+                    completionReminders.slice(
+                      STAGING_COMPLETION_VISIBLE_LIMIT,
                     );
 
                   return (
@@ -5441,6 +6460,108 @@ function StagingWorkspace({
                           <MediaFileSpecBadge release={release} />
                         </span>
                       </th>
+                      <td className="staging-release-reminders-cell">
+                        <div
+                          className="staging-completion-bubbles"
+                          aria-label={`Completion reminders for ${
+                            release.releaseTitle ??
+                            formatReleaseTitle(release.id)
+                          }`}
+                        >
+                          {visibleCompletionReminders.map(
+                            (reminder) => (
+                              <button
+                                key={reminder.key}
+                                type="button"
+                                className={`staging-completion-bubble is-${reminder.tone}`}
+                                data-reminder-key={reminder.key}
+                                title={reminder.title}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openStagingCompletionReminder(
+                                    release.id,
+                                    reminder,
+                                  );
+                                }}
+                                onKeyDown={(event) => {
+                                  event.stopPropagation();
+                                }}
+                              >
+                                {reminder.label}
+                              </button>
+                            ),
+                          )}
+
+                          {hiddenCompletionReminders.length > 0 ? (
+                            <details
+                              className="staging-completion-overflow"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                              }}
+                              onDoubleClick={(event) => {
+                                event.stopPropagation();
+                              }}
+                            >
+                              <summary
+                                aria-label={`${hiddenCompletionReminders.length} more completion reminders`}
+                                title={`${hiddenCompletionReminders.length} more completion reminders`}
+                              >
+                                +{hiddenCompletionReminders.length}
+                              </summary>
+
+                              <div
+                                className="staging-completion-overflow-popover"
+                                role="group"
+                                aria-label="More completion reminders"
+                              >
+                                {hiddenCompletionReminders.map(
+                                  (reminder) => (
+                                    <button
+                                      key={reminder.key}
+                                      type="button"
+                                      className={`staging-completion-overflow-item is-${reminder.tone}`}
+                                      data-reminder-key={reminder.key}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        openStagingCompletionReminder(
+                                          release.id,
+                                          reminder,
+                                        );
+                                      }}
+                                    >
+                                      <strong>
+                                        {reminder.label}
+                                      </strong>
+                                      <small>
+                                        {reminder.title}
+                                      </small>
+                                    </button>
+                                  ),
+                                )}
+                              </div>
+                            </details>
+                          ) : null}
+
+                          {!reminderDetail &&
+                          reminderDetailsLoading ? (
+                            <span
+                              className="staging-completion-bubble-status"
+                              title="Loading metadata completion reminders"
+                              aria-label="Loading metadata completion reminders"
+                            >
+                              …
+                            </span>
+                          ) : completionReminders.length === 0 ? (
+                            <span
+                              className="staging-completion-bubble-status is-complete"
+                              title="No current completion reminders"
+                              aria-label="No current completion reminders"
+                            >
+                              ✓
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
                       <td className="numeric">{release.tracks.length}</td>
                       <td className="numeric">{masterCount}</td>
                       <td className="numeric">{release.videos.length}</td>
@@ -6091,6 +7212,8 @@ function PublishWorkspace({
     useState<MediaPreparationProgress | null>(null);
   const [publishLoading, setPublishLoading] =
     useState(false);
+  const [publicationSelectionSaving, setPublicationSelectionSaving] =
+    useState(false);
   const [unpublishLoadingReleaseId, setUnpublishLoadingReleaseId] =
     useState<string | null>(null);
   const [publishOperations, setPublishOperations] =
@@ -6268,6 +7391,8 @@ function PublishWorkspace({
         );
       }
 
+      setDeploymentSyncPlan(null);
+      setDeploymentSyncError(null);
       await loadPublishFleet();
       onNotify(
         "Package index refreshed and the Web Package snapshot verified.",
@@ -6566,7 +7691,12 @@ function PublishWorkspace({
 
   useEffect(() => {
     if (mode === "production") {
-      void loadDeploymentTargetStatus("production");
+      /*
+       * Live opens on the local rehearsal target by default. Production is
+       * still one explicit profile choice away, and browser writes remain
+       * restricted to local-sandbox.
+       */
+      void loadDeploymentTargetStatus("local-sandbox");
     }
   }, [loadDeploymentTargetStatus, mode]);
 
@@ -6620,6 +7750,66 @@ function PublishWorkspace({
     setSelectedPlan(null);
     void loadPublishPlan(releaseId);
   }, [loadPublishPlan]);
+
+  const savePublicationSelection = useCallback(async (
+    plan: PublishPlan,
+    includeVideo: boolean,
+    includedTrackIds: string[],
+  ) => {
+    setPublicationSelectionSaving(true);
+    setPlanError(null);
+
+    try {
+      const response = await fetch(
+        "/api/publish/release-settings",
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            releaseId: plan.releaseId,
+            includeVideo,
+            includedTrackIds,
+            ...(plan.publicSelection.settingsSha256
+              ? {
+                  expectedSha256:
+                    plan.publicSelection.settingsSha256,
+                }
+              : {}),
+          }),
+        },
+      );
+      const payload = await response.json() as
+        | { settings: unknown }
+        | { error?: string };
+
+      if (!response.ok || !("settings" in payload)) {
+        throw new Error(
+          "error" in payload && payload.error
+            ? payload.error
+            : "Unable to save public-media selection.",
+        );
+      }
+
+      await Promise.all([
+        loadPublishPlan(plan.releaseId),
+        loadPublishFleet(),
+      ]);
+      onNotify(
+        "Public-media selection saved. Ready Check refreshed.",
+        "success",
+      );
+    } catch (selectionError) {
+      setPlanError(
+        selectionError instanceof Error
+          ? selectionError.message
+          : "Unable to save public-media selection.",
+      );
+    } finally {
+      setPublicationSelectionSaving(false);
+    }
+  }, [loadPublishFleet, loadPublishPlan, onNotify]);
 
   const recoverOperation = useCallback(async (
     operation: PublishOperationSummary,
@@ -6943,6 +8133,8 @@ function PublishWorkspace({
             planGeneratedAt:
               plan.videoStreams.generatedAt,
             operationId,
+            includedVideoIds:
+              plan.publicSelection.includedVideoIds,
           }),
         },
       );
@@ -7170,6 +8362,9 @@ function PublishWorkspace({
   ]);
 
   const deploymentAudit = publishFleet?.deployment ?? null;
+  const packageIndexNeedsRefresh =
+    Boolean(deploymentAudit) &&
+    !deploymentAudit?.deploymentManifest.current;
   const pendingLibraryChangesCount =
     publishFleet?.summary.updateAvailableCount ?? 0;
   const hasPendingLibraryChanges =
@@ -7188,6 +8383,19 @@ function PublishWorkspace({
         : deploymentAudit
           ? { label: "Package index needs refresh", tone: "warning" }
           : { label: "Status not refreshed", tone: "preview" };
+
+  const activeDeploymentProfileName =
+    selectedDeploymentProfile ??
+    deploymentTargetStatus?.profile.name ??
+    "local-sandbox";
+  const activeDeploymentProfileLabel =
+    deploymentTargetStatus?.profile.name === activeDeploymentProfileName
+      ? deploymentTargetStatus.profile.label
+      : activeDeploymentProfileName === "production"
+        ? "Production"
+        : activeDeploymentProfileName === "custom"
+          ? "Custom override"
+          : "Local sandbox";
 
   const publishFleetByReleaseId = new Map<string, PublishFleetRelease>(
     publishFleet?.releases.map((release) => [release.releaseId, release]) ?? [],
@@ -7363,19 +8571,13 @@ function PublishWorkspace({
         <div className="workflow-workspace-actions publish-workspace-actions">
           <div className="publish-workspace-action-row">
             {mode === "public-package" ? (
-              <>
-                <TechnicalAuditSummaryBadge audit={technicalAudit} />
-                <span
-                  className="badge warning publish-read-only-status"
-                  role="status"
-                  title="Ready Check is read-only. Choose a release to see what is ready and what still needs preparation."
-                >
-                  Ready Check · read-only
-                </span>
-              </>
+              <TechnicalAuditSummaryBadge
+                audit={technicalAudit}
+                presentation="web-package-header"
+              />
             ) : (
               <span className="badge preview publish-read-only-status" role="status">
-                Live comparison · read-only
+                Target comparison · read-only
               </span>
             )}
           </div>
@@ -7427,6 +8629,64 @@ function PublishWorkspace({
         className="publish-deployment-overview"
         aria-label="Web Package deployment snapshot"
       >
+        {mode === "production" && deploymentTargetStatus && (
+          <section
+            className="publish-live-target-strip"
+            aria-labelledby="live-deployment-destination-heading"
+          >
+            <h3
+              id="live-deployment-destination-heading"
+              className="publish-live-target-strip__heading"
+            >
+              Deployment destination
+            </h3>
+
+            <div
+              className="publish-deployment-profile-selector"
+              aria-label="Published media deployment profiles"
+            >
+              {deploymentTargetStatus.profiles
+                .filter((profile) => profile.name !== "custom" || profile.configured)
+                .map((profile) => {
+                  const isSelected =
+                    selectedDeploymentProfile === profile.name;
+
+                  return (
+                    <button
+                      key={profile.name}
+                      type="button"
+                      className={isSelected ? "active" : ""}
+                      aria-pressed={isSelected}
+                      disabled={deploymentTargetLoading || deploymentSyncPlanLoading}
+                      onClick={() => void selectDeploymentProfile(profile.name)}
+                      title={profile.description}
+                    >
+                      <span className="publish-deployment-profile-selector__copy">
+                        <strong>{profile.label}</strong>
+                        <span>
+                          {profile.name === "local-sandbox"
+                            ? "Browser deploy"
+                            : profile.environment === "production"
+                              ? "CLI deploy"
+                              : profile.configured
+                                ? "Configured"
+                                : "Not configured"}
+                        </span>
+                      </span>
+
+                      <span
+                        className="publish-deployment-profile-selector__state"
+                        aria-hidden="true"
+                      >
+                        {isSelected ? "Selected" : "Select"}
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+          </section>
+        )}
+
         <header className="publish-deployment-overview-header">
           <div>
             <span className="publish-deployment-kicker">
@@ -7435,7 +8695,7 @@ function PublishWorkspace({
             <h3>{mode === "production" ? "Live status" : "Web Package status"}</h3>
             <p>
               {mode === "production"
-                ? "See what is Live now, what would change, and what would leave Live before any deployment."
+                ? "Choose Local sandbox or Production, compare the current Web Package with that destination, then deploy only through the action allowed for that target."
                 : "See which releases are prepared for the web and which still need attention."}
             </p>
           </div>
@@ -7447,7 +8707,8 @@ function PublishWorkspace({
               {deploymentBadge.label}
             </span>
 
-            {mode === "public-package" && (
+            {(mode === "public-package" ||
+              (mode === "production" && packageIndexNeedsRefresh)) && (
               <button
                 type="button"
                 className={
@@ -7493,11 +8754,11 @@ function PublishWorkspace({
                   !deploymentAudit?.deploymentManifest.current
                 }
                 onClick={() => void loadDeploymentSyncPlan()}
-                title="Compare the current Web Package with the configured Live target. This is checksum-based and read-only."
+                title={`Compare the current Web Package with ${activeDeploymentProfileLabel}. This is checksum-based and read-only.`}
               >
                 {deploymentSyncPlanLoading
-                  ? "Checking Live…"
-                  : "Check Live"}
+                  ? `Checking ${activeDeploymentProfileLabel}…`
+                  : `Check ${activeDeploymentProfileLabel}`}
               </button>
             )}
 
@@ -7530,15 +8791,15 @@ function PublishWorkspace({
                     </strong>
                   </div>
                   <div>
-                    <span>Live</span>
+                    <span>Selected target</span>
                     <strong>
                       {!deploymentTargetStatus?.configured
-                        ? "Not connected"
+                        ? `${activeDeploymentProfileLabel} · not connected`
                         : deploymentSyncPlan?.status === "current"
-                          ? "Up to date"
+                          ? `${activeDeploymentProfileLabel} · up to date`
                           : deploymentSyncPlan?.status === "changes"
-                            ? "Changes to deploy"
-                            : "Check required"}
+                            ? `${activeDeploymentProfileLabel} · changes to deploy`
+                            : `${activeDeploymentProfileLabel} · check required`}
                     </strong>
                   </div>
                   <div>
@@ -7817,7 +9078,7 @@ function PublishWorkspace({
             <div className="publish-host-boundary">
               <div className="publish-host-boundary-heading">
                 <div>
-                  <span className="publish-deployment-kicker">Live target</span>
+                  <span className="publish-deployment-kicker">Selected destination</span>
                   <strong>{deploymentTargetStatus?.profile.label ?? "Deployment target"}</strong>
                 </div>
                 <div className="publish-host-boundary-actions">
@@ -7835,7 +9096,7 @@ function PublishWorkspace({
                     {!deploymentTargetStatus?.configured
                       ? "Not configured"
                       : deploymentSyncPlan?.status === "current"
-                        ? "Live is up to date"
+                        ? `${activeDeploymentProfileLabel} is up to date`
                         : deploymentSyncPlan?.status === "changes"
                           ? "Changes to deploy"
                           : "Ready to check"}
@@ -7845,40 +9106,6 @@ function PublishWorkspace({
 
               <details className="publish-live-connection-details">
                 <summary>Connection & deployment details</summary>
-
-              {deploymentTargetStatus && (
-                <div
-                  className="publish-deployment-profile-selector"
-                  aria-label="Published media deployment profiles"
-                >
-                  {deploymentTargetStatus.profiles
-                    .filter((profile) => profile.name !== "custom" || profile.configured)
-                    .map((profile) => (
-                      <button
-                        key={profile.name}
-                        type="button"
-                        className={
-                          selectedDeploymentProfile === profile.name
-                            ? "active"
-                            : ""
-                        }
-                        aria-pressed={selectedDeploymentProfile === profile.name}
-                        disabled={deploymentTargetLoading || deploymentSyncPlanLoading}
-                        onClick={() => void selectDeploymentProfile(profile.name)}
-                        title={profile.description}
-                      >
-                        <strong>{profile.label}</strong>
-                        <span>
-                          {profile.configured
-                            ? profile.environment === "production"
-                              ? "Configured"
-                              : "Available"
-                            : "Not configured"}
-                        </span>
-                      </button>
-                    ))}
-                </div>
-              )}
 
               {deploymentTargetStatus?.profile && (
                 <div className="publish-deployment-profile-context">
@@ -7905,7 +9132,7 @@ function PublishWorkspace({
                     <div className="publish-host-sync-summary">
                       <strong>
                         {deploymentSyncPlan.status === "current"
-                          ? `Live matches the current Web Package · ${formatByteSize(deploymentAudit?.summary.totalBytes ?? 0)} package`
+                          ? `${activeDeploymentProfileLabel} matches the current Web Package · ${formatByteSize(deploymentAudit?.summary.totalBytes ?? 0)} package`
                           : liveFullPackageUploadBytes !== null &&
                               liveFullPackageUploadBytes > 0
                             ? `${deploymentSyncPlan.summary.changeCount} changes to deploy · ~${formatByteSize(liveFullPackageUploadBytes)} upload`
@@ -7987,6 +9214,15 @@ function PublishWorkspace({
                         </div>
                       </div>
                     )}
+
+                  {deploymentTargetStatus.profile.name === "production" && (
+                    <div className="publish-host-production-guard">
+                      <strong>Production deployment is CLI-only</strong>
+                      <span>
+                        Check Production is read-only in this workspace. Review the checksum plan here, then use the guarded command below only when you intentionally want to update the public server.
+                      </span>
+                    </div>
+                  )}
 
                   {deploymentSyncPlan?.status === "changes" && (
                     <details className="publish-host-sync-plan">
@@ -8572,6 +9808,7 @@ function PublishWorkspace({
           closeDisabled={
             prepareLoading ||
             publishLoading ||
+            publicationSelectionSaving ||
             unpublishLoadingReleaseId !== null
           }
           onClose={() => {
@@ -8613,6 +9850,110 @@ function PublishWorkspace({
               );
             })()}
           </header>
+
+          {selectedPlanIntent !== "make-private" && (() => {
+            const release = releases.find(
+              (candidate) => candidate.id === selectedPlan.releaseId,
+            );
+            const included = new Set(
+              selectedPlan.publicSelection.includedTrackIds,
+            );
+            const tracks = release?.tracks ?? [];
+            const videos = release?.videos ?? [];
+            const multiDisc = tracks.some(
+              (track) => (track.discNumber ?? 1) > 1,
+            );
+
+            return (
+              <section
+                className="publish-public-media-selection"
+                aria-label="Public media selection"
+              >
+                <header>
+                  <div>
+                    <span className="eyebrow">Public media selection</span>
+                    <strong>Choose what enters the Web Package</strong>
+                    <small>
+                      Private Library tracks and video assets stay untouched.
+                      Removing a public item makes the next Web Package rebuild
+                      remove its previously published derivatives.
+                    </small>
+                  </div>
+                  {publicationSelectionSaving && (
+                    <span className="badge warning">Saving…</span>
+                  )}
+                </header>
+
+                <div className="publish-public-media-controls">
+                  <fieldset disabled={publicationSelectionSaving}>
+                    <legend>Tracks</legend>
+                    <small>
+                      {selectedPlan.publicSelection.includedTrackIds.length}
+                      {" of "}{tracks.length} public
+                    </small>
+                    <div className="publish-public-track-list">
+                      {tracks.map((track) => {
+                        const checked = included.has(track.id);
+                        const wouldRemoveLast =
+                          checked && included.size === 1;
+
+                        return (
+                          <label key={track.id}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={wouldRemoveLast}
+                              onChange={(event) => {
+                                const next = new Set(included);
+                                if (event.target.checked) {
+                                  next.add(track.id);
+                                } else {
+                                  next.delete(track.id);
+                                }
+                                void savePublicationSelection(
+                                  selectedPlan,
+                                  selectedPlan.publicSelection.includeVideo,
+                                  tracks
+                                    .filter((candidate) => next.has(candidate.id))
+                                    .map((candidate) => candidate.id),
+                                );
+                              }}
+                            />
+                            <span title={track.id}>
+                              {publicTrackSelectionLabel(track, multiDisc)}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+
+                  <fieldset disabled={publicationSelectionSaving}>
+                    <legend>Video</legend>
+                    <label className="publish-public-video-toggle">
+                      <input
+                        type="checkbox"
+                        checked={selectedPlan.publicSelection.includeVideo}
+                        onChange={(event) =>
+                          void savePublicationSelection(
+                            selectedPlan,
+                            event.target.checked,
+                            selectedPlan.publicSelection.includedTrackIds,
+                          )
+                        }
+                      />
+                      <span>Include video assets in Web Package</span>
+                    </label>
+                    <small>
+                      Default OFF for v1.0.0. {videos.length} canonical video
+                      {videos.length === 1 ? " asset" : " assets"} remain private
+                      unless enabled here.
+                    </small>
+                  </fieldset>
+                </div>
+              </section>
+            );
+          })()}
 
           {selectedPlanIntent === "make-private" ? (
             <section
@@ -8744,6 +10085,7 @@ function PublishWorkspace({
                     disabled={
                       prepareLoading ||
                       publishLoading ||
+                      publicationSelectionSaving ||
                       (!canPreparePublishPlan(selectedPlan) &&
                         !canPrepareVideoPublishPlan(selectedPlan) &&
                         (
@@ -9817,6 +11159,17 @@ function IngestCandidateInspectionView({
   const targetSelectionRequired =
     targetReleaseMode === "existing" &&
     !selectedTargetRelease;
+  const hasMetadataSidecar = inspection.files.some(
+    (file) => file.metadataSidecar,
+  );
+  const artworkOnlyRevisionCandidate =
+    candidate.audioCount === 0 &&
+    candidate.videoCount === 0 &&
+    candidate.imageCount > 0 &&
+    !hasMetadataSidecar;
+  const artworkRevisionTargetRequired =
+    artworkOnlyRevisionCandidate &&
+    !resolvedTargetRelease;
 
   useEffect(() => {
     if (
@@ -9848,15 +11201,16 @@ function IngestCandidateInspectionView({
     () => sortIngestSourceFiles(inspection.files, sourceSort),
     [inspection.files, sourceSort],
   );
-  const candidateReadiness = targetSelectionRequired
-    ? {
-        tone: "warning",
-        label: "Review",
-        summary: "Target release selection required",
-        detail:
-          "Choose an existing Library release before continuing to Staging.",
-      }
-    : inspection.warnings.length > 0
+  const candidateReadiness =
+    targetSelectionRequired || artworkRevisionTargetRequired
+      ? {
+          tone: "warning",
+          label: "Review",
+          summary: "Target release selection required",
+          detail:
+            "Artwork-only revisions must target an existing Library release before continuing to Staging.",
+        }
+      : inspection.warnings.length > 0
       ? {
           tone: "warning",
           label: "Review",
@@ -9991,21 +11345,24 @@ function IngestCandidateInspectionView({
             className="primary-button"
             disabled={
               targetSelectionRequired ||
+              artworkRevisionTargetRequired ||
               (
                 candidate.audioCount === 0 &&
                 candidate.videoCount === 0 &&
-                !inspection.files.some(
-                  (file) => file.metadataSidecar,
-                )
+                candidate.imageCount === 0 &&
+                !hasMetadataSidecar
               )
             }
             title={
               candidate.videoCount > 0
                 ? "Continue to Staging to confirm canonical video placement, stable identity, type, and any optional track relationship."
-                : candidate.audioCount === 0 &&
-                    inspection.files.some((file) => file.metadataSidecar)
-                  ? "Continue with metadata-sidecar evidence and target an existing Library release in Staging."
-                  : undefined
+                : artworkOnlyRevisionCandidate && resolvedTargetRelease
+                  ? "Continue to Staging to assign this artwork to the selected existing Library release and explicitly confirm any canonical artwork replacement."
+                  : artworkOnlyRevisionCandidate
+                    ? "Artwork-only revisions must target an existing Library release before continuing to Staging."
+                    : candidate.audioCount === 0 && hasMetadataSidecar
+                      ? "Continue with metadata-sidecar evidence and target an existing Library release in Staging."
+                      : undefined
             }
             onClick={() =>
               onOpenStaging(stagingIdentitySeed)
@@ -10713,50 +12070,415 @@ type LibraryEntityView = "releases" | "artists";
 function LibraryEntitySwitcher({
   value,
   onChange,
+  loading,
+  onRescan,
 }: {
   value: LibraryEntityView;
   onChange: (value: LibraryEntityView) => void;
+  loading: boolean;
+  onRescan: () => void;
 }) {
   return (
-    <div
-      className="library-entity-switcher"
-      role="group"
-      aria-label="Library entity"
-    >
+    <div className="library-entity-switcher">
+      <div
+        className="library-entity-switcher__views"
+        role="group"
+        aria-label="Library entity"
+      >
+        <button
+          type="button"
+          aria-pressed={value === "releases"}
+          onClick={() => onChange("releases")}
+        >
+          Releases
+        </button>
+        <button
+          type="button"
+          aria-pressed={value === "artists"}
+          onClick={() => onChange("artists")}
+        >
+          Artists
+        </button>
+      </div>
+
       <button
         type="button"
-        aria-pressed={value === "releases"}
-        onClick={() => onChange("releases")}
+        className="library-entity-switcher__rescan"
+        disabled={loading}
+        onClick={onRescan}
+        title="Rescan the canonical Library from disk. Use this after external filesystem changes or when you need to force reconciliation."
       >
-        Releases
-      </button>
-      <button
-        type="button"
-        aria-pressed={value === "artists"}
-        onClick={() => onChange("artists")}
-      >
-        Artists
+        {loading ? "Rescanning…" : "Rescan Library"}
       </button>
     </div>
+  );
+}
+
+function LibraryReleaseOverview({
+  detail,
+  release,
+  technicalSummary,
+  playback,
+  onEditMetadata,
+}: {
+  detail: ReleaseMetadataDetail;
+  release: ReleaseScanResult | null;
+  technicalSummary?: MediaTechnicalReleaseSummary;
+  playback: PersistentLibraryPlaybackController;
+  onEditMetadata: () => void;
+}) {
+  const [selectedTrackKey, setSelectedTrackKey] =
+    useState<string | null>(playback.currentTrack?.key ?? null);
+
+  useEffect(() => {
+    setSelectedTrackKey(playback.currentTrack?.key ?? null);
+  }, [playback.currentTrack?.key, release?.id]);
+
+  if (!release) {
+    return (
+      <section className="library-release-overview">
+        <p className="message error">
+          This release is no longer present in the current Library scan.
+        </p>
+      </section>
+    );
+  }
+
+  const releaseArtwork = selectReleaseFrontArtwork(
+    release.artworkMasters,
+  );
+  const releaseDisplayTitle = resolveReleaseDisplayTitle(
+    release.releaseTitle,
+    formatReleaseTitle(release.id),
+  );
+  const releaseArtistName =
+    release.primaryArtistName?.trim() || "Artist not set";
+  const releaseDescriptionValue =
+    findMetadataValueAcrossDocuments(
+      detail.documents,
+      "release.description",
+    );
+  const releaseDescription =
+    typeof releaseDescriptionValue === "string"
+      ? releaseDescriptionValue.trim()
+      : "";
+  const releaseRuntimeLabel =
+    technicalSummary?.durationSeconds !== undefined
+      ? formatDuration(technicalSummary.durationSeconds)
+      : null;
+  const releaseDateLabel = release.releaseDate
+    ? release.releaseDate.slice(0, 10)
+    : formatReleaseDate(release.id);
+
+  const playableTracks = release.tracks.filter(
+    trackHasAudioPreview,
+  );
+
+  const playbackQueue: PersistentPlaybackTrack[] =
+    playableTracks.map((track) => {
+      const trackDocuments = detail.documents.filter(
+        (document) => document.trackId === track.id,
+      );
+      const trackArtwork = selectPreferredReleaseArtwork(
+        track.artworkMasters,
+      );
+      const effectiveArtwork =
+        trackArtwork ?? releaseArtwork;
+
+      return {
+        key: `${release.id}::${track.id}`,
+        source: buildAudioPreviewUrl(
+          release.id,
+          track.id,
+        ),
+        waveformUrl: buildLibraryWaveformUrl(
+          release.id,
+          track.id,
+        ),
+        releaseId: release.id,
+        trackId: track.id,
+        title: readTrackDisplayTitle(
+          track.id,
+          trackDocuments,
+          formatReleaseTitle(track.id),
+        ),
+        artist:
+          release.primaryArtistName?.trim() || null,
+        releaseTitle: releaseDisplayTitle,
+        detail: getAudioPreviewSourceLabel(track),
+        artworkUrl: effectiveArtwork
+          ? artworkPreviewUrl(
+              effectiveArtwork.relativePath,
+            )
+          : null,
+      };
+    });
+
+  return (
+    <section className="library-release-overview">
+      <section className="library-release-overview-hero">
+        <div className="library-release-overview-artwork">
+          {releaseArtwork ? (
+            <img
+              src={artworkPreviewUrl(
+                releaseArtwork.relativePath,
+              )}
+              alt={`Artwork for ${releaseDisplayTitle}`}
+            />
+          ) : (
+            <img
+              className="hiplingo-artwork-fallback"
+              src={hiplingoLogoUrl}
+              alt=""
+              aria-hidden="true"
+            />
+          )}
+        </div>
+
+        <div className="library-release-overview-copy">
+          <div className="library-release-overview-copy-header">
+            <div>
+              <h1>{releaseDisplayTitle}</h1>
+              <p className="library-release-overview-artist">
+                {releaseArtistName}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="primary-button library-release-overview-edit"
+              onClick={onEditMetadata}
+            >
+              Edit metadata
+            </button>
+          </div>
+
+          <div className="library-release-overview-facts">
+            {release.releaseType && (
+              <span>{release.releaseType}</span>
+            )}
+            <span>{releaseDateLabel}</span>
+            <span>
+              {release.tracks.length}{" "}
+              {release.tracks.length === 1
+                ? "track"
+                : "tracks"}
+            </span>
+            {releaseRuntimeLabel && (
+              <span>{releaseRuntimeLabel}</span>
+            )}
+          </div>
+
+          {releaseDescription ? (
+            <p className="library-release-overview-description">
+              {releaseDescription}
+            </p>
+          ) : (
+            <p className="library-release-overview-description is-empty">
+              No public release description has been authored yet.
+            </p>
+          )}
+        </div>
+      </section>
+
+      <section className="library-release-overview-tracks">
+        <header>
+          <div>
+            <h2>Tracks</h2>
+            <p>
+              Browse the release here. Detailed metadata remains behind Edit metadata.
+            </p>
+          </div>
+        </header>
+
+        <ol>
+          {release.tracks.map((track, index) => {
+            const trackDocuments =
+              detail.documents.filter(
+                (document) =>
+                  document.trackId === track.id,
+              );
+
+            const title = readTrackDisplayTitle(
+              track.id,
+              trackDocuments,
+              formatReleaseTitle(track.id),
+            );
+
+            const trackArtwork =
+              selectPreferredReleaseArtwork(
+                track.artworkMasters,
+              );
+
+            const effectiveArtwork =
+              trackArtwork ?? releaseArtwork;
+
+            const playable =
+              trackHasAudioPreview(track);
+            const trackKey =
+              `${release.id}::${track.id}`;
+
+            const isCurrent =
+              playback.currentTrack?.key ===
+              trackKey;
+
+            const isPlaying =
+              isCurrent && playback.isPlaying;
+
+            const isSelected =
+              selectedTrackKey === trackKey;
+
+            return (
+              <li
+                key={track.id}
+                data-playable={playable ? "true" : "false"}
+                data-selected={isSelected ? "true" : "false"}
+                data-playing={isPlaying ? "true" : "false"}
+                onClick={
+                  playable
+                    ? () => setSelectedTrackKey(trackKey)
+                    : undefined
+                }
+                onDoubleClick={
+                  playable
+                    ? (event) => {
+                        event.preventDefault();
+                        setSelectedTrackKey(trackKey);
+
+                        if (isCurrent) {
+                          if (!playback.isPlaying) {
+                            playback.togglePlayback();
+                          }
+                          return;
+                        }
+
+                        playback.playQueue({
+                          trackKey,
+                          queue: playbackQueue,
+                          autoplay: true,
+                        });
+                      }
+                    : undefined
+                }
+              >
+                <span className="library-release-overview-track-number">
+                  {index + 1}
+                </span>
+
+                <button
+                  type="button"
+                  className={[
+                    "library-release-overview-track-artwork",
+                    "library-release-overview-track-artwork-button",
+                    isSelected ? "is-selected" : "",
+                    isPlaying ? "is-playing" : "",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  disabled={!playable}
+                  aria-label={`${isPlaying ? "Pause" : "Play"} ${title}`}
+                  title={
+                    playable
+                      ? `${isPlaying ? "Pause" : "Play"} ${title}`
+                      : "Playback unavailable"
+                  }
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedTrackKey(trackKey);
+                    playback.toggleTrack(
+                      trackKey,
+                      playbackQueue,
+                    );
+                  }}
+                  onDoubleClick={(event) => {
+                    event.stopPropagation();
+                  }}
+                >
+                  {effectiveArtwork ? (
+                    <img
+                      src={artworkPreviewUrl(
+                        effectiveArtwork.relativePath,
+                      )}
+                      alt=""
+                      aria-hidden="true"
+                    />
+                  ) : (
+                    <img
+                      className="hiplingo-artwork-fallback"
+                      src={hiplingoLogoUrl}
+                      alt=""
+                      aria-hidden="true"
+                    />
+                  )}
+
+                  {playable && (
+                    <span
+                      className="library-release-overview-track-play-indicator"
+                      aria-hidden="true"
+                    >
+                      {isPlaying ? "Ⅱ" : "▶"}
+                    </span>
+                  )}
+                </button>
+
+                <span className="library-release-overview-track-copy">
+                  <strong>{title}</strong>
+                  <small>
+                    {playable
+                      ? isPlaying
+                        ? "Playing"
+                        : isSelected
+                          ? "Selected"
+                          : "Playback audio"
+                      : "Playback unavailable"}
+                  </small>
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      </section>
+    </section>
   );
 }
 
 function LibraryArtistRoster({
   artists,
   releases,
+  selectedArtistId,
+  onSelectedArtistIdChange,
   onLibraryChanged,
+  onOpenRelease,
   onNotify,
+  showAdminTools,
+  technicalAudit,
+  technicalByRelease,
+  playback,
+  waveformColorMode,
+  viewMode,
+  onViewModeChange,
 }: {
   artists: ArtistScanResult[];
   releases: ReleaseScanResult[];
+  selectedArtistId: string | null;
+  onSelectedArtistIdChange: (artistId: string | null) => void;
   onLibraryChanged: () => Promise<void>;
+  onOpenRelease: (releaseId: string) => void;
   onNotify: (
     message: string,
     tone?: ToastMessage["tone"],
   ) => void;
+  showAdminTools: boolean;
+  technicalAudit: MediaTechnicalAuditState;
+  technicalByRelease: Map<
+    string,
+    MediaTechnicalReleaseSummary
+  >;
+  playback: PersistentLibraryPlaybackController;
+  waveformColorMode: WaveformColorMode;
+  viewMode: LibraryReleaseViewMode;
+  onViewModeChange: (mode: LibraryReleaseViewMode) => void;
 }) {
-  const [selectedArtistId, setSelectedArtistId] =
-    useState<string | null>(null);
   const [photoPickerOpen, setPhotoPickerOpen] =
     useState(false);
   const [photoCandidates, setPhotoCandidates] =
@@ -10807,7 +12529,7 @@ function LibraryArtistRoster({
       selectedArtistId &&
       !artists.some((artist) => artist.id === selectedArtistId)
     ) {
-      setSelectedArtistId(null);
+      onSelectedArtistIdChange(null);
     }
   }, [artists, selectedArtistId]);
 
@@ -11117,7 +12839,7 @@ function LibraryArtistRoster({
               className="secondary-button library-artist-back-button"
               onClick={() => {
                 closePhotoPicker();
-                setSelectedArtistId(null);
+                onSelectedArtistIdChange(null);
               }}
             >
               ← All Artists
@@ -11383,24 +13105,28 @@ function LibraryArtistRoster({
           </div>
         </section>
 
-        <section className="library-artist-associated-releases">
-          <h3>Associated Releases</h3>
+        <section className="library-artist-release-browser-section">
           {associatedReleases.length === 0 ? (
-            <p>No releases currently reference this Artist.</p>
+            <div className="library-artist-associated-releases">
+              <h3>Associated Releases</h3>
+              <p>No releases currently reference this Artist.</p>
+            </div>
           ) : (
-            <ul>
-              {associatedReleases.map((release) => (
-                <li key={release.id}>
-                  <strong>
-                    {resolveReleaseDisplayTitle(
-                      release.releaseTitle,
-                      formatReleaseTitle(release.id),
-                    )}
-                  </strong>
-                  <small>{release.releaseDate?.slice(0, 10) ?? release.id.slice(0, 10)}</small>
-                </li>
-              ))}
-            </ul>
+            <LibraryReleaseBrowser
+              releases={associatedReleases}
+              onLibraryChanged={onLibraryChanged}
+              onOpenRelease={onOpenRelease}
+              showAdminTools={showAdminTools}
+              onNotify={onNotify}
+              technicalAudit={technicalAudit}
+              technicalByRelease={technicalByRelease}
+              playback={playback}
+              waveformColorMode={waveformColorMode}
+              viewMode={viewMode}
+              onViewModeChange={onViewModeChange}
+              heading={`${selectedArtist.displayName} releases`}
+              showTechnicalSummary={false}
+            />
           )}
         </section>
       </section>
@@ -11446,7 +13172,7 @@ function LibraryArtistRoster({
                 type="button"
                 className="library-artist-card"
                 key={artist.id}
-                onClick={() => setSelectedArtistId(artist.id)}
+                onClick={() => onSelectedArtistIdChange(artist.id)}
               >
                 <div className="library-artist-photo-placeholder">
                   {primaryAsset?.exists ? (
@@ -11639,20 +13365,21 @@ function LibraryReleaseViewIcon({
 function LibraryReleaseBrowser({
   releases,
   onLibraryChanged,
-  onOpenMetadata,
+  onOpenRelease,
   showAdminTools,
   onNotify,
   technicalAudit,
   technicalByRelease,
   playback,
   waveformColorMode,
-  waveformNavigationRequest,
   viewMode,
   onViewModeChange,
+  heading = "Library releases",
+  showTechnicalSummary = true,
 }: {
   releases: ReleaseScanResult[];
   onLibraryChanged: () => Promise<void>;
-  onOpenMetadata: (releaseId: string) => void;
+  onOpenRelease: (releaseId: string) => void;
   showAdminTools: boolean;
   onNotify: (
     message: string,
@@ -11665,9 +13392,10 @@ function LibraryReleaseBrowser({
   >;
   playback: PersistentLibraryPlaybackController;
   waveformColorMode: WaveformColorMode;
-  waveformNavigationRequest: LibraryWaveformNavigationRequest | null;
   viewMode: LibraryReleaseViewMode;
   onViewModeChange: (mode: LibraryReleaseViewMode) => void;
+  heading?: string;
+  showTechnicalSummary?: boolean;
 }) {
   const [sortMode, setSortMode] =
     useState<LibraryReleaseSortMode>(
@@ -11707,23 +13435,6 @@ function LibraryReleaseBrowser({
     setTileSizeRem(clamped);
   };
 
-  useEffect(() => {
-    const releaseId = waveformNavigationRequest?.releaseId;
-    if (
-      !releaseId ||
-      !releases.some((release) => release.id === releaseId)
-    ) {
-      return;
-    }
-
-    onViewModeChange("waveform");
-  }, [
-    releases,
-    waveformNavigationRequest?.releaseId,
-    waveformNavigationRequest?.requestId,
-    onViewModeChange,
-  ]);
-
   const chooseViewMode = (
     mode: LibraryReleaseViewMode,
   ) => {
@@ -11734,11 +13445,13 @@ function LibraryReleaseBrowser({
     <section className="library-release-browser">
       <header className="library-release-browser-toolbar">
         <div>
-          <strong>Library releases</strong>
+          <strong>{heading}</strong>
           <small>
             {releases.length} {releases.length === 1 ? "release" : "releases"}
           </small>
-          <TechnicalAuditSummaryBadge audit={technicalAudit} />
+          {showTechnicalSummary && (
+            <TechnicalAuditSummaryBadge audit={technicalAudit} />
+          )}
         </div>
 
         <div className="library-release-browser-controls">
@@ -11794,7 +13507,7 @@ function LibraryReleaseBrowser({
                 ["rows", "Rows", "Dense column view"],
                 ["cards", "Cards", "Expanded release cards"],
                 ["tiles", "Tiles", "Artwork-first browsing"],
-                ["waveform", "Waveform", "Single-release artwork and waveform player"],
+                ["waveform", "Waveform", "Now Playing waveform and oscilloscope"],
               ] as const
             ).map(([mode, label, description]) => (
               <button
@@ -11817,7 +13530,6 @@ function LibraryReleaseBrowser({
           fallback={<p className="message">Loading Waveform view…</p>}
         >
           <LibraryWaveformView
-            releases={sortedReleases}
             playback={playback}
             colorMode={waveformColorMode}
             releaseDurationSecondsById={new Map(
@@ -11827,8 +13539,6 @@ function LibraryReleaseBrowser({
                   : [],
               ),
             )}
-            navigationRequest={waveformNavigationRequest}
-            onOpenMetadata={onOpenMetadata}
           />
         </Suspense>
       ) : (
@@ -11849,8 +13559,8 @@ function LibraryReleaseBrowser({
               key={release.relativePath}
               release={release}
               onLibraryChanged={onLibraryChanged}
-              onOpenMetadata={() =>
-                onOpenMetadata(release.id)
+              onOpenRelease={() =>
+                onOpenRelease(release.id)
               }
               showAdminTools={showAdminTools}
               onNotify={onNotify}
@@ -11882,7 +13592,7 @@ function libraryMetadataReadinessLabel(
 function ReleaseCard({
   release,
   onLibraryChanged,
-  onOpenMetadata,
+  onOpenRelease,
   showAdminTools,
   onNotify,
   technicalSummary,
@@ -11891,7 +13601,7 @@ function ReleaseCard({
 }: {
   release: ReleaseScanResult;
   onLibraryChanged: () => Promise<void>;
-  onOpenMetadata: () => void;
+  onOpenRelease: () => void;
   showAdminTools: boolean;
   onNotify: (
     message: string,
@@ -12326,8 +14036,8 @@ function ReleaseCard({
         <button
           type="button"
           className="release-primary-action"
-          onClick={onOpenMetadata}
-          aria-label={`Open metadata for ${releaseDisplayTitle}`}
+          onClick={onOpenRelease}
+          aria-label={`Open release ${releaseDisplayTitle}`}
         >
           <span
             className="release-artwork-tile"
@@ -17972,9 +19682,11 @@ function activeReadinessDocuments(
 function ReadinessNavBadge({
   scope,
   skippedPaths,
+  showComplete = false,
 }: {
   scope?: MetadataReadinessScope;
   skippedPaths: ReadonlySet<string>;
+  showComplete?: boolean;
 }) {
   if (!scope) {
     return null;
@@ -17991,7 +19703,19 @@ function ReadinessNavBadge({
     scope.missingRequiredFields.length;
 
   if (count === 0) {
-    return null;
+    if (!showComplete) {
+      return null;
+    }
+
+    return (
+      <small
+        className="readiness-count complete"
+        title="Metadata readiness: complete"
+        aria-label="Metadata readiness: complete"
+      >
+        Metadata ✓
+      </small>
+    );
   }
 
   const tone =
@@ -18011,280 +19735,11 @@ function ReadinessNavBadge({
   return (
     <small
       className={`readiness-count ${tone}`}
-      title={`Needs attention: ${details}`}
+      title={`Metadata readiness · Needs attention: ${details}`}
+      aria-label={`Metadata readiness: ${count} item${count === 1 ? "" : "s"} need attention`}
     >
       {count}
     </small>
-  );
-}
-
-function MetadataReadinessPanel({
-  summary,
-  trackLabels,
-  open,
-  skippedPaths,
-  onToggle,
-  onNavigate,
-  onSkip,
-  onRestore,
-}: {
-  summary: MetadataReadinessSummary;
-  trackLabels: Map<string, string>;
-  open: boolean;
-  skippedPaths: ReadonlySet<string>;
-  onToggle: () => void;
-  onNavigate: (target: ReadinessNavigationTarget) => void;
-  onSkip: (file: MissingMetadataDocument) => void;
-  onRestore: (file: MissingMetadataDocument) => void;
-}) {
-  const scopesWithGaps = summary.scopes
-    .map((scope) => ({
-      ...scope,
-      missingDocuments: activeReadinessDocuments(
-        scope,
-        skippedPaths,
-      ),
-    }))
-    .filter(
-      (scope) =>
-        scope.missingDocuments.length > 0 ||
-        scope.missingRequiredFields.length > 0,
-    );
-  const skippedDocuments = summary.scopes.flatMap(
-    (scope) =>
-      scope.missingDocuments
-        .filter(
-          (file) =>
-            file.importance === "supplemental" &&
-            skippedPaths.has(file.relativePath),
-        )
-        .map((file) => ({ scope, file })),
-  );
-
-  return (
-    <section className="metadata-readiness-panel">
-      <header className="metadata-readiness-header">
-        <div>
-          <h2>Metadata readiness</h2>
-          <p>
-            Work on a gap to jump directly to its release or track and the relevant editor. Optional files may also be skipped in this browser.
-          </p>
-        </div>
-
-        <div className="metadata-readiness-summary">
-          <span
-            className={`badge ${
-              summary.missingCoreDocuments > 0
-                ? "missing"
-                : "complete"
-            }`}
-          >
-            {summary.missingCoreDocuments > 0
-              ? `${summary.missingCoreDocuments} core missing`
-              : "Core documents complete"}
-          </span>
-          <span
-            className={`badge ${
-              summary.missingRequiredFields > 0
-                ? "warning"
-                : "complete"
-            }`}
-          >
-            {summary.missingRequiredFields > 0
-              ? `${summary.missingRequiredFields} required fields missing`
-              : "Required fields complete"}
-          </span>
-          {summary.missingCreditDocuments > 0 && (
-            <span className="badge warning">
-              {summary.missingCreditDocuments} credit {summary.missingCreditDocuments === 1 ? "file" : "files"} missing
-            </span>
-          )}
-          {summary.missingSupplementalDocuments - skippedDocuments.length > 0 && (
-            <span className="badge supplemental">
-              {summary.missingSupplementalDocuments - skippedDocuments.length} optional to review
-            </span>
-          )}
-          {skippedDocuments.length > 0 && (
-            <span className="badge skipped">
-              {skippedDocuments.length} skipped
-            </span>
-          )}
-          <button
-            type="button"
-            className="metadata-readiness-toggle"
-            aria-expanded={open}
-            onClick={onToggle}
-          >
-            {open ? "Hide details" : "Review gaps"}
-          </button>
-        </div>
-      </header>
-
-      {open && scopesWithGaps.length > 0 && (
-        <div className="metadata-readiness-scopes">
-          {scopesWithGaps.map((scope) => (
-            <section
-              key={scope.id}
-              className="metadata-readiness-scope"
-            >
-              <header>
-                <strong>
-                  {scope.kind === "release"
-                    ? "Release"
-                    : trackLabels.get(scope.id) ?? scope.id}
-                </strong>
-                <span>
-                  {scope.missingDocuments.length + scope.missingRequiredFields.length} {scope.missingDocuments.length + scope.missingRequiredFields.length === 1 ? "item" : "items"}
-                </span>
-              </header>
-
-              {scope.missingDocuments.map((file) => (
-                <ReadinessDocumentRow
-                  key={file.relativePath}
-                  scope={scope}
-                  file={file}
-                  onNavigate={onNavigate}
-                  onSkip={onSkip}
-                />
-              ))}
-
-              {scope.missingRequiredFields.map((field) => (
-                <ReadinessFieldRow
-                  key={field.tomlPath}
-                  scope={scope}
-                  field={field}
-                  onNavigate={onNavigate}
-                />
-              ))}
-            </section>
-          ))}
-        </div>
-      )}
-
-      {open && skippedDocuments.length > 0 && (
-        <details className="metadata-readiness-skipped">
-          <summary>
-            {skippedDocuments.length} optional {skippedDocuments.length === 1 ? "item" : "items"} skipped in this browser
-          </summary>
-          <div>
-            {skippedDocuments.map(({ scope, file }) => (
-              <div
-                key={file.relativePath}
-                className="metadata-readiness-item is-skipped"
-              >
-                <div>
-                  <strong>{file.filename}</strong>
-                  <small>
-                    {scope.kind === "release"
-                      ? "Release"
-                      : trackLabels.get(scope.id) ?? scope.id}
-                  </small>
-                  <code>{file.relativePath}</code>
-                </div>
-                <span className="readiness-kind supplemental">
-                  Skipped
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onRestore(file)}
-                >
-                  Restore
-                </button>
-              </div>
-            ))}
-          </div>
-        </details>
-      )}
-    </section>
-  );
-}
-
-function ReadinessDocumentRow({
-  scope,
-  file,
-  onNavigate,
-  onSkip,
-}: {
-  scope: MetadataReadinessScope;
-  file: MissingMetadataDocument;
-  onNavigate: (target: ReadinessNavigationTarget) => void;
-  onSkip: (file: MissingMetadataDocument) => void;
-}) {
-  return (
-    <div className="metadata-readiness-item">
-      <div>
-        <strong>{file.filename}</strong>
-        <small>{file.description}</small>
-        <code>{file.relativePath}</code>
-      </div>
-      <span className={`readiness-kind ${file.importance}`}>
-        {file.importance === "core"
-          ? "Core"
-          : file.importance === "credits"
-            ? "Credits"
-            : "Optional"}
-      </span>
-      <div className="metadata-readiness-item-actions">
-        {file.importance === "supplemental" && (
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => onSkip(file)}
-          >
-            Skip for now
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() =>
-            onNavigate({
-              kind: "document",
-              scopeId: scope.id,
-              tab: file.tab,
-              file,
-            })
-          }
-        >
-          Work on this
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function ReadinessFieldRow({
-  scope,
-  field,
-  onNavigate,
-}: {
-  scope: MetadataReadinessScope;
-  field: RequiredFieldIssue;
-  onNavigate: (target: ReadinessNavigationTarget) => void;
-}) {
-  return (
-    <div className="metadata-readiness-item">
-      <div>
-        <strong>{field.label}</strong>
-        <small>Required metadata field is blank or absent.</small>
-        <code>{field.tomlPath}</code>
-      </div>
-      <span className="readiness-kind required">
-        Required
-      </span>
-      <button
-        type="button"
-        onClick={() =>
-          onNavigate({
-            kind: "field",
-            scopeId: scope.id,
-            tab: field.tab,
-            field,
-          })
-        }
-      >
-        Edit field
-      </button>
-    </div>
   );
 }
 
@@ -18430,6 +19885,8 @@ function ReleaseMetadataDetailView({
   playback,
   waveformColorMode,
   onWaveformColorModeChange,
+  initialFocusTarget,
+  onInitialFocusHandled,
 }: {
   detail: ReleaseMetadataDetail;
   release: ReleaseScanResult | null;
@@ -18455,6 +19912,8 @@ function ReleaseMetadataDetailView({
   playback: PersistentLibraryPlaybackController;
   waveformColorMode: WaveformColorMode;
   onWaveformColorModeChange: (mode: WaveformColorMode) => void;
+  initialFocusTarget: MetadataEditorFocusTarget | null;
+  onInitialFocusHandled: () => void;
 }) {
   const [setupMode, setSetupMode] =
     useState(false);
@@ -18603,8 +20062,6 @@ function ReleaseMetadataDetailView({
     detailMenuOpen,
     setDetailMenuOpen,
   ] = useState(false);
-  const [readinessOpen, setReadinessOpen] =
-    useState(true);
   const [
     readinessTarget,
     setReadinessTarget,
@@ -18647,6 +20104,69 @@ function ReleaseMetadataDetailView({
       window.localStorage,
     ),
   );
+
+  useEffect(() => {
+    if (!initialFocusTarget) {
+      return;
+    }
+
+    setActiveDocumentGroup(
+      initialFocusTarget.scopeId,
+    );
+    setActiveMetadataTab(
+      initialFocusTarget.tab,
+    );
+    setEditMode(true);
+    setReadinessTarget(null);
+
+    let secondFrame = 0;
+    const firstFrame =
+      window.requestAnimationFrame(() => {
+        secondFrame =
+          window.requestAnimationFrame(() => {
+            if (initialFocusTarget.tomlPath) {
+              const row = Array.from(
+                document.querySelectorAll<HTMLElement>(
+                  "[data-metadata-path]",
+                ),
+              ).find(
+                (candidate) =>
+                  candidate.dataset.metadataPath ===
+                  initialFocusTarget.tomlPath,
+              );
+
+              row?.scrollIntoView({
+                block: "center",
+                behavior: "smooth",
+              });
+
+              const addButton =
+                row?.querySelector<HTMLButtonElement>(
+                  ".metadata-default-field-add-button",
+                );
+
+              (addButton ?? row)?.focus({
+                preventScroll: true,
+              });
+            }
+
+            onInitialFocusHandled();
+          });
+      });
+
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+
+      if (secondFrame) {
+        window.cancelAnimationFrame(secondFrame);
+      }
+    };
+  }, [
+    detail.releaseId,
+    initialFocusTarget,
+    onInitialFocusHandled,
+  ]);
+
   useEffect(() => {
     setTrackDirectoryRenameReview(null);
     setTrackDirectoryRenameConfirmationInput("");
@@ -18938,28 +20458,11 @@ function ReleaseMetadataDetailView({
       ),
     );
     setReadinessTarget(null);
-    setReadinessOpen(true);
     onNotify(
       `${file.filename} skipped in this browser`,
       "info",
     );
   };
-
-  const restoreReadinessDocument = (
-    file: MissingMetadataDocument,
-  ) => {
-    persistSkippedReadinessPaths(
-      removeReadinessSkip(
-        skippedReadinessPaths,
-        file.relativePath,
-      ),
-    );
-    onNotify(
-      `${file.filename} restored to readiness`,
-      "info",
-    );
-  };
-
 
   const completePerformerCopy = async (
     result: PerformerCopyResponse,
@@ -19016,7 +20519,6 @@ function ReleaseMetadataDetailView({
     setActiveDocumentGroup("release");
     setActiveMetadataTab("overview");
     setDetailMenuOpen(false);
-    setReadinessOpen(true);
     setActivityLogOpen(false);
     setPerformerCopySource(null);
     setSetupMode(false);
@@ -21760,15 +23262,6 @@ function ReleaseMetadataDetailView({
       };
     });
 
-  const readinessTrackLabels = new Map(
-    performerCopyTrackOptions.map(
-      (option) => [
-        option.trackId,
-        option.label,
-      ],
-    ),
-  );
-
   const performerCopySourceLabel =
     performerCopySource?.document.scope ===
       "release"
@@ -21875,38 +23368,6 @@ function ReleaseMetadataDetailView({
         : metadataReadiness?.actionableCount
           ? "preview"
           : "complete";
-
-  const navigateToReadinessItem = (
-    target: ReadinessNavigationTarget,
-  ) => {
-    if (
-      target.tab === "settings" &&
-      !showAdminTools
-    ) {
-      onShowAdminToolsChange(true);
-    }
-
-    setActiveDocumentGroup(target.scopeId);
-    setActiveMetadataTab(target.tab);
-    setReadinessTarget(target);
-    setReadinessOpen(false);
-
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        const workItem = document.getElementById(
-          "metadata-readiness-work-item",
-        );
-
-        workItem?.scrollIntoView({
-          block: "center",
-          behavior: "smooth",
-        });
-        workItem?.focus({
-          preventScroll: true,
-        });
-      });
-    });
-  };
 
   const editReadinessField = (
     field: RequiredFieldIssue,
@@ -22177,6 +23638,7 @@ function ReleaseMetadataDetailView({
     view: WorkflowApplicationView,
   ) => {
     if (view === "library") {
+      returnToLibrary();
       return;
     }
 
@@ -22196,16 +23658,6 @@ function ReleaseMetadataDetailView({
     <section className="metadata-detail">
       <header className="metadata-detail-header">
         <div className="metadata-detail-identity">
-          <button
-            type="button"
-            className="metadata-detail-back-button"
-            aria-label="Back to Library"
-            title="Back to Library"
-            onClick={returnToLibrary}
-          >
-            <span aria-hidden="true">←</span>
-          </button>
-
           <button
             type="button"
             className="page-header-brand metadata-detail-home-button"
@@ -22594,21 +24046,6 @@ function ReleaseMetadataDetailView({
         onNavigate={navigateFromRelease}
       />
 
-      {metadataReadiness && (
-        <MetadataReadinessPanel
-          summary={metadataReadiness}
-          trackLabels={readinessTrackLabels}
-          open={readinessOpen}
-          skippedPaths={skippedReadinessPathSet}
-          onToggle={() =>
-            setReadinessOpen((current) => !current)
-          }
-          onNavigate={navigateToReadinessItem}
-          onSkip={skipReadinessDocument}
-          onRestore={restoreReadinessDocument}
-        />
-      )}
-
       {activityLogOpen && (
         <MetadataActivityLogModal
           entries={metadataActivityEntries}
@@ -22646,80 +24083,64 @@ function ReleaseMetadataDetailView({
           />
         )}
 
-      <section
-        className={[
-          "draft-status",
-          dirtyCount > 0
-            ? "has-unsaved-changes"
-            : "",
-        ]
-          .filter(Boolean)
-          .join(" ")}
-        role="status"
-        aria-live="polite"
-      >
-        <div className="draft-status-copy">
-          <span>
-            Mode:{" "}
-            <strong>
-              {editMode
-                ? "Editing in browser"
-                : "Read-only"}
-            </strong>
-          </span>
+      {(isMetadataEmpty || dirtyCount > 0) && (
+        <section
+          className={[
+            "draft-status",
+            dirtyCount > 0
+              ? "has-unsaved-changes"
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          role="status"
+          aria-live="polite"
+        >
+          <div className="draft-status-copy">
+            {isMetadataEmpty ? (
+              <strong>Metadata setup required</strong>
+            ) : (
+              <>
+                <span>
+                  Unsaved changes:{" "}
+                  <strong>{dirtyCount}</strong>
+                </span>
+                <span className="badge unsaved">
+                  Unsaved browser changes
+                </span>
+              </>
+            )}
+          </div>
 
-          <span>
-            Unsaved changes:{" "}
-            <strong>{dirtyCount}</strong>
-          </span>
-
-          <span
-            className={[
-              "badge",
-              dirtyCount > 0
-                ? "unsaved"
-                : "preview",
-            ]
-              .filter(Boolean)
-              .join(" ")}
-          >
-            {dirtyCount > 0
-              ? "Unsaved browser changes"
-              : "No filesystem writes"}
-          </span>
-        </div>
-
-        <div className="draft-status-actions">
-          {isMetadataEmpty ? (
-            <button
-              type="button"
-              className="primary-action"
-              onClick={beginStarterSetup}
-            >
-              {setupMode
-                ? "Metadata setup"
-                : "Start metadata setup"}
-            </button>
-          ) : editMode ? (
-            <>
+          <div className="draft-status-actions">
+            {isMetadataEmpty ? (
               <button
                 type="button"
                 className="primary-action"
-                disabled={
-                  dirtyCount === 0 ||
-                  savingAll ||
-                  savingDocumentPath !== null
-                }
-                onClick={() =>
-                  void saveAllDrafts()
-                }
+                onClick={beginStarterSetup}
               >
-                {savingAll
-                  ? "Saving edits…"
-                  : "Save edits"}
+                {setupMode
+                  ? "Metadata setup"
+                  : "Start metadata setup"}
               </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="primary-action"
+                  disabled={
+                    savingAll ||
+                    savingDocumentPath !== null
+                  }
+                  onClick={() =>
+                    void saveAllDrafts()
+                  }
+                >
+                  {savingAll
+                    ? "Saving edits…"
+                    : "Save edits"}
+                </button>
 
-              {dirtyCount > 0 && (
                 <button
                   type="button"
                   disabled={
@@ -22731,12 +24152,11 @@ function ReleaseMetadataDetailView({
                 >
                   Discard edits
                 </button>
-              )}
-            </>
-          ) : null}
-        </div>
-      </section>
-
+              </>
+            )}
+          </div>
+        </section>
+      )}
 
       {saveError && (
         <p className="message error">
@@ -23725,6 +25145,7 @@ function ReleaseMetadataDetailView({
           <ReadinessNavBadge
             scope={releaseReadinessScope}
             skippedPaths={skippedReadinessPathSet}
+            showComplete
           />
 
           {releaseDraftCount > 0 && (
@@ -24454,6 +25875,24 @@ function formatReleaseTitle(
       (character) =>
         character.toUpperCase(),
     );
+}
+
+function publicTrackSelectionLabel(
+  track: TrackScanResult,
+  multiDisc: boolean,
+): string {
+  const title = track.title?.trim() ||
+    formatReleaseTitle(track.id);
+
+  if (!track.trackNumber) {
+    return title;
+  }
+
+  if (multiDisc) {
+    return `${track.discNumber ?? 1}.${track.trackNumber} · ${title}`;
+  }
+
+  return `${track.trackNumber}. ${title}`;
 }
 
 function formatReleaseDate(
@@ -31391,6 +32830,8 @@ function MetadataDocumentTable({
       <div
         key={field.tomlPath}
         className="metadata-table-row metadata-default-missing-row"
+        data-metadata-path={field.tomlPath}
+        tabIndex={-1}
       >
         <div className="metadata-key">
           <div className="metadata-key-heading">

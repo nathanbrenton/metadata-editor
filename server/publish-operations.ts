@@ -16,6 +16,9 @@ import path from "node:path";
 import {
   assertPathWithinRoot,
 } from "./media-root.js";
+import {
+  isIgnoredPublicationJunk,
+} from "./publication-junk.js";
 
 export const publishOperationsDirectoryName =
   ".metadata-editor-publish-operations";
@@ -292,16 +295,20 @@ async function walkRegularFiles(
   const files: string[] = [];
 
   for (const entry of entries) {
-    if (entry.isSymbolicLink()) {
-      throw new Error(
-        `Published package contains a symbolic link: ${path.posix.join(relativePath, entry.name)}`,
-      );
-    }
-
     const entryRelativePath = path.posix.join(
       relativePath,
       entry.name,
     );
+
+    if (entry.isSymbolicLink()) {
+      throw new Error(
+        `Published package contains a symbolic link: ${entryRelativePath}`,
+      );
+    }
+
+    if (isIgnoredPublicationJunk(entryRelativePath)) {
+      continue;
+    }
 
     if (entry.isDirectory()) {
       files.push(

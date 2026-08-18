@@ -28,6 +28,7 @@ import type {
 import {
   executeIngestReleaseBuild as executeIngestReleaseBuildReal,
   inspectIngestStagingTarget,
+  parseIngestBuildDraft,
   prepareIngestReleaseBuild,
 } from "../server/ingest-builder.js";
 
@@ -1079,7 +1080,7 @@ test(
       "utf8",
     );
     await writeFile(
-      path.join(trackRoot, "waveform-peaks.json"),
+      path.join(trackRoot, "waveform-peaks.wfp"),
       "{}\n",
       "utf8",
     );
@@ -1162,6 +1163,15 @@ test(
       }),
     );
 
+    const parsedReplacementDraft = parseIngestBuildDraft(
+      JSON.parse(JSON.stringify(replacementDraft)),
+    );
+    assert.equal(
+      parsedReplacementDraft.tracks[0]?.replacementTrackId,
+      originalTrack.id,
+      "API draft parsing must preserve the explicit replacement target",
+    );
+
     const status = await inspectIngestStagingTarget(
       fixture.outputRoot,
       created.releaseId,
@@ -1173,7 +1183,7 @@ test(
       fixture.ingestRoot,
       fixture.outputRoot,
       replacementInspection,
-      replacementDraft,
+      parsedReplacementDraft,
     );
     assert.equal(prepared.preview.operation, "update");
     assert.equal(prepared.preview.summary.replacedTrackCount, 1);
@@ -1203,7 +1213,7 @@ test(
       fixture.ingestRoot,
       fixture.outputRoot,
       replacementInspection,
-      replacementDraft,
+      parsedReplacementDraft,
       INGEST_UPDATE_CONFIRMATION_PHRASE,
     );
     assert.equal(updated.operation, "update");
@@ -1223,7 +1233,7 @@ test(
     );
     assert.equal(
       await readFile(
-        path.join(trackRoot, "waveform-peaks.json"),
+        path.join(trackRoot, "waveform-peaks.wfp"),
         "utf8",
       ),
       '{"testWaveform":true}\n',

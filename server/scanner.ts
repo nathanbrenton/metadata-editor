@@ -76,6 +76,16 @@ function readNonBlankString(
     : undefined;
 }
 
+function readPositiveInteger(
+  value: unknown,
+): number | undefined {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value > 0
+    ? value
+    : undefined;
+}
+
 async function readReleaseLibraryIdentity(
   mediaRoot: string,
   releasePath: string,
@@ -172,6 +182,83 @@ async function readReleaseLibraryIdentity(
         : {}),
       ...(releaseType
         ? { releaseType }
+        : {}),
+    };
+  } catch {
+    // The full metadata-detail reader reports malformed TOML on open.
+    return {};
+  }
+}
+
+async function readTrackLibraryIdentity(
+  mediaRoot: string,
+  trackPath: string,
+  metadataFiles: MetadataFileStatus[],
+): Promise<
+  Pick<
+    TrackScanResult,
+    | "title"
+    | "trackNumber"
+    | "discNumber"
+  >
+> {
+  const trackDocument = metadataFiles.find(
+    (file) => file.filename === "track.toml",
+  );
+
+  if (!trackDocument?.exists) {
+    return {};
+  }
+
+  try {
+    const candidatePath = assertPathWithinRoot(
+      mediaRoot,
+      path.join(trackPath, "track.toml"),
+    );
+    const stats = await lstat(candidatePath);
+
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+      return {};
+    }
+
+    const canonicalMediaRoot = await realpath(mediaRoot);
+    const canonicalFilePath = await realpath(candidatePath);
+
+    assertPathWithinRoot(
+      canonicalMediaRoot,
+      canonicalFilePath,
+    );
+
+    const parsed = parse(
+      await readFile(canonicalFilePath, "utf8"),
+    );
+    const trackTable =
+      isRecord(parsed) && isRecord(parsed.track)
+        ? parsed.track
+        : null;
+
+    if (!trackTable) {
+      return {};
+    }
+
+    const numbering = isRecord(trackTable.numbering)
+      ? trackTable.numbering
+      : null;
+    const title = readNonBlankString(trackTable.title);
+    const trackNumber = readPositiveInteger(
+      numbering?.track_number,
+    );
+    const discNumber = readPositiveInteger(
+      numbering?.disc_number,
+    );
+
+    return {
+      ...(title ? { title } : {}),
+      ...(trackNumber !== undefined
+        ? { trackNumber }
+        : {}),
+      ...(discNumber !== undefined
+        ? { discNumber }
         : {}),
     };
   } catch {
@@ -436,6 +523,16 @@ async function scanTrack(
   trackPath: string,
 ): Promise<TrackScanResult> {
   const files = await walkFiles(mediaRoot, trackPath);
+  const metadataFiles = await scanExpectedMetadataFiles(
+    mediaRoot,
+    trackPath,
+    trackMetadataFiles,
+  );
+  const identity = await readTrackLibraryIdentity(
+    mediaRoot,
+    trackPath,
+    metadataFiles,
+  );
 
   return {
     id: path.basename(trackPath),
@@ -443,11 +540,8 @@ async function scanTrack(
       mediaRoot,
       trackPath,
     ),
-    metadataFiles: await scanExpectedMetadataFiles(
-      mediaRoot,
-      trackPath,
-      trackMetadataFiles,
-    ),
+    ...identity,
+    metadataFiles,
     audioMasters: files
       .filter((filePath) =>
         matchesMasterAsset(

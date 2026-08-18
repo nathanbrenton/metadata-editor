@@ -15,6 +15,11 @@ import {
 import path from "node:path";
 
 import {
+  decodeWaveformBinary,
+  encodeWaveformBinary,
+} from "@hiplingo/media-player/waveform-binary";
+
+import {
   detectFfmpegCapabilities,
 } from "../ffmpeg-capabilities.js";
 import {
@@ -209,9 +214,11 @@ async (
         wavBytes,
         profile.waveform.peaksPerSecond,
       );
+    const encodedWaveform = encodeWaveformBinary(waveform);
+    const decodedWaveform = decodeWaveformBinary(encodedWaveform);
     const inspection =
       inspectWaveformDocument(
-        waveform,
+        decodedWaveform,
         profile.waveform,
       );
 
@@ -225,7 +232,7 @@ async (
 
     await writeFile(
       temporaryWaveformPath,
-      `${JSON.stringify(waveform, null, 2)}\n`,
+      encodedWaveform,
       {
         flag: "wx",
         mode: 0o600,

@@ -45,7 +45,15 @@ test("Publish keeps technical storage roots out of the default Step 4 header", (
 
   assert.match(
     publish,
-    /Step 4 · Web Package[\s\S]*?Ready Check · read-only/,
+    /Step 4 · Web Package/,
+  );
+  assert.match(
+    publish,
+    /presentation="web-package-header"/,
+  );
+  assert.doesNotMatch(
+    publish,
+    /Ready Check · read-only/,
   );
   assert.doesNotMatch(
     publish,

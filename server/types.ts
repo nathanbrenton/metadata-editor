@@ -13,6 +13,9 @@ export type DiscoveredAsset = {
 export type TrackScanResult = {
   id: string;
   relativePath: string;
+  title?: string;
+  trackNumber?: number;
+  discNumber?: number;
   metadataFiles: MetadataFileStatus[];
   audioMasters: DiscoveredAsset[];
   playbackAudio?: DiscoveredAsset[];

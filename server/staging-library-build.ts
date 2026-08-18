@@ -8,6 +8,10 @@ import {
 import path from "node:path";
 
 import {
+  decodeWaveformBinary,
+} from "@hiplingo/media-player/waveform-binary";
+
+import {
   assertPathWithinRoot,
 } from "./media-root.js";
 import {
@@ -259,15 +263,14 @@ export async function buildStagingLibraryBuildPlan(
 
     let validWaveform = false;
     try {
-      const waveformDocument = JSON.parse(
+      const waveformDocument = decodeWaveformBinary(
         await readFile(
           libraryPath(
             mediaRoot,
             waveformRelativePath,
           ),
-          "utf8",
         ),
-      ) as unknown;
+      );
       validWaveform =
         inspectWaveformDocument(
           waveformDocument,

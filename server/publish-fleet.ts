@@ -37,6 +37,13 @@ export type PublishFleetRelease = {
   audioStreamNeedsPreparation: boolean;
   videoStreamNeedsPreparation: boolean;
   waveformNeedsPreparation: boolean;
+  publicSelection?: {
+    includeVideo: boolean;
+    publicTrackCount: number;
+    libraryTrackCount: number;
+    publicVideoCount: number;
+    libraryVideoCount: number;
+  };
 };
 
 export type PublishFleetSummary = {
@@ -132,6 +139,15 @@ export async function buildPublishFleetSummary(
       audioStreamNeedsPreparation,
       videoStreamNeedsPreparation,
       waveformNeedsPreparation,
+      publicSelection: {
+        includeVideo: plan.publicSelection.includeVideo,
+        publicTrackCount:
+          plan.publicSelection.includedTrackIds.length,
+        libraryTrackCount: release.tracks.length,
+        publicVideoCount:
+          plan.publicSelection.includedVideoIds.length,
+        libraryVideoCount: release.videos?.length ?? 0,
+      },
     });
   }
 

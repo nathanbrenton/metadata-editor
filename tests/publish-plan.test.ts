@@ -14,6 +14,11 @@ import path from "node:path";
 import test from "node:test";
 
 import {
+  decodeWaveformBinary,
+  encodeWaveformBinary,
+} from "../../packages/media-player/src/waveform-binary.js";
+
+import {
   buildPublishPlan,
   formatPublishPlan,
 } from "../server/publish-plan.js";
@@ -189,7 +194,7 @@ async function createPublishFixture(options: {
 
   const masterPath = path.join(trackPath, "audio-master.wav");
   const playbackPath = path.join(trackPath, "audio-playback.mp3");
-  const waveformPath = path.join(trackPath, "waveform-peaks.json");
+  const waveformPath = path.join(trackPath, "waveform-peaks.wfp");
   const wav = createPcm16Wav();
   const waveform = generateWaveformPeaksFromWav(wav);
 
@@ -201,7 +206,7 @@ async function createPublishFixture(options: {
 
   await writeFile(
     waveformPath,
-    `${JSON.stringify(waveform, null, 2)}\n`,
+    encodeWaveformBinary(waveform),
   );
   await writeFile(
     path.join(trackPath, "track.toml"),
@@ -222,7 +227,7 @@ async function createPublishFixture(options: {
       "[track.assets]",
       'audio_master = "audio-master.wav"',
       'audio_playback = "audio-playback.mp3"',
-      'waveform_peaks = "waveform-peaks.json"',
+      'waveform_peaks = "waveform-peaks.wfp"',
       "",
       "[track.dates]",
       'release = "2026-08-01"',
@@ -326,7 +331,19 @@ test("builds a read-only audio-player package plan for a publishable release", a
     assert.equal(plan.writesEnabled, false);
     assert.notEqual(plan.status, "blocked");
     assert.equal(plan.summary.blockedCount, 0);
-    assert.equal(plan.contract.version, 5);
+    assert.equal(plan.contract.version, 6);
+    assert.equal(
+      plan.contract.trackResources.waveform.filename,
+      "waveform-peaks.wfp",
+    );
+    assert.equal(
+      plan.contract.trackResources.waveform.format,
+      "hiplingo-waveform-binary",
+    );
+    assert.equal(
+      plan.contract.trackResources.waveform.formatVersion,
+      1,
+    );
     assert.equal(plan.contract.trackResources.stream.protocol, "hls");
     assert.equal(plan.contract.trackResources.stream.bitrateKbps, 192);
     assert.equal(
@@ -387,6 +404,107 @@ test("builds a read-only audio-player package plan for a publishable release", a
     );
     assert.match(formatPublishPlan(plan), /Web streams: 1\/1 current/);
     assert.match(formatPublishPlan(plan), /Writes enabled: no/);
+  } finally {
+    await rm(fixture.temporaryRoot, {
+      recursive: true,
+      force: true,
+    });
+  }
+});
+
+test("video publication defaults off and only enters preflight when explicitly enabled", async () => {
+  const fixture = await createPublishFixture();
+  const releasePath = path.join(
+    fixture.mediaRoot,
+    "releases",
+    fixture.releaseId,
+  );
+  const videoPath = path.join(
+    releasePath,
+    "videos",
+    "video_public-test",
+  );
+
+  try {
+    await mkdir(videoPath, { recursive: true });
+    await writeFile(
+      path.join(videoPath, "video-master.mp4"),
+      Buffer.from("canonical private video"),
+    );
+    await writeFile(
+      path.join(videoPath, "video.toml"),
+      [
+        "[schema]",
+        'name = "video-metadata"',
+        "version = 3",
+        "",
+        "[video]",
+        'id = "video_public-test"',
+        'title = "Public Test Video"',
+        'type = "visualizer"',
+        'master_path = "video-master.mp4"',
+        'related_track_id = "artist_01_public-track"',
+        "",
+      ].join("\n"),
+    );
+
+    const defaultPlan = await buildPublishPlan(
+      fixture.mediaRoot,
+      fixture.publishRoot,
+      fixture.releaseId,
+      {
+        generatedAt: "2026-08-01T01:10:00.000Z",
+        ffmpegCapabilities: readyCapabilities,
+      },
+    );
+
+    assert.equal(defaultPlan.publicSelection.includeVideo, false);
+    assert.equal(defaultPlan.videoStreams.videoCount, 0);
+    assert.equal(defaultPlan.derivatives.videoCount, 0);
+    assert.equal(
+      defaultPlan.items.some((item) =>
+        item.kind.startsWith("video-"),
+      ),
+      false,
+    );
+    assert.notEqual(defaultPlan.status, "blocked");
+
+    await writeFile(
+      path.join(releasePath, "release-settings.toml"),
+      [
+        "[release_reference]",
+        `release_id = "${fixture.releaseId}"`,
+        "",
+        "[settings.publication]",
+        "include_video = true",
+        'included_track_ids = ["artist_01_public-track"]',
+        "",
+      ].join("\n"),
+    );
+
+    const enabledPlan = await buildPublishPlan(
+      fixture.mediaRoot,
+      fixture.publishRoot,
+      fixture.releaseId,
+      {
+        generatedAt: "2026-08-01T01:11:00.000Z",
+        ffmpegCapabilities: readyCapabilities,
+      },
+    );
+
+    assert.equal(enabledPlan.publicSelection.includeVideo, true);
+    assert.equal(enabledPlan.videoStreams.videoCount, 1);
+    assert.ok(
+      enabledPlan.items.some((item) =>
+        item.kind === "video-metadata",
+      ),
+    );
+    assert.equal(enabledPlan.status, "blocked");
+    assert.ok(
+      enabledPlan.issues.some((issue) =>
+        issue.code === "video-web-stream-not-current",
+      ),
+    );
   } finally {
     await rm(fixture.temporaryRoot, {
       recursive: true,
@@ -517,7 +635,7 @@ test("prepares reviewed HLS stream and waveform derivatives without writing the 
   );
   const waveformPath = path.join(
     trackPath,
-    "waveform-peaks.json",
+    "waveform-peaks.wfp",
   );
   const generatedAt = "2026-08-01T01:00:00.000Z";
 
@@ -597,6 +715,15 @@ test("prepares reviewed HLS stream and waveform derivatives without writing the 
     assert.equal(receipt.playbackCount, 1);
     assert.equal(receipt.streamCount, 1);
     assert.equal(receipt.waveformCount, 1);
+
+    const preparedWaveform = decodeWaveformBinary(
+      await readFile(waveformPath),
+    );
+    assert.equal(preparedWaveform.peaksPerSecond, 400);
+    assert.equal(
+      preparedWaveform.analysis.peakFields.join(","),
+      "min,max,low,mid,high",
+    );
 
     const manifest = JSON.parse(
       await readFile(

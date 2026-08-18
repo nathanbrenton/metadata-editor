@@ -19,7 +19,10 @@ test("Web Package and Live reuse the guarded publication workspace with differen
   assert.match(appSource, /mode=\{applicationView === "production" \? "production" : "public-package"\}/);
   assert.match(appSource, /Only releases marked Included are part of the exact Web Package/i);
   assert.match(appSource, /Compare the current Web Package with Hiplingo before deployment/i);
-  assert.match(appSource, /loadDeploymentTargetStatus\("production"\)/);
+  assert.match(appSource, /loadDeploymentTargetStatus\("local-sandbox"\)/);
+  assert.match(appSource, /Deployment destination/);
+  assert.match(appSource, /Production deployment is CLI-only/);
+  assert.match(appSource, /Check Production is read-only/i);
   assert.match(appSource, /hiplingo-prod:\/var\/www\/hiplingo\.com\/published-media/);
 });
 
