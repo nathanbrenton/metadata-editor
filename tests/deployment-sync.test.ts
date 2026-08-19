@@ -3,6 +3,7 @@ import {
   createHash,
 } from "node:crypto";
 import {
+  chmod,
   mkdtemp,
   mkdir,
   readFile,
@@ -52,6 +53,9 @@ async function createPublishedFixture(): Promise<{
   const root = await mkdtemp(
     path.join(os.tmpdir(), "metadata-editor-deploy-sync-"),
   );
+  // mkdtemp creates 0700 by design. This fixture represents the
+  // sanitized public package root, whose deployment contract is 0755.
+  await chmod(root, 0o755);
   const releaseId = "2026-08-11_example-release";
   const releaseRoot = path.join(
     root,

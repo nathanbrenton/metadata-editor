@@ -75,7 +75,11 @@ Do not proceed while verification reports blockers.
 
 ## 2. Check public file permissions locally
 
-Public web assets should already be emitted with safe public permissions, but this audit is useful before a large production deployment.
+The deployment audit now treats the public permission contract as a **blocking preflight**. A production plan is not approvable if a file in `published-media/` is not `0644` or a directory is not `0755`.
+
+The audit is read-only: it reports permission drift but does not silently change the reviewed source package.
+
+The following shell audit is still useful as a quick diagnostic before a large production deployment:
 
 ```bash
 ROOT="$HOME/Desktop/record-label/published-media"

@@ -208,6 +208,76 @@ async function pathExists(
   }
 }
 
+function modeOctal(mode: number): string {
+  return (mode & 0o777).toString(8).padStart(4, "0");
+}
+
+async function auditPublishedMediaPermissions(
+  publishRoot: string,
+): Promise<PublishedMediaDeploymentIssue[]> {
+  const permissionIssues: PublishedMediaDeploymentIssue[] = [];
+
+  async function visit(
+    absolutePath: string,
+    relativePath: string,
+  ): Promise<void> {
+    const stats = await lstat(absolutePath);
+
+    if (stats.isSymbolicLink()) {
+      // Symlinks are rejected by the existing public-tree audit.
+      return;
+    }
+
+    if (stats.isDirectory()) {
+      const mode = stats.mode & 0o777;
+      if (mode !== 0o755) {
+        permissionIssues.push({
+          code: "public-directory-mode-invalid",
+          severity: "blocked",
+          relativePath: relativePath || ".",
+          message:
+            `Public directory mode must be 0755 before deployment planning; found ${modeOctal(stats.mode)}.`,
+        });
+      }
+
+      const entries = await readdir(absolutePath, {
+        withFileTypes: true,
+      });
+      for (const entry of entries) {
+        const childRelativePath = relativePath
+          ? path.posix.join(relativePath, entry.name)
+          : entry.name;
+
+        if (isIgnoredPublicationJunk(childRelativePath)) {
+          continue;
+        }
+
+        await visit(
+          path.join(absolutePath, entry.name),
+          childRelativePath,
+        );
+      }
+      return;
+    }
+
+    if (stats.isFile()) {
+      const mode = stats.mode & 0o777;
+      if (mode !== 0o644) {
+        permissionIssues.push({
+          code: "public-file-mode-invalid",
+          severity: "blocked",
+          relativePath,
+          message:
+            `Public file mode must be 0644 before deployment planning; found ${modeOctal(stats.mode)}.`,
+        });
+      }
+    }
+  }
+
+  await visit(publishRoot, "");
+  return permissionIssues;
+}
+
 async function sha256File(
   filePath: string,
 ): Promise<PublishedMediaDeploymentFile> {
@@ -607,6 +677,17 @@ export async function auditPublishedMediaDeployment(
       `Configured published-media root is not a regular directory: ${canonicalPublishRoot}`,
     );
   }
+
+  /*
+   * Permission drift is a source-package integrity problem. Block it here,
+   * before a deployable plan fingerprint can be approved. Do not mutate the
+   * reviewed public package during planning or deployment.
+   */
+  issues.push(
+    ...(await auditPublishedMediaPermissions(
+      canonicalPublishRoot,
+    )),
+  );
 
   const rootEntries = await readdir(canonicalPublishRoot, {
     withFileTypes: true,
