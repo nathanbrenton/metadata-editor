@@ -165,14 +165,31 @@ Defense in depth implemented in metadata-editor:
     publication boundary:
         copied public assets are chmod 0644
 
-    deployment boundary:
-        rsync enforces
+    local deployment audit:
+        READ-ONLY
+        blocks before an approvable deployment plan when:
+            any public file mode      != 0644
+            any public directory mode != 0755
+
+        blocker codes:
+            public-file-mode-invalid
+            public-directory-mode-invalid
+
+    production incoming boundary:
+        rsync carries only the checksum delta
+        incoming tree is then explicitly normalized and asserted:
             directories 0755
             files       0644
 
-The first production deployment found WFP files at 0600. nginx consequently
-returned HTTP 403 for those assets. This is why both boundaries now normalize
-permissions.
+    post-deploy validation:
+        exact live permission audit must report:
+            non-0644 files       0
+            non-0755 directories 0
+
+The first production deployment found public assets inheriting private 0600
+modes. nginx consequently returned HTTP 403 for those assets. The final model
+therefore validates permissions before planning, normalizes them again in the
+incoming production tree, and independently verifies the promoted live tree.
 
 
 SAFETY CONVENTION
@@ -253,23 +270,39 @@ This is a historical checkpoint, not a permanent expected count.
 
 
 ======================================================================
-3. LOCAL CLIENT — VERIFY PUBLIC WFP MODES
+3. LOCAL CLIENT — VERIFY PUBLIC PERMISSION PREFLIGHT
 ======================================================================
 
 Run on: LOCAL CLIENT
 Mode: READ-ONLY
 Output: SAFE TO PASTE.
 
-    find ../published-media \
-      -type f -name 'waveform-peaks.wfp' \
-      -exec stat -f '%Lp %N' {} \; |
-      head -40
+    cd ~/Desktop/record-label/metadata-editor || return
+
+    npm run verify:published-media
+
+    ROOT="$HOME/Desktop/record-label/published-media"
+
+    echo -n "non-0644 files: "
+    find "$ROOT" -type f ! -perm 0644 | wc -l
+
+    echo -n "non-0755 directories: "
+    find "$ROOT" -type d ! -perm 0755 | wc -l
 
 Expected:
-    every listed WFP begins with 644
+    verify:published-media succeeds
+    non-0644 files:       0
+    non-0755 directories: 0
 
-Do not change the PRIVATE Library WFP writer to 0644. Private 0600 is correct;
-normalization belongs at the public-package boundary.
+The deployment audit is read-only and blocks permission drift before a
+deployable plan is approved:
+
+    public-file-mode-invalid
+    public-directory-mode-invalid
+
+If a legacy public package needs repair, chmod only published-media and rerun
+verification before generating a fresh plan. Do not change the PRIVATE Library
+WFP writer to 0644. Private 0600 remains correct.
 
 
 ======================================================================
@@ -436,6 +469,11 @@ The override is milliseconds and must be at least 60000.
 The initial ~157.8 MiB production upload exceeded the earlier hard-coded
 10-minute limit, which is why the normal default is now 60 minutes.
 
+For subsequent deployments, the incoming tree is first seeded from the current
+live package on the server. rsync therefore sends primarily new/changed content
+instead of retransmitting the complete already-live package over the client
+connection.
+
 
 ======================================================================
 10. WHAT THE ATOMIC DEPLOYMENT PROTECTS
@@ -444,14 +482,22 @@ The initial ~157.8 MiB production upload exceeded the earlier hard-coded
 Operational intent:
 
     1. create incoming sibling
-    2. rsync package into incoming sibling
-    3. checksum/difference verification
-    4. swap staged tree into live published-media
-    5. verify resulting state
-    6. retain/restore the previous tree when required by failure handling
+    2. when live published-media exists, seed incoming from it server-side
+    3. rsync the checksum delta from the local reviewed package
+    4. normalize and assert incoming directories 0755 / files 0644
+    5. checksum/difference verification
+    6. recheck the local reviewed source snapshot
+    7. swap staged tree into live published-media atomically
+    8. verify resulting state
+    9. retain the previous tree as the rollback snapshot
 
-A failure during the initial rsync should not expose a partially copied live
-media tree.
+For a genuinely empty first deployment there is no live tree to seed, so rsync
+must transfer the complete package. For later deployments, unchanged live media
+is copied locally on the VPS first and does not need to cross the client
+network.
+
+A failure during seeding, rsync, normalization, or verification should occur
+before promotion and should not expose a partially copied live media tree.
 
 Observed during commissioning:
     - permission-denied failure left live published-media empty
@@ -498,22 +544,20 @@ Output: SAFE TO PASTE.
       /var/www/hiplingo.com/app \
       /var/www/hiplingo.com/published-media
 
-    echo "----- FILES NOT WORLD-READABLE -----"
-    find /var/www/hiplingo.com/published-media \
-      -type f ! -perm -004 -print
+    ROOT=/var/www/hiplingo.com/published-media
 
-    echo "----- WFP MODES -----"
-    find /var/www/hiplingo.com/published-media \
-      -type f -name 'waveform-peaks.wfp' \
-      -printf '%m %p\n' |
-      head -40
+    echo -n "non-0644 files: "
+    find "$ROOT" -type f ! -perm 0644 | wc -l
+
+    echo -n "non-0755 directories: "
+    find "$ROOT" -type d ! -perm 0755 | wc -l
 
 Healthy result:
     parent is root:hiplingo-media-deploy mode 3775
     app remains root:hiplingo-app-deploy
     published-media remains deploy-hiplingo-media owned
-    unreadable-file search prints nothing
-    every WFP is 644
+    non-0644 files:       0
+    non-0755 directories: 0
 
 
 ======================================================================
@@ -623,26 +667,35 @@ and inspect any incoming staging directory before starting a second write.
 
 
 ======================================================================
-17. TROUBLESHOOTING — WFP RETURNS HTTP 403
+17. TROUBLESHOOTING — PUBLIC MEDIA RETURNS HTTP 403
 ======================================================================
 
 Symptom:
-    waveform-peaks.wfp -> HTTP 403
+    artwork, waveform, HLS, JSON, or another known-present public asset -> 403
 
 Typical nginx evidence:
-    open() ".../waveform-peaks.wfp" failed (13: Permission denied)
+    open() ".../asset" failed (13: Permission denied)
 
-If the PUBLIC WFP is 0600, nginx cannot read it because www-data is purposely
-not in the media deployment group.
+First run the exact production permission audit. Healthy public output requires:
 
-Emergency correction for already-deployed public WFP files:
+    files       0644
+    directories 0755
+
+Emergency correction for an already-deployed public tree:
 
     sudo find /var/www/hiplingo.com/published-media \
-      -type f -name 'waveform-peaks.wfp' \
-      -exec chmod 0644 {} +
+      -type f -exec chmod 0644 {} +
 
-Then verify the source-side publication/deployment permission fix is present.
-A server-only chmod is not sufficient for future syncs.
+    sudo find /var/www/hiplingo.com/published-media \
+      -type d -exec chmod 0755 {} +
+
+Then repair/verify the local sanitized published-media package too:
+
+    cd ~/Desktop/record-label/metadata-editor || return
+    npm run verify:published-media
+
+A server-only chmod is not sufficient if the local reviewed source package is
+also wrong. The local deployment audit now blocks such drift before planning.
 
 
 ======================================================================
@@ -669,16 +722,17 @@ For every future publication change:
     2. Regenerate/update the Web Package.
     3. Confirm only intended releases/tracks/videos are public.
     4. Run npm run audit:public-v1.
-    5. Require Status: ready.
-    6. Generate production plan with --profile production.
-    7. Review add/update/remove/metadata counts and paths.
-    8. Use the exact CURRENT production plan fingerprint.
-    9. Execute the guarded production deployment.
-   10. Regenerate the production plan.
-   11. Require Status: current and 0 changes.
-   12. Run the permission audit.
-   13. Run public HTTP smoke tests.
-   14. Spot-check Hiplingo frontend/browser behavior as appropriate.
+    5. Run npm run verify:published-media.
+    6. Require the package/audit to be ready with no permission blockers.
+    7. Generate production plan with --profile production.
+    8. Review add/update/remove/metadata counts and paths.
+    9. Use the exact CURRENT production plan fingerprint.
+   10. Execute the guarded production deployment.
+   11. Regenerate the production plan.
+   12. Require Status: current and 0 changes.
+   13. Require non-0644 files = 0 and non-0755 directories = 0 on production.
+   14. Run public HTTP smoke tests.
+   15. Spot-check Hiplingo frontend/browser behavior as appropriate.
 
 Never let a media refresh become an implicit frontend deployment.
 
@@ -731,15 +785,54 @@ Validated on 2026-08-18:
       WFP -> 200 application/octet-stream
 
     permission correction discovered during commissioning:
-      public WFP copies initially inherited private 0600 mode.
-      Production files were corrected to 0644 and metadata-editor was updated
-      so both publication and rsync normalize future public modes.
+      some public copies initially inherited private 0600/0700 modes.
+      Production files/directories were corrected to 0644/0755.
+      metadata-editor now enforces the full permission chain:
+        publication copy -> local blocking preflight -> incoming normalization
+        and assertion -> post-deploy live audit.
 
     atomic deployment permission correction:
       /var/www/hiplingo.com changed to
       root:hiplingo-media-deploy mode 3775
       so sibling staging works while sticky-bit protection retains the
       root-owned frontend boundary.
+
+
+Subsequent incremental production checkpoint — 2026-08-18
+---------------------------------------------------------
+A later three-release expansion validated the final incremental deployment
+and permission-hardening path in real production.
+
+    added releases:
+      2016-10-23_indoor-lightning
+      2016-11-10_double-shuffle
+      2021-01-30_feels
+
+    reviewed plan:
+      snapshot:
+        d665d725d28b5753c60376caaffe02d4d2766ee0026f5cbb5fc03aa38686917f
+      changes: 1652
+      add:     1641
+      update:  4
+      remove:  0
+      metadata: 7
+
+    deployment:
+      server-side incoming seed enabled
+      checksum-delta rsync completed over a slow hotspot
+      atomic promotion completed
+      rollback snapshot retained
+
+    post-deploy:
+      Status: current
+      Changes: 0
+      non-0644 files:       0
+      non-0755 directories: 0
+
+    representative live HTTP:
+      Indoor Lightning release/artwork/HLS -> 200 / 200 / 200
+      Double Shuffle release/artwork/HLS   -> 200 / 200 / 200
+      Feels release/artwork/HLS            -> 200 / 200 / 200
 
 
 ======================================================================
@@ -765,8 +858,13 @@ PUBLIC SERVER — READ-ONLY:
       /var/www/hiplingo.com/app \
       /var/www/hiplingo.com/published-media
 
-    find /var/www/hiplingo.com/published-media \
-      -type f ! -perm -004 -print
+    ROOT=/var/www/hiplingo.com/published-media
+
+    echo -n "non-0644 files: "
+    find "$ROOT" -type f ! -perm 0644 | wc -l
+
+    echo -n "non-0755 directories: "
+    find "$ROOT" -type d ! -perm 0755 | wc -l
 
 LOCAL CLIENT — PUBLIC HTTP:
 
@@ -778,7 +876,8 @@ Healthy final state:
     publication audit -> ready
     production plan   -> current / 0 changes
     parent             -> root:hiplingo-media-deploy 3775
-    unreadable files   -> none
+    non-0644 files     -> 0
+    non-0755 directories -> 0
     catalog HTTP       -> 200 application/json
 
 

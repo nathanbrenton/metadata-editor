@@ -24,16 +24,17 @@ The current production workflow is intentionally guarded and incremental.
 
 When a deployment begins:
 
-1. Metadata Editor rebuilds the deployment plan and requires the exact reviewed plan fingerprint.
-2. The currently live production media tree is copied **server-side** to a temporary incoming sibling directory.
-3. `rsync` compares the local public package against that seeded incoming tree using checksums.
-4. Only the actual delta needs to cross the network.
-5. The incoming tree is normalized to public web permissions:
+1. Metadata Editor runs the read-only public-package audit. Files must be `0644` and directories must be `0755`; permission drift blocks planning.
+2. Metadata Editor rebuilds the deployment plan and requires the exact reviewed plan fingerprint.
+3. The currently live production media tree is copied **server-side** to a temporary incoming sibling directory when a live target already exists.
+4. `rsync` compares the local public package against that seeded incoming tree using checksums.
+5. Only the actual delta needs to cross the network.
+6. The incoming tree is independently normalized and asserted to public web permissions:
    - directories: `0755`
    - files: `0644`
-6. The incoming tree is checksum-verified against the reviewed local package.
-7. Only after verification is the incoming tree atomically promoted to the live destination.
-8. The previous live tree is retained as the rollback snapshot.
+7. The incoming tree is checksum-verified against the reviewed local package.
+8. Only after verification is the incoming tree atomically promoted to the live destination.
+9. The previous live tree is retained as the rollback snapshot.
 
 This means an interrupted or timed-out transfer should fail before promotion rather than partially replacing the live site.
 
@@ -75,9 +76,14 @@ Do not proceed while verification reports blockers.
 
 ## 2. Check public file permissions locally
 
-The deployment audit now treats the public permission contract as a **blocking preflight**. A production plan is not approvable if a file in `published-media/` is not `0644` or a directory is not `0755`.
+The deployment audit treats the public permission contract as a **blocking preflight**. A production plan is not approvable if a file in `published-media/` is not `0644` or a directory is not `0755`.
 
-The audit is read-only: it reports permission drift but does not silently change the reviewed source package.
+The blocking issue codes are:
+
+- `public-file-mode-invalid`
+- `public-directory-mode-invalid`
+
+`verify:published-media` and deployment planning use this audit. The audit is read-only: it reports permission drift but does not silently change the reviewed source package. Manual `chmod` is a repair action for legacy/drifted public output, not a routine deployment prerequisite.
 
 The following shell audit is still useful as a quick diagnostic before a large production deployment:
 
@@ -364,6 +370,17 @@ The local public package or target changed after the plan was reviewed.
 
 Generate a fresh plan, review it, and use its new fingerprint.
 
+### `public-file-mode-invalid` / `public-directory-mode-invalid`
+
+The local sanitized package violates the public permission contract.
+
+Expected:
+
+- files `0644`
+- directories `0755`
+
+Repair only `published-media/`, rerun `npm run verify:published-media`, and generate a fresh production plan. Never apply public permissions to the private `media-library/`.
+
 ### `Incoming deployment failed checksum verification`
 
 The incoming tree does not exactly match the reviewed local package after synchronization.
@@ -381,7 +398,7 @@ Do not promote a mismatched incoming tree.
 
 The transfer exceeded `PUBLISHED_MEDIA_RSYNC_TIMEOUT_MS`.
 
-Because production is seeded server-side and promoted only after verification, retry with a larger timeout after generating/reviewing a fresh plan if needed.
+Because production is seeded server-side and promoted only after verification, existing live media does not need to be uploaded again on a normal incremental attempt. Retry with a larger timeout after generating/reviewing a fresh plan if needed.
 
 ### Media URL returns HTTP `403`
 
