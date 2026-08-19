@@ -3,6 +3,7 @@ import {
   createHash,
 } from "node:crypto";
 import {
+  chmod,
   mkdtemp,
   mkdir,
   readFile,
@@ -244,6 +245,9 @@ test("publishes and atomically refreshes the complete Artist snapshot without st
       "metadata-artist-publication-public-",
     ),
   );
+  // mkdtemp creates 0700 by design. publishRoot models the sanitized
+  // public package boundary, whose deployment contract is 0755.
+  await chmod(publishRoot, 0o755);
 
   t.after(async () => {
     await rm(mediaRoot, {
