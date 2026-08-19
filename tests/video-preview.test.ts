@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  canDirectPreviewVideoExtension,
   getVideoPreviewContentType,
   selectVideoPreviewMaster,
 } from "../server/video-preview.js";
@@ -17,8 +16,6 @@ test("recognizes browser-direct canonical video containers", () => {
   assert.equal(getVideoPreviewContentType(".mov"), "video/quicktime");
   assert.equal(getVideoPreviewContentType(".webm"), "video/webm");
   assert.equal(getVideoPreviewContentType(".mkv"), undefined);
-  assert.equal(canDirectPreviewVideoExtension(".mp4"), true);
-  assert.equal(canDirectPreviewVideoExtension(".mxf"), false);
   assert.equal(canPreviewLibraryVideoExtension(".webm"), true);
   assert.equal(canPreviewLibraryVideoExtension("mkv"), false);
 });

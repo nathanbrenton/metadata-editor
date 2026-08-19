@@ -1,11 +1,6 @@
 import {
   parseMediaWaveformData,
-  type MediaWaveformData,
-  type MediaWaveformPeak,
 } from "./media-waveform.js";
-
-export type LibraryWaveformPeak = MediaWaveformPeak;
-export type LibraryWaveformData = MediaWaveformData;
 
 export function buildLibraryWaveformUrl(
   releaseId: string,

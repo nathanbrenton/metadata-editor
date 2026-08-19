@@ -22,14 +22,6 @@ export function getVideoPreviewContentType(
   );
 }
 
-export function canDirectPreviewVideoExtension(
-  extension: string,
-): boolean {
-  return Boolean(
-    getVideoPreviewContentType(extension),
-  );
-}
-
 export function selectVideoPreviewMaster(
   video: VideoScanResult,
 ): DiscoveredAsset {

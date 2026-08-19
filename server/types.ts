@@ -244,13 +244,6 @@ export type WritingCreditRecordInput =
     sourceFamily: WritingCreditFamily | null;
   };
 
-export type ScalarMetadataSaveRequest = {
-  releaseId: string;
-  relativePath: string;
-  originalSha256: string;
-  changes: MetadataValueChange[];
-};
-
 export type ScalarMetadataSaveReceipt = {
   relativePath: string;
   backupRelativePath: string;
@@ -259,12 +252,6 @@ export type ScalarMetadataSaveReceipt = {
   bytes: number;
   savedAt: string;
 };
-
-export type ScalarMetadataSaveResponse =
-  ScalarMetadataSaveReceipt & {
-    synchronizedTrackFiles?: number;
-    skippedTrackFiles?: number;
-  };
 
 export type ExportContainer =
   | "mp3"

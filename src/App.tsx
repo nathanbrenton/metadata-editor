@@ -116,7 +116,6 @@ import {
 import {
   buildMissingInheritedMetadataRows,
   findMetadataValueAcrossDocuments,
-  isArtistSortNameInheritancePath,
   isBlankMetadataValue,
   resolveInheritedReleaseValue,
 } from "./release-inheritance.js";
@@ -239,7 +238,6 @@ import {
   summarizeMissingMetadataDocuments,
   summarizeReleaseScanReadiness,
   type MetadataReadinessScope,
-  type MetadataReadinessSummary,
   type MissingMetadataDocument,
   type RequiredFieldIssue,
 } from "./metadata-readiness.js";
@@ -25995,92 +25993,6 @@ function formatReleaseDate(
   ).format(date);
 }
 
-function formatReleaseDisplayName(
-  releaseId: string,
-): string {
-  const match = releaseId.match(
-    /^(\d{4})-(\d{2})-(\d{2})_(.+)$/,
-  );
-
-  if (!match) {
-    return releaseId;
-  }
-
-  const [
-    ,
-    year,
-    month,
-    day,
-    slug,
-  ] = match;
-
-  const date = new Date(
-    Date.UTC(
-      Number(year),
-      Number(month) - 1,
-      Number(day),
-    ),
-  );
-
-  /*
-   * Reject invalid calendar dates rather than allowing JavaScript
-   * to roll them into a different month.
-   */
-  if (
-    date.getUTCFullYear() !== Number(year) ||
-    date.getUTCMonth() !==
-      Number(month) - 1 ||
-    date.getUTCDate() !== Number(day)
-  ) {
-    return releaseId;
-  }
-
-  const title = slug
-    .replace(/[_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(
-      /\b\w/g,
-      (character) =>
-        character.toUpperCase(),
-    );
-
-  const formattedDate =
-    new Intl.DateTimeFormat(
-      "en-US",
-      {
-        month: "long",
-        day: "2-digit",
-        year: "numeric",
-        timeZone: "UTC",
-      },
-    )
-      .format(date)
-      .replace(",", "");
-
-  return `${title} (${formattedDate})`;
-}
-
-function formatMetadataDocumentLabel(
-  filename: string,
-): string {
-  const labels: Record<string, string> = {
-    "release.toml": "Release",
-    "release-settings.toml": "Settings",
-    "release-production-notes.toml":
-      "Production Notes",
-    "track.toml": "Track",
-    "track-credits.toml": "Credits",
-    "track-production-notes.toml":
-      "Production Notes",
-  };
-
-  return (
-    labels[filename] ??
-    filename.replace(/\.toml$/i, "")
-  );
-}
-
 function MetadataDocumentSection({
   title,
   documents,
@@ -28349,12 +28261,6 @@ function getTrackContributorRecordIndex(
   return Number.isInteger(parsedIndex)
     ? parsedIndex
     : null;
-}
-
-function getTrackContributorLeaf(
-  path: string,
-): string {
-  return path.split(".").at(-1) ?? path;
 }
 
 function getReleaseContributorRecordIndex(
