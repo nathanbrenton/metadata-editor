@@ -54,11 +54,11 @@ test("Library Tiles exposes a reset-on-refresh tile-size slider only in Tiles vi
 test("Library Tile size slider keeps the square Tiles layout untouched", () => {
   assert.match(
     styleSource,
-    /\/\* Library square Tiles view v4 \*\//,
+    /\/\* Library Tiles view \*\//,
   );
   assert.match(
     styleSource,
-    /\.library-release-list--tiles \.library-release-card\s*\{[\s\S]*aspect-ratio:\s*1\s*\/\s*1\s*!important/,
+    /\.library-release-list--tiles \.library-release-card\s*\{[\s\S]*aspect-ratio:\s*1\s*\/\s*1/,
   );
   assert.match(styleSource, /\.library-tile-size-control\s*\{/);
 });

@@ -417,23 +417,6 @@ code {
   padding: 0;
 }
 
-.release-artwork-tile strong,
-.release-artwork-tile small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.release-artwork-tile strong {
-  font-size: 0.68rem;
-  text-transform: uppercase;
-}
-
-.release-artwork-tile small {
-  color: #aeb7c0;
-  font-size: 0.6rem;
-}
-
 .release-summary {
   display: grid;
   gap: 0.25rem;
@@ -12710,39 +12693,6 @@ input[aria-invalid="true"] {
   padding: 0.75rem;
 }
 
-.library-release-list--tiles {
-  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
-  align-items: start;
-  gap: 0.65rem;
-}
-
-.library-release-list--tiles .library-release-header {
-  align-items: stretch;
-  gap: 0.55rem;
-}
-
-.library-release-list--tiles .release-primary-action {
-  align-items: start;
-  gap: 0.55rem;
-}
-
-.library-release-list--tiles .release-artwork-tile {
-  width: 100%;
-  flex-basis: auto;
-}
-
-.library-release-list--tiles .release-title,
-.library-release-list--tiles .release-artist,
-.library-release-list--tiles .release-subtitle {
-  white-space: normal;
-}
-
-.library-release-list--tiles .library-video-disclosure,
-.library-release-list--tiles .library-release-disclosures,
-.library-release-list--tiles .admin-tools-button {
-  display: none;
-}
-
 .publish-workspace-actions {
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -13910,88 +13860,105 @@ main {
   color: var(--text-muted);
 }
 
-/* Library square Tiles view v4 */
+/* Library Tiles view */
 
 /*
  * Tiles are square release cards. Artwork fills the card and release metadata
  * is overlaid, so artwork-first browsing stays compact instead of turning
  * each release into a portrait card.
  */
+.library-release-list--tiles {
+  align-items: start;
+  gap: 0.65rem;
+}
+
+.library-release-list--tiles .library-video-disclosure,
+.library-release-list--tiles .library-release-disclosures,
+.library-release-list--tiles .admin-tools-button {
+  display: none;
+}
+
 .library-release-list--tiles .library-release-card {
-  position: relative !important;
-  display: block !important;
-  box-sizing: border-box !important;
-  width: 100% !important;
-  height: auto !important;
-  min-width: 0 !important;
-  min-height: 0 !important;
-  aspect-ratio: 1 / 1 !important;
-  overflow: hidden !important;
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
 }
 
 .library-release-list--tiles .library-release-header {
-  position: absolute !important;
-  inset: 0 !important;
-  display: block !important;
-  width: 100% !important;
-  height: 100% !important;
-  padding: 0 !important;
-  overflow: hidden !important;
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
 }
 
 .library-release-list--tiles .release-primary-action {
-  position: absolute !important;
-  inset: 0 !important;
-  display: block !important;
-  width: 100% !important;
-  height: 100% !important;
-  margin: 0 !important;
-  padding: 0 !important;
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .library-release-list--tiles .release-artwork-tile,
 .library-release-list--tiles
   .release-primary-action
   > .release-artwork-tile {
-  position: absolute !important;
-  inset: 0 !important;
-  display: block !important;
-  box-sizing: border-box !important;
-  width: 100% !important;
-  height: 100% !important;
-  min-width: 0 !important;
-  min-height: 0 !important;
-  max-width: none !important;
-  max-height: none !important;
-  aspect-ratio: auto !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  padding: 0 !important;
-  overflow: hidden !important;
+  position: absolute;
+  inset: 0;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: auto;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  overflow: hidden;
 }
 
+
+/*
+ * Keep authored/fallback tile images full-card. The generic brand fallback
+ * rule later in this file intentionally uses a smaller contained logo in
+ * non-Tiles media slots, so these three declarations retain precedence here.
+ */
 .library-release-list--tiles .release-artwork-tile > img {
-  position: absolute !important;
-  inset: 0 !important;
-  display: block !important;
+  position: absolute;
+  inset: 0;
+  display: block;
   width: 100% !important;
   height: 100% !important;
-  min-width: 0 !important;
-  min-height: 0 !important;
-  max-width: none !important;
-  max-height: none !important;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
   object-fit: cover !important;
 }
 
 .library-release-list--tiles .release-summary {
-  position: absolute !important;
+  position: absolute;
   z-index: 2;
   right: 0;
   bottom: 0;
   left: 0;
-  display: grid !important;
-  width: auto !important;
-  gap: 0.12rem !important;
+  display: grid;
+  width: auto;
+  gap: 0.12rem;
   box-sizing: border-box;
   padding: 3rem 0.72rem 0.72rem;
   background:
@@ -14024,23 +13991,7 @@ main {
   white-space: normal;
 }
 
-.library-release-list--tiles .release-status-actions {
-  position: absolute !important;
-  flex-wrap: wrap;
-}
-
-/* No-artwork fallback fills the same square card. */
-.library-release-list--tiles
-  .release-artwork-tile:not(:has(img)) {
-  display: grid !important;
-  padding: 0.72rem !important;
-  place-content: center;
-  background:
-    linear-gradient(145deg, #343c45, #171b20);
-  color: #d8dde2;
-}
-
-/* Library Tiles rich tooltip v1 */
+/* Library Tiles rich tooltip */
 
 /* The helper node must have no effect at all in Rows or Cards. */
 .library-tile-details-tooltip {
@@ -14052,16 +14003,18 @@ main {
  * or recomputed: it is simply hidden until the tile tooltip is active.
  */
 .library-release-list--tiles .release-status-actions {
-  top: auto !important;
-  right: 1.15rem !important;
-  bottom: 1.05rem !important;
-  left: 1.15rem !important;
-  z-index: 7 !important;
-  display: flex !important;
-  width: auto !important;
-  max-width: none !important;
-  justify-content: flex-start !important;
-  gap: 0.28rem !important;
+  position: absolute;
+  top: auto;
+  right: 1.15rem;
+  bottom: 1.05rem;
+  left: 1.15rem;
+  z-index: 7;
+  display: flex;
+  width: auto;
+  max-width: none;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 0.28rem;
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
@@ -14184,7 +14137,7 @@ main {
   font-size: 0.61rem;
 }
 
-/* Library Tiles size slider v1 */
+/* Library Tiles size slider */
 .library-tile-size-control {
   display: grid;
   grid-template-columns: auto minmax(7.5rem, 11rem) 3.45rem;
