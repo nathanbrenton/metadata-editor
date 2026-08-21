@@ -271,7 +271,7 @@ test("descriptor rows show definitions and move taxonomy paths into tooltips", (
   );
   assert.match(
     browserSource,
-    /<small>\{definition\}<\/small>/,
+    /<small\s+title=\{definition\}>\s*\{definition\}\s*<\/small>/,
   );
   /*
    * Taxonomy paths are allowed in title/aria-label expressions elsewhere in
@@ -311,8 +311,8 @@ test("high-value descriptor definitions explain meaning rather than repeating ta
     ["optimistic", "positive expectation"],
     ["otherworldly", "ordinary physical reality"],
     ["paranoid", "unseen threat"],
-    ["sidechain compression", "control signal"],
-    ["diatonic harmony", "prevailing key"],
+    ["sidechain compression", "key signal"],
+    ["diatonic harmony", "prevailing diatonic key"],
     ["Progressive Rock", "thematic development"],
     ["rebellious", "resistance to rules"],
   ] as const;

@@ -362,6 +362,14 @@ export function EditorialDescriptorBrowser({
                 related.map((descriptor) => {
                   const selected =
                     isSelected(descriptor);
+                  const path =
+                    getEditorialDescriptorBrowserPath(
+                      descriptor,
+                    );
+                  const definition =
+                    getEditorialDescriptorBrowserDefinition(
+                      descriptor,
+                    );
 
                   return (
                     <button
@@ -370,22 +378,9 @@ export function EditorialDescriptorBrowser({
                       className={
                         selected ? "selected" : ""
                       }
-                      title={
-                        getEditorialDescriptorBrowserPath(
-                          descriptor,
-                        )
-                      }
                       aria-label={`${
                         selected ? "Remove" : "Add"
-                      } ${descriptor.label}. ${
-                        getEditorialDescriptorBrowserDefinition(
-                          descriptor,
-                        )
-                      }. Taxonomy path: ${
-                        getEditorialDescriptorBrowserPath(
-                          descriptor,
-                        )
-                      }`}
+                      } ${descriptor.label}. ${definition}. Taxonomy path: ${path}`}
                       onClick={() =>
                         toggleDescriptor(descriptor)
                       }
@@ -394,11 +389,18 @@ export function EditorialDescriptorBrowser({
                         {selected ? "✓" : "+"}
                       </span>
                       <span>
-                        <strong>{descriptor.label}</strong>
-                        <small>
-                          {getEditorialDescriptorBrowserDefinition(
-                            descriptor,
-                          )}
+                        <span className="release-descriptor-browser__result-heading">
+                          <strong>{descriptor.label}</strong>
+                          <span
+                            className="release-descriptor-browser__path-help"
+                            aria-hidden="true"
+                            title={path}
+                          >
+                            ?
+                          </span>
+                        </span>
+                        <small title={definition}>
+                          {definition}
                         </small>
                       </span>
                     </button>
@@ -484,7 +486,9 @@ function DescriptorResults({
                         ?
                       </span>
                     </span>
-                    <small>{definition}</small>
+                    <small title={definition}>
+                      {definition}
+                    </small>
                   </span>
                   {descriptor.level === "advanced" && (
                     <em>Advanced</em>
