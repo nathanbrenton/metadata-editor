@@ -69,13 +69,24 @@ test("Publish labels the release table concisely", () => {
   assert.doesNotMatch(appSource, /<h3>Release readiness overview<\/h3>/);
 });
 
-test("footer stays in normal page flow", () => {
-  const refinementStart = styles.indexOf(
-    "/* Workspace layout refinement: integrated header, staging rows, library controls, flow footer */",
+test("footer stays in one normal-flow shell definition", () => {
+  const footerStart = styles.indexOf(
+    "/* Footer stays in normal document flow and settles at the shell bottom. */",
   );
-  assert.notEqual(refinementStart, -1);
-  const refinement = styles.slice(refinementStart);
+  const footerEnd = styles.indexOf(".app-footer p", footerStart);
 
-  assert.match(refinement, /\.app-footer\s*\{[\s\S]*?position:\s*static/);
+  assert.notEqual(footerStart, -1);
+  assert.ok(footerEnd > footerStart);
+
+  const footerStyles = styles.slice(footerStart, footerEnd);
+
+  assert.match(footerStyles, /position:\s*static/);
+  assert.match(footerStyles, /margin-top:\s*auto/);
+  assert.match(footerStyles, /border-top:\s*1px solid #353b42/);
+  assert.equal(
+    (styles.match(/^\.app-footer\s*\{/gm) ?? []).length,
+    1,
+  );
+  assert.doesNotMatch(styles, /padding:\s*2rem 1rem 5\.25rem/);
   assert.match(appSource, /<footer className="app-footer">/);
 });

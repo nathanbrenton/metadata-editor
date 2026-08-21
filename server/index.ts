@@ -32,6 +32,11 @@ import {
 } from "../shared/production-context.js";
 
 import {
+  assertReleaseEditorialStorageValue,
+  isReleaseEditorialStoragePath,
+} from "../shared/editorial-profile.js";
+
+import {
   buildAudioPreviewTranscodeArgs,
   getAudioPreviewContentType,
   getAudioPreviewDeliveryMode,
@@ -287,6 +292,14 @@ function assertMetadataFieldMayBeCreated(
   metadataPath: string,
 ): void {
   const filename = path.basename(relativePath);
+
+  if (
+    filename === "release.toml" &&
+    isReleaseEditorialStoragePath(metadataPath)
+  ) {
+    return;
+  }
+
   const productionField =
     findProductionContextField(metadataPath);
 
@@ -313,6 +326,14 @@ function assertMetadataFieldMayBeCreated(
 }
 
 function assertCanonicalMetadataValue(pathValue: string, value: unknown): void {
+  if (isReleaseEditorialStoragePath(pathValue)) {
+    assertReleaseEditorialStorageValue(
+      pathValue,
+      value,
+    );
+    return;
+  }
+
   if (pathValue === "track.audio.tuning_hz" && (typeof value !== "number" || !isValidTuningReference(value))) {
     throw new Error("track.audio.tuning_hz must be a number from 100 through 999.");
   }

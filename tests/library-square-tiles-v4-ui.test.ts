@@ -27,7 +27,7 @@ test("Library Tiles renders each release as a square artwork-first card", () => 
 test("Library Tiles keeps one consolidated component block with minimal important overrides", () => {
   const start = styles.indexOf("/* Library Tiles view */");
   const end = styles.indexOf(
-    "/* Publish operations & recovery v2 */",
+    "/* Publish operations & recovery */",
     start,
   );
 

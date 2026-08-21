@@ -169,6 +169,15 @@ import {
 } from "../shared/artist-sort-name.js";
 
 import {
+  buildReleaseEditorialStorageSnapshot,
+  isReleaseEditorialStoragePath,
+  readEditorialObjectPath,
+  releaseEditorialSnapshotEntries,
+  releaseEditorialSnapshotValue,
+  type ReleaseEditorialStorageSnapshot,
+} from "../shared/editorial-profile.js";
+
+import {
   creditNamePathForSortNamePath,
   creditSortNamePathForNamePath,
   generateCreditSortName,
@@ -391,6 +400,17 @@ const StagingLibraryBuildWorkspace = lazy(async () => {
 
   return {
     default: module.StagingLibraryBuildWorkspace,
+  };
+});
+
+
+const LazyReleaseAboutGenerator = lazy(async () => {
+  const module = await import(
+    "./ReleaseAboutGenerator.js"
+  );
+
+  return {
+    default: module.ReleaseAboutGenerator,
   };
 });
 
@@ -13240,8 +13260,6 @@ function LibraryArtistRoster({
                 </div>
                 <div className="library-artist-card-copy">
                   <strong>{artist.displayName}</strong>
-                  <code>{artist.id}</code>
-                  <small>{artist.slug}</small>
                   <span>Associated releases: {associatedReleaseCount}</span>
                 </div>
               </button>
@@ -16545,6 +16563,34 @@ function readDocumentDraftString(
     : "";
 }
 
+function readReleaseEditorialSnapshot(
+  document: ParsedMetadataDocument,
+  draft: MetadataDraft,
+): ReleaseEditorialStorageSnapshot {
+  return buildReleaseEditorialStorageSnapshot(
+    (metadataPath) => {
+      const draftKey = buildDocumentDraftKey(
+        document,
+        metadataPath,
+      );
+
+      if (
+        Object.prototype.hasOwnProperty.call(
+          draft,
+          draftKey,
+        )
+      ) {
+        return draft[draftKey];
+      }
+
+      return readEditorialObjectPath(
+        document.parsed,
+        metadataPath,
+      );
+    },
+  );
+}
+
 function getDocumentDraftChanges(
   document: ParsedMetadataDocument,
   draft: MetadataDraft,
@@ -16595,10 +16641,24 @@ function getDocumentSaveChanges(
           existing,
           authoredChanges,
         )
-      : {
-          changes: authoredChanges,
-          createChanges: [],
-        };
+      : document.scope === "release" &&
+          document.filename === "release.toml"
+        ? {
+            changes: authoredChanges.filter(
+              (change) =>
+                !isReleaseEditorialStoragePath(change.path) ||
+                existing.has(change.path),
+            ),
+            createChanges: authoredChanges.filter(
+              (change) =>
+                isReleaseEditorialStoragePath(change.path) &&
+                !existing.has(change.path),
+            ),
+          }
+        : {
+            changes: authoredChanges,
+            createChanges: [],
+          };
   const releaseArtistDocument =
     releaseDocuments.find(
       (candidate) =>
@@ -27576,9 +27636,73 @@ function MetadataValueCell({
       currentValue.trim()
         ? currentValue.trim().split(/\s+/).length
         : 0;
+    const isReleaseDescription =
+      document.scope === "release" &&
+      row.path === "release.description";
 
     return (
-      <label className="metadata-editor-field metadata-multiline-field">
+      <div className="metadata-editor-field metadata-multiline-field">
+        {isReleaseDescription && (
+          <Suspense
+            fallback={
+              <span className="metadata-multiline-help">
+                Loading Release About Generator…
+              </span>
+            }
+          >
+            <LazyReleaseAboutGenerator
+              artistName={readDocumentDraftString(
+                document,
+                "release.primary_artist.name",
+                draft,
+              )}
+              releaseTitle={readDocumentDraftString(
+                document,
+                "release.title",
+                draft,
+              )}
+              currentDescription={currentValue}
+              profileStorageKey={document.relativePath}
+              editorialSnapshot={readReleaseEditorialSnapshot(
+                document,
+                draft,
+              )}
+              onEditorialSnapshotChange={(nextSnapshot) => {
+                const originalSnapshot =
+                  readReleaseEditorialSnapshot(
+                    document,
+                    {},
+                  );
+
+                for (
+                  const entry of
+                    releaseEditorialSnapshotEntries(
+                      nextSnapshot,
+                    )
+                ) {
+                  onDraftValueChange(
+                    document,
+                    entry.path,
+                    releaseEditorialSnapshotValue(
+                      originalSnapshot,
+                      entry.path,
+                    ),
+                    entry.value,
+                  );
+                }
+              }}
+              onUse={(generatedDescription) =>
+                onDraftValueChange(
+                  document,
+                  row.path,
+                  originalValue,
+                  generatedDescription,
+                )
+              }
+            />
+          </Suspense>
+        )}
+
         <textarea
           rows={multilineEditor.rows ?? 6}
           maxLength={multilineEditor.maxLength}
@@ -27606,7 +27730,7 @@ function MetadataValueCell({
             Modified
           </span>
         )}
-      </label>
+      </div>
     );
   }
 
@@ -31329,7 +31453,12 @@ function MetadataDocumentTable({
         };
       },
     ),
-  ];
+  ].filter(
+    ({ row }) =>
+      !isReleaseEditorialStoragePath(
+        row.path,
+      ),
+  );
 
   const groupedRows =
     activeMetadataTab === "settings"
@@ -32580,6 +32709,11 @@ function MetadataDocumentTable({
         "metadata-table-row",
         /\[\d+\]/.test(row.path)
           ? "indexed-metadata-row"
+          : "",
+        editMode &&
+        document.scope === "release" &&
+        row.path === "release.description"
+          ? "metadata-table-row--release-description-editor"
           : "",
       ]
         .filter(Boolean)
