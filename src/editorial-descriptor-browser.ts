@@ -1,4 +1,8 @@
 import {
+  getSharedEditorialDescriptorDefinition,
+} from "./editorial-descriptor-knowledge.js";
+
+import {
   getRelatedReleaseDescriptors,
   releaseDescriptorCategoryDefinitions,
   releaseDescriptorOntology,
@@ -424,6 +428,15 @@ function lowerFirst(value: string): string {
 export function getEditorialDescriptorBrowserDefinition(
   descriptor: ReleaseDescriptor,
 ): string {
+  const sharedDefinition =
+    getSharedEditorialDescriptorDefinition(
+      descriptor,
+    );
+
+  if (sharedDefinition) {
+    return sharedDefinition;
+  }
+
   const override =
     descriptorDefinitionOverrides[
       descriptorDefinitionKey(descriptor)
@@ -433,84 +446,62 @@ export function getEditorialDescriptorBrowserDefinition(
     return override;
   }
 
-  /*
-   * A style can appear in the ontology both as a Genre and as an Influence.
-   * Reuse the curated Genre definition for the Influence instance so the
-   * browser still explains what the style means, then add influence-specific
-   * guidance. This avoids generic copy such as "a reference point drawn from
-   * progressive rock" when a richer style definition already exists.
-   */
-  if (descriptor.category === "influence") {
-    const styleDefinition =
-      descriptorDefinitionOverrides[
-        `genre:${descriptor.label.toLocaleLowerCase()}`
-      ];
-
-    if (styleDefinition) {
-      return (
-        `${styleDefinition} ` +
-        "As an influence, select it when this style materially shapes " +
-        "the release rather than appearing only incidentally."
-      );
-    }
-  }
-
   const label = descriptor.label;
   const lowerLabel = lowerFirst(label);
 
   switch (descriptor.category) {
     case "genre":
-      return `A musical style or classification identified as ${label}; use it when this genre meaningfully describes the release rather than merely appearing as a minor influence.`;
+      return `${label} is a genre or subgenre within ${descriptor.family}, classified under ${descriptor.subfamily}.`;
     case "influence":
-      return `A reference point drawn from ${lowerLabel}; use it when that tradition, aesthetic, or technique noticeably shapes the writing, arrangement, performance, or production.`;
+      return `A stylistic or creative reference point drawn from ${lowerLabel}.`;
     case "direction":
-      return `An artistic orientation described as ${lowerLabel}; use it when this phrase captures where the project is moving or how this release differs from earlier work.`;
+      return `An artistic orientation toward ${lowerLabel}, describing how the project is moving or changing.`;
     case "element":
-      return `A recurring musical or sonic feature built around ${lowerLabel}; use it when the element is important enough to help characterize the arrangement.`;
+      return `A recurring musical or sonic feature built around ${lowerLabel}.`;
     case "instrumentation":
-      return `An instrument, voice, synthesis tool, or sound source identified as ${lowerLabel}; use it when it is audibly important to the arrangement.`;
+      return `An instrument, voice, synthesis tool, or sound source identified as ${lowerLabel}.`;
     case "production":
-      return `A recording, mixing, editing, effects, or sound-design approach involving ${lowerLabel}; use it when the technique materially shapes the finished sound.`;
+      return `A recording, mixing, editing, effects, or sound-design approach involving ${lowerLabel}.`;
     case "theory": {
       if (descriptor.family === "Tonality & scales") {
-        return `A tonal or scalar framework based on ${lowerLabel}; use it when this pitch collection or tonal organization is musically significant.`;
+        return `A tonal or scalar framework based on ${lowerLabel}.`;
       }
       if (descriptor.family === "Harmony") {
-        return `A harmonic language or chordal device based on ${lowerLabel}; use it when this relationship among pitches or chords is a noticeable part of the writing.`;
+        return `A harmonic language or chordal device based on ${lowerLabel}.`;
       }
       if (descriptor.family === "Voice leading") {
-        return `A voice-leading or contrapuntal concept involving ${lowerLabel}; use it when the motion and interaction of individual lines are structurally important.`;
+        return `A voice-leading or contrapuntal concept involving ${lowerLabel}.`;
       }
       if (descriptor.family === "Melody") {
-        return `A melodic-writing or development technique involving ${lowerLabel}; use it when this device noticeably shapes the tune or recurring musical ideas.`;
+        return `A melodic-writing or development technique involving ${lowerLabel}.`;
       }
-      return `A formal or compositional concept involving ${lowerLabel}; use it when this structural device meaningfully organizes the music.`;
+      return `A formal or compositional concept involving ${lowerLabel}.`;
     }
     case "rhythm":
-      return `A rhythmic or metric characteristic described as ${lowerLabel}; use it when this pulse, groove, subdivision, or timing relationship is a recognizable part of the music.`;
+      return `A rhythmic or metric characteristic described as ${lowerLabel}.`;
     case "mood":
-      return `A ${descriptor.family.toLocaleLowerCase()} mood that makes the music feel ${lowerLabel}; use it when this emotional impression is clearly perceived by the listener.`;
+      return `An emotional quality described as ${lowerLabel}.`;
     case "attitude":
-      return `An expressive posture that feels ${lowerLabel}; use it when the performance communicates this stance or social attitude, independently of the song's underlying emotion.`;
+      return `An expressive posture or social stance described as ${lowerLabel}.`;
     case "energy":
-      return `Describes the music's perceived motion or intensity as ${lowerLabel}; use it for how strongly the arrangement seems to move, build, hold back, or release.`;
+      return `A description of perceived motion or intensity: ${lowerLabel}.`;
     case "sonic-quality":
-      return `Describes the audible texture, space, density, finish, or tonal character as ${lowerLabel}; use it for how the sound itself is perceived rather than what the song is about.`;
+      return `An audible texture, space, density, finish, or tonal quality described as ${lowerLabel}.`;
     case "theme":
-      return `A lyrical, narrative, or conceptual subject centered on ${lowerLabel}; use it when this idea recurs or materially shapes the meaning of the release.`;
+      return `A lyrical, narrative, conceptual, or imagistic subject concerning ${lowerLabel}.`;
     case "songwriting":
-      return `A songwriting or compositional approach involving ${lowerLabel}; use it when this technique noticeably shapes form, development, lyrics, or ensemble writing.`;
+      return `A songwriting or compositional approach involving ${lowerLabel}.`;
     case "identity":
-      return `A high-level statement of musical identity centered on ${lowerLabel}; use it when the phrase captures something durable about what makes the project or release feel like itself.`;
+      return `A high-level statement of musical identity centered on ${lowerLabel}.`;
     case "performance":
-      return `A performance characteristic described as ${lowerLabel}; use it when this quality is audible in delivery, ensemble interaction, spontaneity, or precision.`;
+      return `A performance quality or delivery characteristic described as ${lowerLabel}.`;
     case "context":
-      return `Release context described as ${lowerLabel}; use it to explain the record's place in the artist's development, process, chronology, or archival history.`;
+      return `Release context concerning ${lowerLabel}.`;
     case "place":
-      return `A geographic, scene, studio, or imagined setting described as ${lowerLabel}; use it only when that environment meaningfully shapes the release or its presentation.`;
+      return `A geographic, scene, studio, or imagined setting described as ${lowerLabel}.`;
   }
 
-  return `An editorial descriptor for ${lowerLabel}; use it when this term materially helps characterize the music, context, or presentation.`;
+  return `An editorial descriptor for ${lowerLabel}.`;
 }
 
 export function getEditorialDescriptorBrowserPath(

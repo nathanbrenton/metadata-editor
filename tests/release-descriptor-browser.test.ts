@@ -313,7 +313,7 @@ test("high-value descriptor definitions explain meaning rather than repeating ta
     ["paranoid", "unseen threat"],
     ["sidechain compression", "control signal"],
     ["diatonic harmony", "prevailing key"],
-    ["Progressive Rock", "extended forms"],
+    ["Progressive Rock", "thematic development"],
     ["rebellious", "resistance to rules"],
   ] as const;
 
