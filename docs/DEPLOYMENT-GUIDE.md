@@ -1,96 +1,127 @@
-# Metadata Editor Deployment Guide
+# Metadata Editor — Publication and Deployment Guide
 
-This guide covers deployment of the sanitized Hiplingo public media package produced by `metadata-editor`.
+Updated: 2026-08-24
 
-It is intentionally focused on the `published-media/` deployment workflow. It does **not** deploy the Hiplingo frontend application itself.
+This document is the application-level guide for publishing Hiplingo media
+from `metadata-editor`.
 
-## Deployment boundaries
+For server filesystem commissioning, historical production checkpoints,
+permission incidents, and full operational troubleshooting, also read:
 
-The important paths are:
+`web-prod-01-hiplingo-media-deployment-runbook-20260818.txt`
 
-- Private source/library data: `~/Desktop/record-label/media-library/`
-- Sanitized public package: `~/Desktop/record-label/published-media/`
-- Metadata Editor: `~/Desktop/record-label/metadata-editor/`
-- Production media target: `ssh:hiplingo-prod:/var/www/hiplingo.com/published-media`
-- Public media URL: `https://hiplingo.com/media/`
+## Ownership boundary
 
-`media-library/` is private and must never be deployed or exposed by the public web server.
+Private canonical library:
 
-Only the sanitized `published-media/` tree crosses the public deployment boundary.
+```text
+~/Desktop/record-label/media-library/
+```
 
-## What a production deployment does
+This tree is **PRIVATE — NEVER DEPLOY**.
 
-The current production workflow is intentionally guarded and incremental.
+Metadata editor:
 
-When a deployment begins:
+```text
+~/Desktop/record-label/metadata-editor/
+```
 
-1. Metadata Editor runs the read-only public-package audit. Files must be `0644` and directories must be `0755`; permission drift blocks planning.
-2. Metadata Editor rebuilds the deployment plan and requires the exact reviewed plan fingerprint.
-3. The currently live production media tree is copied **server-side** to a temporary incoming sibling directory when a live target already exists.
-4. `rsync` compares the local public package against that seeded incoming tree using checksums.
-5. Only the actual delta needs to cross the network.
-6. The incoming tree is independently normalized and asserted to public web permissions:
-   - directories: `0755`
-   - files: `0644`
-7. The incoming tree is checksum-verified against the reviewed local package.
-8. Only after verification is the incoming tree atomically promoted to the live destination.
-9. The previous live tree is retained as the rollback snapshot.
-
-This means an interrupted or timed-out transfer should fail before promotion rather than partially replacing the live site.
-
-## 1. Prepare the Web Package
-
-Use Metadata Editor to choose the releases and tracks that should be public.
-
-Run the normal **Rebuild Local Public Package** / update workflow until the Web Package is current.
-
-The resulting public package is:
+Sanitized public package:
 
 ```text
 ~/Desktop/record-label/published-media/
 ```
 
-Before production deployment, verify the package.
+Production public-media tree:
 
-```bash
-# Work from the Metadata Editor repository.
-cd ~/Desktop/record-label/metadata-editor || return
+```text
+/var/www/hiplingo.com/published-media/
+```
 
-# Verify the sanitized public package and deployment manifest.
+Public URL:
+
+```text
+https://hiplingo.com/media/
+```
+
+Hiplingo frontend:
+
+```text
+~/Desktop/record-label/hiplingo.com/
+```
+
+The frontend is a read-only consumer of the publication package. Frontend
+deployment and public-media deployment are independent lifecycles.
+
+## Publication responsibilities
+
+`metadata-editor` owns:
+
+- public release/track selection;
+- per-release video inclusion policy;
+- public artist/release/track metadata;
+- browser-compatible artwork derivatives;
+- HLS/audio derivatives;
+- compact `waveform-peaks.wfp`;
+- sanitized JSON;
+- publication manifests;
+- `published-media/catalog.json`;
+- package auditing;
+- deployment planning;
+- guarded production synchronization.
+
+Hiplingo frontend owns consumption/presentation and must not become a second
+writer of `published-media`.
+
+## Public-package security contract
+
+Private material must never cross into `published-media`.
+
+Public permission contract:
+
+```text
+directories    0755
+files          0644
+```
+
+Private waveform files may legitimately be `0600`; public waveform copies must
+be `0644`.
+
+`www-data` remains read-only and is not made a member of deployment groups.
+
+## Normal publication workflow
+
+From:
+
+```sh
+cd "$HOME/Desktop/record-label/metadata-editor"
+```
+
+1. Make metadata/public-selection changes.
+2. Regenerate/update the Web Package using the editor's normal controls.
+3. Confirm intended release/track/video inclusion.
+4. Run:
+
+```sh
+npm run audit:public-v1
+```
+
+Require:
+
+```text
+Status: ready
+```
+
+5. Verify the sanitized public package:
+
+```sh
 npm run verify:published-media
 ```
 
-If the deployment manifest is stale, refresh it:
+6. Optional direct local mode audit:
 
-```bash
-cd ~/Desktop/record-label/metadata-editor || return
-
-# Rebuild deployment-manifest.json from the current sanitized package.
-npm run manifest:published-media
-
-# Verify again after refreshing the manifest.
-npm run verify:published-media
-```
-
-Do not proceed while verification reports blockers.
-
-## 2. Check public file permissions locally
-
-The deployment audit treats the public permission contract as a **blocking preflight**. A production plan is not approvable if a file in `published-media/` is not `0644` or a directory is not `0755`.
-
-The blocking issue codes are:
-
-- `public-file-mode-invalid`
-- `public-directory-mode-invalid`
-
-`verify:published-media` and deployment planning use this audit. The audit is read-only: it reports permission drift but does not silently change the reviewed source package. Manual `chmod` is a repair action for legacy/drifted public output, not a routine deployment prerequisite.
-
-The following shell audit is still useful as a quick diagnostic before a large production deployment:
-
-```bash
+```sh
 ROOT="$HOME/Desktop/record-label/published-media"
-
-echo "===== LOCAL PUBLIC PERMISSION AUDIT ====="
 
 echo -n "non-0644 files: "
 find "$ROOT" -type f ! -perm 0644 | wc -l
@@ -102,337 +133,280 @@ find "$ROOT" -type d ! -perm 0755 | wc -l
 Expected:
 
 ```text
-non-0644 files: 0
+non-0644 files:       0
 non-0755 directories: 0
 ```
 
-If an older public package contains restrictive modes, normalize **only the sanitized public package**:
+## Production plan
 
-```bash
-ROOT="$HOME/Desktop/record-label/published-media"
+Always specify the production profile:
 
-# published-media is already the explicit public boundary.
-# Files are made web-readable; directories are made traversable.
-find "$ROOT" -type f -exec chmod 0644 {} +
-find "$ROOT" -type d -exec chmod 0755 {} +
+```sh
+npm run plan:published-media-deploy -- --profile production
 ```
 
-This command must never be pointed at `media-library/`.
+Expected target:
 
-## 3. Build and review the production plan
-
-Planning is read-only.
-
-```bash
-cd ~/Desktop/record-label/metadata-editor || return
-
-tmp="$(mktemp)"
-
-npm run plan:published-media-deploy -- --profile production >"$tmp" && \
-echo "===== PRODUCTION DEPLOYMENT PLAN =====" && \
-grep -E \
-  '^(Source:|Profile:|Target:|Status:|Snapshot:|Changes:|Plan fingerprint:)' \
-  "$tmp"
-
-rm -f "$tmp"
+```text
+ssh:hiplingo-prod:/var/www/hiplingo.com/published-media
 ```
 
 Review:
 
-- `Source` must be the expected local `published-media` root.
-- `Profile` must be `Production (production)`.
-- `Target` must be `ssh:hiplingo-prod:/var/www/hiplingo.com/published-media`.
-- `Status` should be `changes` when a deployment is needed.
-- The change count should make sense for the releases being added/updated.
-- Save the exact `Plan fingerprint`.
+- status;
+- source snapshot;
+- add/update/remove/metadata/unknown counts;
+- paths;
+- plan fingerprint.
 
-Do not type shell placeholders such as `<fingerprint>`. Angle brackets are shell syntax.
+Do not deploy an unexplained plan.
 
-### Review changes grouped by release
+## Fingerprint rule
 
-For a large plan, use JSON mode to make sure additions belong to the intended releases:
+The production deployment must use the fingerprint from the exact plan that
+was reviewed.
 
-```bash
-cd ~/Desktop/record-label/metadata-editor || return
+Never:
 
-tmp="$(mktemp)"
+- reuse an old fingerprint after package changes;
+- reuse a local-sandbox fingerprint;
+- guess a fingerprint;
+- deploy after server state changes without regenerating/reviewing the plan.
 
-npm run --silent plan:published-media-deploy -- \
-  --profile production \
-  --json >"$tmp" && \
-python3 - "$tmp" <<'PY'
-import json
-import sys
-from collections import Counter
+## Production write
 
-with open(sys.argv[1]) as f:
-    plan = json.load(f)
+Only after the plan is approved:
 
-print("Status:", plan["status"])
-print("Snapshot:", plan["sourceContentFingerprint"])
-print("Plan fingerprint:", plan["planFingerprint"])
-print()
-
-by_release = Counter()
-outside = []
-
-for change in plan.get("changes", []):
-    p = change["path"]
-    action = change["action"]
-
-    if p.startswith("releases/"):
-        parts = p.split("/")
-        release_id = parts[1] if len(parts) > 1 else "<unknown>"
-        by_release[(action, release_id)] += 1
-    else:
-        outside.append((action, p))
-
-print("----- CHANGES BY RELEASE -----")
-for (action, release_id), count in sorted(by_release.items()):
-    print(f"{action.upper():8} {count:5}  {release_id}")
-
-print()
-print("----- CHANGES OUTSIDE RELEASES -----")
-for action, path in outside:
-    print(f"{action.upper():8} {path}")
-PY
-
-rm -f "$tmp"
-```
-
-Catalog, artist snapshot, and deployment-manifest updates are normal when publication membership changes.
-
-## 4. Deploy the reviewed plan
-
-Use the **real fingerprint returned by the plan you reviewed**.
-
-A convenient shell-safe pattern is:
-
-```bash
-cd ~/Desktop/record-label/metadata-editor || return
-
-# Paste the exact reviewed fingerprint between the single quotes.
-PLAN_FINGERPRINT='paste-real-fingerprint-here'
-
+```sh
 npm run deploy:published-media -- \
   --profile production \
-  --plan-fingerprint "$PLAN_FINGERPRINT" \
+  --plan-fingerprint <CURRENT_PRODUCTION_PLAN_FINGERPRINT> \
   --confirm DEPLOY_PUBLISHED_MEDIA
 ```
 
-The confirmation token is deliberately explicit. The command will rebuild the plan before writing and refuse deployment if the fingerprint no longer matches.
+## Transfer timeout
 
-If the package changed after planning, do not force the old fingerprint. Generate and review a fresh plan.
+Normal long-transfer timeout:
 
-## Slow or unreliable connections
+```text
+60 minutes
+```
 
-Production deployment now seeds the incoming tree from the currently live production tree **on the server** before rsync begins.
+Optional override:
 
-That means existing live media does not need to be uploaded again. The local connection primarily carries newly added or changed files.
-
-The default rsync timeout is one hour. For a slow hotspot, a longer timeout can be supplied without changing the deployment contents:
-
-```bash
-cd ~/Desktop/record-label/metadata-editor || return
-
-PLAN_FINGERPRINT='paste-real-fingerprint-here'
-
-# Four-hour rsync timeout.
-PUBLISHED_MEDIA_RSYNC_TIMEOUT_MS=14400000 \
+```sh
+PUBLISHED_MEDIA_RSYNC_TIMEOUT_MS=7200000 \
 npm run deploy:published-media -- \
   --profile production \
-  --plan-fingerprint "$PLAN_FINGERPRINT" \
+  --plan-fingerprint <CURRENT_PRODUCTION_PLAN_FINGERPRINT> \
   --confirm DEPLOY_PUBLISHED_MEDIA
 ```
 
-A timeout during the incoming sync happens before atomic promotion. The live production tree should remain unchanged.
+The override is milliseconds and must be at least 60000.
 
-## 5. Require zero-change convergence
+## Atomic production behavior
 
-After a successful deployment, immediately rebuild the production plan.
+Operational intent:
 
-```bash
-cd ~/Desktop/record-label/metadata-editor || return
+1. create a sibling incoming tree;
+2. seed it from current live content where supported;
+3. rsync the package delta;
+4. normalize public modes;
+5. verify checksum/difference state;
+6. recheck the reviewed source snapshot;
+7. atomically promote incoming to live;
+8. verify resulting state;
+9. retain the prior tree as rollback state where implemented.
 
+Do not manually rsync ordinary updates directly into the live
+`published-media` directory.
+
+## Required server boundary
+
+Production parent:
+
+```text
+/var/www/hiplingo.com
+owner: root
+group: hiplingo-media-deploy
+mode: 3775
+```
+
+Frontend:
+
+```text
+/var/www/hiplingo.com/app
+owner: root
+group: hiplingo-app-deploy
+mode: 2775
+```
+
+Live media after normal atomic publication:
+
+```text
+/var/www/hiplingo.com/published-media
+owner: deploy-hiplingo-media
+group: hiplingo-media-deploy
+normal live mode: 0755
+```
+
+The `3775` parent is deliberate:
+
+- SGID preserves deployment group inheritance;
+- group-write permits sibling staging;
+- sticky bit protects root-owned siblings such as `app`.
+
+Do not use `chmod 777`.
+
+## Atomic staging permission probe
+
+```sh
+ssh hiplingo-prod '
+probe="/var/www/hiplingo.com/published-media.metadata-editor-permission-probe.$$"
+mkdir "$probe" &&
+rmdir "$probe" &&
+echo "PASS: atomic deployment staging permission"
+'
+```
+
+## Post-deploy convergence
+
+```sh
 tmp="$(mktemp)"
-
-npm run plan:published-media-deploy -- --profile production >"$tmp" && \
-echo "===== PRODUCTION CONVERGENCE =====" && \
+npm run plan:published-media-deploy -- --profile production >"$tmp" &&
 grep -E \
   '^(Source:|Profile:|Target:|Status:|Snapshot:|Changes:|Plan fingerprint:)' \
   "$tmp"
-
 rm -f "$tmp"
 ```
 
-Expected:
+Healthy:
 
 ```text
 Status: current
 Changes: 0 · add 0 · update 0 · remove 0 · metadata 0 · unknown 0
 ```
 
-Do not consider a deployment complete until the production target converges to zero changes.
+## Production permission audit
 
-## 6. Verify production permissions
+On `web-prod-01`:
 
-The deployment pipeline normalizes and verifies the incoming tree before promotion. This independent check confirms the live target also has the required modes.
+```sh
+stat -c '%A %a %U:%G %n' \
+  /var/www/hiplingo.com \
+  /var/www/hiplingo.com/app \
+  /var/www/hiplingo.com/published-media
 
-```bash
-ssh hiplingo-prod '
-  ROOT=/var/www/hiplingo.com/published-media
+ROOT=/var/www/hiplingo.com/published-media
 
-  echo -n "non-0644 files: "
-  find "$ROOT" -type f ! -perm 0644 | wc -l
+echo -n "non-0644 files: "
+find "$ROOT" -type f ! -perm 0644 | wc -l
 
-  echo -n "non-0755 directories: "
-  find "$ROOT" -type d ! -perm 0755 | wc -l
-'
+echo -n "non-0755 directories: "
+find "$ROOT" -type d ! -perm 0755 | wc -l
 ```
 
-Expected:
+Healthy counts are zero.
+
+## Public HTTP smoke test
+
+Use `/media/`, not `/published-media/`.
+
+Representative checks:
+
+```sh
+curl -fsSI https://hiplingo.com/media/catalog.json |
+  grep -Ei '^(HTTP/|content-type:|content-length:)'
+```
+
+Expected catalog:
 
 ```text
-non-0644 files: 0
-non-0755 directories: 0
+HTTP 200
+application/json
 ```
 
-Incorrect public file permissions can produce HTTP `403` responses even when the catalog path and file itself are correct.
-
-## 7. Verify live HTTP media
-
-For each newly deployed release, verify at least:
-
-- `release.json`
-- release artwork
-- one HLS playlist
-
-Example:
-
-```bash
-RID='YYYY-MM-DD_release-id'
-
-printf "release.json: "
-curl -sS -o /dev/null -w '%{http_code}\n' \
-  "https://hiplingo.com/media/releases/$RID/release.json"
-```
-
-A successful public asset should normally return HTTP `200`.
-
-For a batch of newly published releases, also verify they appear in the live `catalog.json`.
-
-## 8. Browser validation
-
-After the server checks pass, validate the actual public experience:
-
-- release appears in Releases
-- release appears under the correct Artist
-- release artwork loads
-- track-specific artwork loads where authored
-- playback starts
-- waveform loads and scrubs
-- Next/Previous work
-- Shuffle can traverse the expanded public library
-- persistent playback survives navigation between public pages
-
-Server checks prove deployment integrity; browser validation proves the public application is consuming the new package correctly.
-
-## Rollback
-
-A completed deployment records the previous production snapshot and keeps a backup for rollback.
-
-The deployment command prints the rollback command when a previous snapshot exists.
-
-Standard rollback:
-
-```bash
-cd ~/Desktop/record-label/metadata-editor || return
-
-npm run rollback:published-media -- \
-  --profile production \
-  --confirm ROLLBACK_PUBLISHED_MEDIA
-```
-
-After rollback, verify:
-
-1. the restored deployment manifest fingerprint,
-2. production convergence against the intended local package,
-3. public HTTP responses,
-4. browser behavior.
-
-Rollback is for the published-media deployment only. The Hiplingo frontend application has a separate deployment lifecycle.
-
-## Common failure modes
-
-### `Deployment plan fingerprint changed`
-
-The local public package or target changed after the plan was reviewed.
-
-Generate a fresh plan, review it, and use its new fingerprint.
-
-### `public-file-mode-invalid` / `public-directory-mode-invalid`
-
-The local sanitized package violates the public permission contract.
-
-Expected:
-
-- files `0644`
-- directories `0755`
-
-Repair only `published-media/`, rerun `npm run verify:published-media`, and generate a fresh production plan. Never apply public permissions to the private `media-library/`.
-
-### `Incoming deployment failed checksum verification`
-
-The incoming tree does not exactly match the reviewed local package after synchronization.
-
-Check:
-
-- local `published-media` file and directory modes,
-- whether the local package changed during deployment,
-- rsync/network errors,
-- whether the deployment manifest is current.
-
-Do not promote a mismatched incoming tree.
-
-### `rsync timed out`
-
-The transfer exceeded `PUBLISHED_MEDIA_RSYNC_TIMEOUT_MS`.
-
-Because production is seeded server-side and promoted only after verification, existing live media does not need to be uploaded again on a normal incremental attempt. Retry with a larger timeout after generating/reviewing a fresh plan if needed.
-
-### Media URL returns HTTP `403`
-
-First check file and directory permissions on production.
-
-Expected:
-
-- files `0644`
-- directories `0755`
-
-A `403` with the file present is commonly a permissions/traversal problem.
-
-### Media URL returns HTTP `404`
-
-Check:
-
-- the path advertised by `catalog.json`, `release.json`, or `track.json`,
-- whether the corresponding file exists under production `published-media`,
-- whether the deployment converged to zero changes.
-
-### Production plan says `current`
-
-No write is required.
-
-A deployment command intentionally refuses to deploy when the target is already current.
-
-## Frontend deployment is separate
-
-`deploy:published-media` only updates:
+Representative derivative content types:
 
 ```text
-/var/www/hiplingo.com/published-media
+HLS     application/vnd.apple.mpegurl
+WFP     application/octet-stream
 ```
 
-It does not deploy the Hiplingo React/Vite application.
+## Failure modes
 
-The media deployment SSH identity is intentionally restricted to media deployment. Keep frontend application deployment and media deployment as separate operational boundaries.
+### Sibling staging permission denied
+
+If the incoming sibling cannot be created, inspect the parent.
+
+Correct:
+
+```text
+/var/www/hiplingo.com
+root:hiplingo-media-deploy
+3775
+```
+
+### Public asset returns 403
+
+Check the public mode contract.
+
+Emergency production repair, followed by source/package repair:
+
+```sh
+sudo find /var/www/hiplingo.com/published-media \
+  -type f -exec chmod 0644 {} +
+
+sudo find /var/www/hiplingo.com/published-media \
+  -type d -exec chmod 0755 {} +
+```
+
+Do not treat server-side chmod as the permanent fix if the local public
+package is wrong.
+
+### Media URL returns small HTML
+
+The request probably used the internal filesystem name:
+
+```text
+/published-media/...
+```
+
+Correct public contract:
+
+```text
+/media/...
+```
+
+The wrong path can fall through to the SPA and return `index.html`.
+
+### Transfer timeout
+
+Before retrying a write:
+
+```sh
+ps -ef | grep "[r]sync" || true
+```
+
+Inspect/understand any incoming staging tree before starting a second write.
+
+## Frontend/media decoupling
+
+Frontend:
+
+```text
+/var/www/hiplingo.com/app/releases/<timestamp>/
+/var/www/hiplingo.com/app/current
+```
+
+Media:
+
+```text
+/var/www/hiplingo.com/published-media/
+```
+
+Frontend rollback changes only `app/current`.
+
+Media publication changes only `published-media`.
+
+Never let one lifecycle implicitly alter the other.
