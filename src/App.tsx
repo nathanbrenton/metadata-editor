@@ -49,6 +49,7 @@ import {
   type WaveformColorMode,
 } from "./media-waveform.js";
 import { buildLibraryWaveformUrl } from "./library-waveform.js";
+import { HiplingoPreviewPanel } from "./HiplingoPreviewPanel.js";
 
 import {
   buildIngestAudioPreviewUrl,
@@ -12169,6 +12170,9 @@ function LibraryReleaseOverview({
   const [selectedTrackKey, setSelectedTrackKey] =
     useState<string | null>(playback.currentTrack?.key ?? null);
 
+  const [hiplingoPreviewOpen, setHiplingoPreviewOpen] =
+    useState(false);
+
   useEffect(() => {
     setSelectedTrackKey(playback.currentTrack?.key ?? null);
   }, [playback.currentTrack?.key, release?.id]);
@@ -12312,13 +12316,28 @@ function LibraryReleaseOverview({
               </p>
             </div>
 
-            <button
-              type="button"
-              className="primary-button library-release-overview-edit"
-              onClick={onEditMetadata}
-            >
-              Edit metadata
-            </button>
+            <div className="library-release-overview-actions">
+              <button
+                type="button"
+                className="library-release-overview-preview"
+                aria-expanded={hiplingoPreviewOpen}
+                onClick={() =>
+                  setHiplingoPreviewOpen((open) => !open)
+                }
+              >
+                {hiplingoPreviewOpen
+                  ? "Hide Hiplingo preview"
+                  : "Preview in Hiplingo"}
+              </button>
+
+              <button
+                type="button"
+                className="primary-button library-release-overview-edit"
+                onClick={onEditMetadata}
+              >
+                Edit metadata
+              </button>
+            </div>
           </div>
 
           <div className="library-release-overview-facts">
@@ -12348,6 +12367,14 @@ function LibraryReleaseOverview({
           )}
         </div>
       </section>
+
+      {hiplingoPreviewOpen && (
+        <HiplingoPreviewPanel
+          releaseId={release.id}
+          releaseTitle={releaseDisplayTitle}
+          selectedTrackKey={selectedTrackKey}
+        />
+      )}
 
       <section className="library-release-overview-tracks">
         <header>

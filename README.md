@@ -281,6 +281,17 @@ Open:
 http://127.0.0.1:5174/
 ```
 
+### Optional Terminal 3: embedded Hiplingo preview
+
+Library release overviews can open the real Hiplingo frontend inside Metadata Editor. Start the sibling public site in a third terminal:
+
+```bash
+cd ~/Desktop/record-label/hiplingo.com;
+npm run dev;
+```
+
+By default the preview iframe uses `http://127.0.0.1:5173`. Set `VITE_HIPLINGO_PREVIEW_ORIGIN` before starting Metadata Editor if the local Hiplingo frontend uses a different origin. The preview intentionally reads Hiplingo's sanitized `published-media` / Web Package source; it does not expose the private canonical Library.
+
 Health check:
 
 ```bash
@@ -961,3 +972,31 @@ or developer metadata is not exposed by this preview.
 Production publication and media deployment are documented in [`docs/DEPLOYMENT-GUIDE.md`](docs/DEPLOYMENT-GUIDE.md).
 
 The deployment workflow uses a reviewed plan fingerprint, a read-only source permission preflight that blocks non-`0755` directories or non-`0644` files, server-side seeding for incremental transfers, checksum-delta rsync, independent incoming permission normalization/assertion, checksum verification, atomic promotion, and a retained rollback snapshot. The Hiplingo frontend application is deployed separately from `published-media`.
+
+
+## Embedded Hiplingo source comparison
+
+Library release overview can embed the real Hiplingo application as a preview
+panel. The preview intentionally preserves Hiplingo as the only public renderer
+instead of duplicating release/listen UI inside metadata-editor.
+
+The panel currently exposes three lifecycle source labels:
+
+- **Working** — reserved for the next local preview-bridge phase. It will render
+  saved canonical Library state before Web Package generation. The control is
+  visible but disabled until that bridge exists.
+- **Web Package** — the current sanitized local `published-media` package through
+  the local Hiplingo dev server (default `http://127.0.0.1:5173`).
+- **Published** — the read-only production Hiplingo site (default
+  `https://hiplingo.com`).
+
+Single view can switch between Web Package and Published. **Split compare** locks
+two synchronized panes to those two sources so Release, Releases, or Listen can
+be compared at the same route and Desktop/Mobile framing without changing the
+underlying publication lifecycle. `VITE_HIPLINGO_PREVIEW_ORIGIN` and
+`VITE_HIPLINGO_PUBLIC_ORIGIN` may override the two origins.
+
+This comparison does not read `media-library` from Hiplingo and does not deploy,
+publish, or mutate production. If production later adopts restrictive frame
+headers, the Published pane may need an explicit same-renderer remote-data mode;
+that is separate from the private Working preview bridge.

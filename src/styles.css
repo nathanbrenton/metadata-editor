@@ -18302,3 +18302,354 @@ main:has(.persistent-library-player) {
     grid-template-columns: 1fr;
   }
 }
+
+/* Hiplingo public renderer preview: Grafana-style inspectable panel embedded in Library release context. */
+.library-release-overview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.library-release-overview-preview {
+  border-color: #52606d;
+  background: #20272d;
+  color: #dce4ea;
+}
+
+.library-release-overview-preview[aria-expanded="true"] {
+  border-color: #7890a5;
+  background: #2b3945;
+  color: #f4f7fa;
+}
+
+.hiplingo-preview-panel {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid #46515c;
+  border-radius: 0.5rem;
+  padding: 0.85rem;
+  background: #14191d;
+  box-shadow: 0 0.7rem 1.8rem rgb(0 0 0 / 22%);
+}
+
+.hiplingo-preview-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.hiplingo-preview-panel__header h2,
+.hiplingo-preview-panel__header p {
+  margin: 0;
+}
+
+.hiplingo-preview-panel__header p {
+  margin-top: 0.2rem;
+  color: #929da7;
+  font-size: 0.76rem;
+}
+
+.hiplingo-preview-panel__eyebrow {
+  display: block;
+  margin-bottom: 0.18rem;
+  color: #aab7c2;
+  font-size: 0.67rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.hiplingo-preview-panel__status {
+  display: grid;
+  min-width: 8.5rem;
+  gap: 0.12rem;
+  border: 1px solid #44515d;
+  border-radius: 0.35rem;
+  padding: 0.45rem 0.6rem;
+  background: #1d242a;
+}
+
+.hiplingo-preview-panel__status span {
+  color: #8f9ca7;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hiplingo-preview-panel__status strong {
+  color: #e1e8ee;
+  font-size: 0.78rem;
+}
+
+.hiplingo-preview-panel__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  border-top: 1px solid #303940;
+  border-bottom: 1px solid #303940;
+  padding: 0.55rem 0;
+}
+
+.hiplingo-preview-panel__segmented {
+  display: inline-flex;
+  gap: 0.15rem;
+  border: 1px solid #3f4952;
+  border-radius: 0.35rem;
+  padding: 0.15rem;
+  background: #181e23;
+}
+
+.hiplingo-preview-panel__segmented button {
+  min-width: 4.6rem;
+  border: 0;
+  border-radius: 0.25rem;
+  padding: 0.38rem 0.55rem;
+  background: transparent;
+  color: #9da9b3;
+  font-size: 0.72rem;
+}
+
+.hiplingo-preview-panel__segmented button[aria-pressed="true"] {
+  background: #33424e;
+  color: #f2f5f7;
+}
+
+.hiplingo-preview-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.hiplingo-preview-panel__actions button,
+.hiplingo-preview-panel__actions .button-link {
+  min-height: 2rem;
+  padding: 0.38rem 0.58rem;
+  font-size: 0.72rem;
+}
+
+.hiplingo-preview-panel__actions .button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #48545e;
+  border-radius: 0.35rem;
+  background: #20272d;
+  color: #dce4ea;
+  text-decoration: none;
+}
+
+.hiplingo-preview-panel__actions .button-link:hover,
+.hiplingo-preview-panel__actions .button-link:focus-visible {
+  border-color: #70879a;
+  background: #2a3741;
+  color: #fff;
+}
+
+.hiplingo-preview-panel__notice {
+  color: #9ea9b2;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.hiplingo-preview-panel__notice code {
+  display: inline;
+  color: #c7d1d9;
+  font-size: inherit;
+}
+
+.hiplingo-preview-panel__viewport {
+  overflow: hidden;
+  justify-self: stretch;
+  border: 1px solid #46515b;
+  border-radius: 0.45rem;
+  background: #090b0d;
+}
+
+.hiplingo-preview-panel__browser-bar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.65rem;
+  min-height: 2rem;
+  border-bottom: 1px solid #3b454e;
+  padding: 0.35rem 0.55rem;
+  background: #242b31;
+  color: #6e7982;
+  font-size: 0.62rem;
+}
+
+.hiplingo-preview-panel__browser-bar code {
+  overflow: hidden;
+  color: #aab5be;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hiplingo-preview-panel__viewport iframe {
+  display: block;
+  width: 100%;
+  height: min(72vh, 760px);
+  border: 0;
+  background: #0b0d0f;
+}
+
+.hiplingo-preview-panel__viewport--mobile {
+  width: min(390px, 100%);
+  justify-self: center;
+}
+
+.hiplingo-preview-panel__viewport--mobile iframe {
+  height: min(76vh, 844px);
+}
+
+@media (max-width: 720px) {
+  .library-release-overview-actions,
+  .hiplingo-preview-panel__header,
+  .hiplingo-preview-panel__toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .library-release-overview-actions > *,
+  .hiplingo-preview-panel__actions,
+  .hiplingo-preview-panel__status {
+    width: 100%;
+  }
+
+  .hiplingo-preview-panel__actions {
+    margin-left: 0;
+  }
+
+  .hiplingo-preview-panel__actions > * {
+    flex: 1;
+    text-align: center;
+  }
+}
+
+/* Hiplingo preview Phase 2: explicit lifecycle sources and Grafana-style split comparison. */
+.hiplingo-preview-panel__source-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
+.hiplingo-preview-panel__source-label {
+  color: #909ca6;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hiplingo-preview-panel__source-help {
+  color: #89959f;
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+.hiplingo-preview-panel__segmented button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.hiplingo-preview-panel__segmented--source button[aria-pressed="true"] {
+  outline: 1px solid #71889a;
+  outline-offset: -1px;
+}
+
+.hiplingo-preview-panel__frame {
+  display: grid;
+  min-width: 0;
+  gap: 0.4rem;
+}
+
+.hiplingo-preview-panel__frame-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.hiplingo-preview-panel__frame-heading > div {
+  display: grid;
+  gap: 0.08rem;
+}
+
+.hiplingo-preview-panel__frame-heading span {
+  color: #dce4ea;
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.hiplingo-preview-panel__frame-heading small {
+  color: #87939d;
+  font-size: 0.65rem;
+}
+
+.hiplingo-preview-panel__frame-heading .button-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.8rem;
+  border: 1px solid #48545e;
+  border-radius: 0.35rem;
+  padding: 0.28rem 0.48rem;
+  background: #20272d;
+  color: #dce4ea;
+  font-size: 0.68rem;
+  text-decoration: none;
+}
+
+.hiplingo-preview-panel__frame-heading .button-link:hover,
+.hiplingo-preview-panel__frame-heading .button-link:focus-visible {
+  border-color: #70879a;
+  background: #2a3741;
+  color: #fff;
+}
+
+.hiplingo-preview-panel__comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.hiplingo-preview-panel__comparison--mobile {
+  grid-template-columns: repeat(2, minmax(300px, 390px));
+  justify-content: start;
+  overflow-x: auto;
+  padding-bottom: 0.35rem;
+}
+
+.hiplingo-preview-panel__comparison--mobile .hiplingo-preview-panel__viewport--mobile {
+  width: 100%;
+}
+
+@media (max-width: 980px) {
+  .hiplingo-preview-panel__comparison--desktop {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .hiplingo-preview-panel__source-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .hiplingo-preview-panel__segmented--source {
+    width: 100%;
+  }
+
+  .hiplingo-preview-panel__segmented--source button {
+    flex: 1;
+  }
+}
