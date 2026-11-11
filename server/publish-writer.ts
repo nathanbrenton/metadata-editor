@@ -3,6 +3,9 @@ import {
   randomUUID,
 } from "node:crypto";
 import {
+  filterPublicMetadata,
+} from "./public-metadata-contract.js";
+import {
   chmod,
   copyFile,
   lstat,
@@ -158,68 +161,16 @@ function isRecord(
   );
 }
 
-function cloneRecord(
-  value: unknown,
-): Record<string, unknown> {
-  if (!isRecord(value)) {
-    return {};
-  }
-
-  return JSON.parse(
-    JSON.stringify(value),
-  ) as Record<string, unknown>;
-}
-
-function removeKeys(
-  value: unknown,
-  keys: ReadonlySet<string>,
-): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) =>
-      removeKeys(entry, keys),
-    );
-  }
-
-  if (!isRecord(value)) {
-    return value;
-  }
-
-  const sanitized: Record<string, unknown> = {};
-
-  for (const [key, entry] of Object.entries(value)) {
-    if (keys.has(key)) {
-      continue;
-    }
-
-    sanitized[key] = removeKeys(entry, keys);
-  }
-
-  return sanitized;
-}
-
 function sanitizeReleaseMetadata(
   releaseValue: unknown,
 ): Record<string, unknown> {
-  return removeKeys(
-    cloneRecord(releaseValue),
-    new Set([
-      "master_path",
-      "web_path",
-      "embedded_path",
-    ]),
-  ) as Record<string, unknown>;
+  return filterPublicMetadata("release", releaseValue).value;
 }
 
 function sanitizeTrackMetadata(
   trackValue: unknown,
 ): Record<string, unknown> {
-  const track = cloneRecord(trackValue);
-
-  delete track.assets;
-  delete track.credit_sources;
-  delete track.production_note_sources;
-
-  return track;
+  return filterPublicMetadata("track", trackValue).value;
 }
 
 function publicReleaseMetadata(
@@ -257,26 +208,7 @@ function publicTrackMetadata(
 function sanitizeTrackCredits(
   trackValue: unknown,
 ): Record<string, unknown> {
-  const credits = cloneRecord(trackValue);
-
-  delete credits.sample_clearances;
-
-  if (Array.isArray(credits.samples)) {
-    credits.samples = credits.samples.map((sample) => {
-      if (!isRecord(sample)) {
-        return sample;
-      }
-
-      const sanitized = { ...sample };
-      delete sanitized.notes;
-      return sanitized;
-    });
-  }
-
-  return removeKeys(
-    credits,
-    new Set(["editor_only"]),
-  ) as Record<string, unknown>;
+  return filterPublicMetadata("track-credits", trackValue).value;
 }
 
 function findDocument(

@@ -1049,3 +1049,13 @@ note = "AI-generated backing vocals; everything else performed live."
   "Not tagged") using the same resolver as the public site. The fields are
   public and flow into `release.json` / `track.json` under
   `metadata.provenance` on the next **Update Web Package**.
+
+## Public metadata contract
+
+Publication is allow-listed. `server/public-metadata-contract.ts` names every
+`release.toml`, `track.toml`, and `track-credits.toml` path that may appear in
+the public `release.json` / `track.json`, plus the paths that are private on
+purpose (Library asset locations, sample-clearance records, private sample
+notes, the editorial authoring profile). Any other key is withheld from the
+Web Package and reported by Library validation as
+`unclassified-public-metadata` until it is added to one of the two lists.

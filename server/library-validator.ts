@@ -14,6 +14,10 @@ import path from "node:path";
 
 import { parse } from "smol-toml";
 import {
+  filterPublicMetadata,
+  type PublicMetadataDocumentKind,
+} from "./public-metadata-contract.js";
+import {
   PROVENANCE_ORIGIN_VALUES,
   isProvenanceOrigin,
 } from "@hiplingo/media-player/provenance";
@@ -643,6 +647,63 @@ function validateProvenance(
     check(
       documents.tracks.get(track.id)?.get("track.toml"),
       "track.provenance.origin",
+    );
+  }
+
+  return issues;
+}
+
+/*
+ * Publication is allow-listed. A key that the public metadata contract does
+ * not classify is withheld from the Web Package; report it so a person
+ * decides whether it should be public or is private on purpose.
+ */
+function validatePublicContract(
+  release: ReleaseScanResult,
+  documents: ReleaseDocuments,
+): LibraryValidationIssue[] {
+  const issues: LibraryValidationIssue[] = [];
+  const check = (
+    kind: PublicMetadataDocumentKind,
+    rootKey: "release" | "track",
+    document: { parsed: unknown; relativePath: string } | undefined,
+  ) => {
+    if (!document || !isRecord(document.parsed)) {
+      return;
+    }
+
+    const { unclassifiedPaths } = filterPublicMetadata(
+      kind,
+      document.parsed[rootKey],
+    );
+
+    for (const unclassifiedPath of unclassifiedPaths) {
+      issues.push(
+        issue(
+          "unclassified-public-metadata",
+          "warning",
+          document.relativePath,
+          `${unclassifiedPath} is not part of the public metadata contract and will not be published.`,
+          "Add the path to the public or private list in server/public-metadata-contract.ts.",
+        ),
+      );
+    }
+  };
+
+  check(
+    "release",
+    "release",
+    documents.release.get("release.toml"),
+  );
+
+  for (const track of release.tracks) {
+    const trackDocuments = documents.tracks.get(track.id);
+
+    check("track", "track", trackDocuments?.get("track.toml"));
+    check(
+      "track-credits",
+      "track",
+      trackDocuments?.get("track-credits.toml"),
     );
   }
 
@@ -1567,6 +1628,7 @@ async function validateRelease(
     ...validateRequiredFields(release, parsed.documents),
     ...validateReferencesAndIdentity(release, parsed.documents),
     ...validateProvenance(release, parsed.documents),
+    ...validatePublicContract(release, parsed.documents),
     ...validateNumbering(release, parsed.documents),
     ...validateUnexpectedFiles(release, entries),
     ...(await validateAssets(mediaRoot, release, parsed.documents)),
