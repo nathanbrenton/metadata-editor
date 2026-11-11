@@ -1087,3 +1087,21 @@ additive), entries written before embedding simply have no `documents`, and
 deployment verification blocks with `catalog-embedded-documents-stale` if an
 embedded copy differs from its files. Unpublish rewrites the catalog without
 altering the remaining members' entries.
+
+## Behaviour tests
+
+New tests should exercise behaviour rather than assert on source text:
+
+- `tests/api-behaviour.test.ts` boots the real API as a child process against
+  a throwaway Library (`tests/support/api-server.ts`) and makes real HTTP
+  requests — routing, scan/detail, field creation, saves with backups, stale
+  and out-of-root refusals, read-only publish planning.
+- `tests/provenance-badge-render.test.ts` renders a real component with
+  `react-dom/server` and inspects the markup.
+- `tests/public-metadata-contract.test.ts`, `tests/publish-writer.test.ts`,
+  and `tests/publication-membership.test.ts` run the real publisher against
+  fixture trees.
+
+Most older UI tests still read source text through
+`tests/support/editor-source.ts`; convert them as the areas they cover are
+next changed.
