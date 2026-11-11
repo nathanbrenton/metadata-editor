@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { readEditorServerSource } from "./support/editor-source.js";
+
 const builderSource = await readFile(
   new URL("../src/IngestReleaseBuilder.tsx", import.meta.url),
   "utf8",
@@ -10,10 +12,7 @@ const serverSource = await readFile(
   new URL("../server/ingest-artwork.ts", import.meta.url),
   "utf8",
 );
-const apiSource = await readFile(
-  new URL("../server/index.ts", import.meta.url),
-  "utf8",
-);
+const apiSource = await readEditorServerSource();
 
 test("shows TIFF artwork in Staging through a read-only PNG preview", () => {
   assert.match(

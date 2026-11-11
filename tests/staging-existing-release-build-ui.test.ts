@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorServerSource,
+} from "./support/editor-source.js";
 
 const appSource = readEditorAppSource();
 const workspaceSource = readFileSync(
@@ -12,10 +15,7 @@ const workspaceSource = readFileSync(
   ),
   "utf8",
 );
-const serverSource = readFileSync(
-  new URL("../server/index.ts", import.meta.url),
-  "utf8",
-);
+const serverSource = readEditorServerSource();
 const helpSource = readFileSync(
   new URL(
     "../src/workflow-help-content.ts",

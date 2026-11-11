@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { readEditorServerSource } from "./support/editor-source.js";
+
 const builderSource = readFileSync(
   new URL("../src/IngestReleaseBuilder.tsx", import.meta.url),
   "utf8",
@@ -10,10 +12,7 @@ const hookSource = readFileSync(
   new URL("../src/useIngestDraft.ts", import.meta.url),
   "utf8",
 );
-const serverSource = readFileSync(
-  new URL("../server/index.ts", import.meta.url),
-  "utf8",
-);
+const serverSource = readEditorServerSource();
 
 test(
   "offers rescan, durable draft status, and loose attachments",

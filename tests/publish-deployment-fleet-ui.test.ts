@@ -8,7 +8,10 @@ import {
   fileURLToPath,
 } from "node:url";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorServerSource,
+} from "./support/editor-source.js";
 
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -16,10 +19,7 @@ const root = path.resolve(
 );
 
 const appSource = await readEditorAppSource();
-const serverSource = await readFile(
-  path.join(root, "server/index.ts"),
-  "utf8",
-);
+const serverSource = readEditorServerSource();
 const helpSource = await readFile(
   path.join(root, "src/workflow-help-content.ts"),
   "utf8",

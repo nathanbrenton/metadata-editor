@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { readEditorServerSource } from "./support/editor-source.js";
+
 test("guards video preparation with reviewed plans, isolated staging, validation, promotion, and rollback", async () => {
   const source = await readFile(
     new URL(
@@ -27,10 +29,7 @@ test("guards video preparation with reviewed plans, isolated staging, validation
 });
 
 test("exposes read-only video planning and reviewed preparation endpoints", async () => {
-  const source = await readFile(
-    new URL("../server/index.ts", import.meta.url),
-    "utf8",
-  );
+  const source = await readEditorServerSource();
 
   assert.match(source, /"\/api\/publish\/video-plan"/);
   assert.match(source, /buildVideoWebStreamPlan/);

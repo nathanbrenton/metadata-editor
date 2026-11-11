@@ -87,3 +87,24 @@ export function readEditorAppSourceWithSharedTypes(): string {
     ),
   ].join("\n");
 }
+
+const serverRoot = fileURLToPath(
+  new URL("../../server/", import.meta.url),
+);
+
+/*
+ * The API entry point (server/index.ts) dispatches to route modules under
+ * server/api/. Source-shape tests read them together.
+ */
+export function readEditorServerSource(): string {
+  const routeFiles = readdirSync(path.join(serverRoot, "api"))
+    .filter((name) => name.endsWith(".ts"))
+    .sort()
+    .map((name) => `api/${name}`);
+
+  return ["index.ts", ...routeFiles]
+    .map((name) =>
+      readFileSync(path.join(serverRoot, name), "utf8"),
+    )
+    .join("\n");
+}

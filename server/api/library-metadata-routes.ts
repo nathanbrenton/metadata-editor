@@ -1,0 +1,2423 @@
+import type {
+  IncomingMessage,
+  ServerResponse,
+} from "node:http";
+import path from "node:path";
+import {
+  buildMetadataGenerationPlan,
+  buildSingleMetadataDocumentPlan,
+} from "../generation-plan.js";
+import { readJsonBody } from "../http.js";
+import { buildMetadataPreview } from "../inference.js";
+import { resolveMediaRoot } from "../media-root.js";
+import { readReleaseMetadataDetail } from "../metadata-reader.js";
+import {
+  buildPerformerReplacementInputs,
+  planPerformerCopyToTarget,
+  readCopyablePerformerRecords,
+  selectPerformerRecords,
+  type PerformerCopyTargetPlan,
+} from "../performer-copy.js";
+import { saveScalarMetadataChanges } from "../metadata-saver.js";
+import {
+  buildTrackDirectoryRenamePlan,
+  executeTrackDirectoryRenamePlan,
+} from "../track-directory-sync.js";
+import {
+  normalizeSampleClearanceRequest,
+  normalizeSampleRelationshipRequest,
+} from "../sample-record-request.js";
+import {
+  getReleaseNumberingTotalsFromChanges,
+  synchronizeTrackNumberingTotals,
+} from "../numbering-sync.js";
+import {
+  buildStarterMetadataPlan,
+  type StarterMetadataInput,
+} from "../starter-metadata.js";
+import { executeMetadataCreationPlan } from "../metadata-writer.js";
+import { buildGeneratedTomlPreview } from "../toml-preview.js";
+import {
+  scanMediaLibrary,
+  scanReleaseById,
+} from "../scanner.js";
+import {
+  buildReleaseRenamePlan,
+  executeReleaseRenamePlan,
+} from "../release-rename.js";
+import {
+  assertCanonicalMetadataValue,
+  assertMetadataFieldMayBeCreated,
+  assertMetadataFieldMayBeRemoved,
+  parseGenerationScope,
+  sendJson,
+} from "./support.js";
+import { routeNotHandled } from "./route-result.js";
+
+/*
+ * library-metadata routes. Each block answers one endpoint and returns; reaching the
+ * end means no route in this module matched.
+ */
+export async function handleLibraryMetadataRoutes(
+  request: IncomingMessage,
+  response: ServerResponse,
+  requestUrl: URL,
+): Promise<typeof routeNotHandled | void> {
+  if (
+    request.method === "POST" &&
+    requestUrl.pathname ===
+      "/api/library/create-metadata-document"
+  ) {
+    try {
+      const body = await readJsonBody(request);
+
+      if (typeof body !== "object" || body === null) {
+        sendJson(response, 400, {
+          error: "Expected a JSON object",
+        });
+        return;
+      }
+
+      const releaseId =
+        "releaseId" in body &&
+        typeof body.releaseId === "string"
+          ? body.releaseId
+          : null;
+      const relativePath =
+        "relativePath" in body &&
+        typeof body.relativePath === "string"
+          ? body.relativePath
+          : null;
+      const confirmation =
+        "confirmation" in body &&
+        typeof body.confirmation === "string"
+          ? body.confirmation
+          : null;
+
+      if (!releaseId || !relativePath) {
+        sendJson(response, 400, {
+          error: "releaseId and relativePath are required",
+        });
+        return;
+      }
+
+      if (confirmation !== "CREATE_METADATA_DOCUMENT") {
+        sendJson(response, 400, {
+          error:
+            "Explicit CREATE_METADATA_DOCUMENT confirmation is required",
+        });
+        return;
+      }
+
+      const mediaRoot = await resolveMediaRoot();
+      const release = await scanReleaseById(
+        mediaRoot,
+        releaseId,
+      );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: "Release not found",
+        });
+        return;
+      }
+
+      const generatedPreview = buildGeneratedTomlPreview(
+        release,
+        buildMetadataPreview(release),
+      );
+      const plan = buildSingleMetadataDocumentPlan(
+        release,
+        generatedPreview,
+        relativePath,
+      );
+
+      if (plan.summary.blockedCount > 0) {
+        sendJson(response, 409, {
+          error:
+            "Target metadata document already exists; overwrite is not allowed.",
+          plan,
+        });
+        return;
+      }
+
+      const result = await executeMetadataCreationPlan(
+        mediaRoot,
+        plan,
+      );
+
+      sendJson(response, 201, result);
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown metadata document creation error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    requestUrl.pathname ===
+      "/api/library/create-missing-metadata"
+  ) {
+    try {
+      const body = await readJsonBody(request);
+
+      if (
+        typeof body !== "object" ||
+        body === null
+      ) {
+        sendJson(response, 400, {
+          error: "Expected a JSON object",
+        });
+        return;
+      }
+
+      const releaseId =
+        "releaseId" in body &&
+        typeof body.releaseId === "string"
+          ? body.releaseId
+          : null;
+
+      const confirmation =
+        "confirmation" in body &&
+        typeof body.confirmation === "string"
+          ? body.confirmation
+          : null;
+
+
+      const scope = parseGenerationScope(
+        "scope" in body
+          ? body.scope
+          : undefined,
+      );
+
+      const trackId =
+        "trackId" in body &&
+        typeof body.trackId === "string"
+          ? body.trackId
+          : undefined;
+
+      if (!releaseId) {
+        sendJson(response, 400, {
+          error: "Missing releaseId",
+        });
+        return;
+      }
+
+      if (scope === "track" && !trackId) {
+        sendJson(response, 400, {
+          error:
+            "trackId is required for track-scoped creation",
+        });
+        return;
+      }
+
+      if (
+        confirmation !==
+        "CREATE_MISSING_METADATA"
+      ) {
+        sendJson(response, 400, {
+          error:
+            "Explicit CREATE_MISSING_METADATA confirmation is required",
+        });
+        return;
+      }
+
+      const mediaRoot = await resolveMediaRoot();
+
+      /*
+       * Rescan and rebuild immediately before writing so the
+       * endpoint does not rely on a stale browser-side plan.
+       */
+      const release = await scanReleaseById(
+        mediaRoot,
+        releaseId,
+      );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: "Release not found",
+        });
+        return;
+      }
+
+      const inferredPreview =
+        buildMetadataPreview(release);
+
+      const generatedPreview =
+        buildGeneratedTomlPreview(
+          release,
+          inferredPreview,
+        );
+
+      const plan =
+        buildMetadataGenerationPlan(
+          release,
+          generatedPreview,
+          {
+            scope,
+            trackId,
+          },
+        );
+
+      const result =
+        await executeMetadataCreationPlan(
+          mediaRoot,
+          plan,
+        );
+
+      sendJson(response, 201, result);
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown metadata creation error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    requestUrl.pathname ===
+      "/api/library/create-starter-metadata"
+  ) {
+    try {
+      const body = await readJsonBody(request);
+
+      if (
+        typeof body !== "object" ||
+        body === null
+      ) {
+        sendJson(response, 400, {
+          error: "Expected a JSON object",
+        });
+        return;
+      }
+
+      const confirmation =
+        "confirmation" in body &&
+        typeof body.confirmation === "string"
+          ? body.confirmation
+          : null;
+
+      if (
+        confirmation !==
+        "CREATE_STARTER_METADATA"
+      ) {
+        sendJson(response, 400, {
+          error:
+            "Explicit CREATE_STARTER_METADATA confirmation is required",
+        });
+        return;
+      }
+
+      const input =
+        "starter" in body &&
+        typeof body.starter === "object" &&
+        body.starter !== null
+          ? (body.starter as StarterMetadataInput)
+          : null;
+
+      if (!input) {
+        sendJson(response, 400, {
+          error:
+            "Missing starter metadata payload",
+        });
+        return;
+      }
+
+      const mediaRoot = await resolveMediaRoot();
+      const release = await scanReleaseById(
+        mediaRoot,
+        input.releaseId,
+      );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: "Release not found",
+        });
+        return;
+      }
+
+      const plan =
+        buildStarterMetadataPlan(
+          release,
+          input,
+        );
+
+      if (plan.summary.blockedCount > 0) {
+        sendJson(response, 409, {
+          error:
+            "Starter metadata cannot be created because one or more target files already exist.",
+          plan,
+        });
+        return;
+      }
+
+      const result =
+        await executeMetadataCreationPlan(
+          mediaRoot,
+          plan,
+        );
+
+      sendJson(response, 201, result);
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown starter metadata creation error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    requestUrl.pathname ===
+      "/api/library/copy-performer-credits"
+  ) {
+    try {
+      const body = await readJsonBody(request);
+
+      if (
+        typeof body !== "object" ||
+        body === null
+      ) {
+        throw new Error(
+          "Expected a JSON object.",
+        );
+      }
+
+      const releaseId =
+        "releaseId" in body &&
+        typeof body.releaseId === "string"
+          ? body.releaseId
+          : "";
+      const sourceScope =
+        "sourceScope" in body &&
+        body.sourceScope === "release"
+          ? "release"
+          : "track";
+      const sourceTrackId =
+        "sourceTrackId" in body &&
+        typeof body.sourceTrackId === "string"
+          ? body.sourceTrackId
+          : "";
+      const sourceOriginalSha256 =
+        "sourceOriginalSha256" in body &&
+        typeof body.sourceOriginalSha256 === "string"
+          ? body.sourceOriginalSha256
+          : "";
+      const selectedSourceIndexes =
+        "selectedSourceIndexes" in body &&
+        Array.isArray(body.selectedSourceIndexes)
+          ? body.selectedSourceIndexes
+          : null;
+      const destinationTrackIds =
+        "destinationTrackIds" in body &&
+        Array.isArray(body.destinationTrackIds)
+          ? body.destinationTrackIds
+          : null;
+      const execute =
+        "execute" in body &&
+        body.execute === true;
+
+      if (
+        !releaseId ||
+        (
+          sourceScope === "track" &&
+          !sourceTrackId
+        ) ||
+        !/^[a-f0-9]{64}$/.test(
+          sourceOriginalSha256,
+        ) ||
+        !selectedSourceIndexes ||
+        !selectedSourceIndexes.every(
+          (value: unknown) =>
+            typeof value === "number" &&
+            Number.isSafeInteger(value),
+        ) ||
+        !destinationTrackIds ||
+        !destinationTrackIds.every(
+          (value: unknown) =>
+            typeof value === "string" &&
+            Boolean(value),
+        )
+      ) {
+        throw new Error(
+          "releaseId, source scope, source hash, selectedSourceIndexes, and destinationTrackIds are required.",
+        );
+      }
+
+      const uniqueDestinationTrackIds =
+        Array.from(
+          new Set(
+            destinationTrackIds as string[],
+          ),
+        );
+
+      if (
+        uniqueDestinationTrackIds.length === 0
+      ) {
+        throw new Error(
+          "Select at least one destination track.",
+        );
+      }
+
+      if (
+        sourceScope === "track" &&
+        uniqueDestinationTrackIds.includes(
+          sourceTrackId,
+        )
+      ) {
+        throw new Error(
+          "The source track cannot also be a destination.",
+        );
+      }
+
+      const mediaRoot =
+        await resolveMediaRoot();
+      let release =
+        await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: "Release not found",
+        });
+        return;
+      }
+
+      let detail =
+        await readReleaseMetadataDetail(
+          mediaRoot,
+          release,
+        );
+      const sourceDocument =
+        detail.documents.find(
+          (document) =>
+            sourceScope === "release"
+              ? document.scope === "release" &&
+                document.filename === "release.toml"
+              : document.trackId ===
+                  sourceTrackId &&
+                document.filename ===
+                  "track-credits.toml",
+        );
+
+      if (!sourceDocument) {
+        throw new Error(
+          sourceScope === "release"
+            ? "The release requires a readable release.toml document."
+            : "The source track requires a readable track-credits.toml document.",
+        );
+      }
+
+      if (
+        sourceDocument.sha256 !==
+        sourceOriginalSha256
+      ) {
+        throw new Error(
+          "The source performer credits changed after the dialog opened. Refresh and review the copy again.",
+        );
+      }
+
+      const sourceRecords =
+        readCopyablePerformerRecords(
+          sourceDocument,
+        );
+      const selectedRecords =
+        selectPerformerRecords(
+          sourceRecords,
+          selectedSourceIndexes as number[],
+        );
+
+      const destinationPlans =
+        uniqueDestinationTrackIds.map(
+          (trackId) => {
+            const track =
+              release?.tracks.find(
+                (candidate) =>
+                  candidate.id === trackId,
+              );
+
+            if (!track) {
+              return {
+                trackId,
+                relativePath: "",
+                documentExists: false,
+                addCount: 0,
+                duplicateCount: 0,
+                resultingCount: 0,
+                status: "blocked" as const,
+                reason:
+                  "Destination track was not found in the selected release.",
+                additions: [],
+              };
+            }
+
+            const creditsFile =
+              track.metadataFiles.find(
+                (file) =>
+                  file.filename ===
+                    "track-credits.toml",
+              );
+
+            if (!creditsFile) {
+              return {
+                trackId,
+                relativePath: "",
+                documentExists: false,
+                addCount: 0,
+                duplicateCount: 0,
+                resultingCount: 0,
+                status: "blocked" as const,
+                reason:
+                  "Destination track has no track-credits metadata slot.",
+                additions: [],
+              };
+            }
+
+            const targetDocument =
+              detail.documents.find(
+                (document) =>
+                  document.trackId ===
+                    trackId &&
+                  document.filename ===
+                    "track-credits.toml",
+              );
+
+            if (
+              creditsFile.exists &&
+              !targetDocument
+            ) {
+              return {
+                trackId,
+                relativePath:
+                  creditsFile.relativePath,
+                documentExists: true,
+                addCount: 0,
+                duplicateCount: 0,
+                resultingCount: 0,
+                status: "blocked" as const,
+                reason:
+                  "Destination track-credits.toml could not be parsed safely.",
+                additions: [],
+              };
+            }
+
+            return planPerformerCopyToTarget(
+              selectedRecords,
+              targetDocument
+                ? readCopyablePerformerRecords(
+                    targetDocument,
+                  )
+                : [],
+              {
+                trackId,
+                relativePath:
+                  creditsFile.relativePath,
+                documentExists:
+                  Boolean(targetDocument),
+              },
+            );
+          },
+        );
+
+      const publicPlans =
+        destinationPlans.map(
+          ({ additions: _additions, ...plan }) =>
+            plan,
+        );
+      const planSummary = {
+        selectedCreditCount:
+          selectedRecords.length,
+        destinationCount:
+          destinationPlans.length,
+        readyCount:
+          destinationPlans.filter(
+            (plan) =>
+              plan.status === "ready",
+          ).length,
+        blockedCount:
+          destinationPlans.filter(
+            (plan) =>
+              plan.status === "blocked",
+          ).length,
+        addCount:
+          destinationPlans.reduce(
+            (total, plan) =>
+              total + plan.addCount,
+            0,
+          ),
+        duplicateCount:
+          destinationPlans.reduce(
+            (total, plan) =>
+              total +
+              plan.duplicateCount,
+            0,
+          ),
+      };
+
+      if (!execute) {
+        sendJson(response, 200, {
+          releaseId,
+          sourceTrackId:
+            sourceScope === "release"
+              ? "release"
+              : sourceTrackId,
+          sourceScope,
+          sourceRelativePath:
+            sourceDocument.relativePath,
+          sourceSha256:
+            sourceDocument.sha256,
+          selectedCredits:
+            selectedRecords,
+          destinations: publicPlans,
+          summary: planSummary,
+        });
+        return;
+      }
+
+      const missingTargets =
+        destinationPlans.filter(
+          (plan) =>
+            plan.status === "ready" &&
+            plan.addCount > 0 &&
+            !plan.documentExists,
+        );
+
+      if (missingTargets.length > 0) {
+        await executeMetadataCreationPlan(
+          mediaRoot,
+          {
+            releaseId,
+            scope: "track",
+            items: missingTargets.map(
+              (plan) => ({
+                storageRole:
+                  "track-credits" as const,
+                filename:
+                  "track-credits.toml",
+                relativePath:
+                  plan.relativePath,
+                action: "create" as const,
+                reason:
+                  "Create a track credits document before copying selected performer credits.",
+                content:
+                  "[track]\nperformers = []\ncontributors = []\n",
+                validated: true,
+              }),
+            ),
+            summary: {
+              createCount:
+                missingTargets.length,
+              blockedCount: 0,
+            },
+            warnings: [],
+          },
+        );
+
+        release = await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+        if (!release) {
+          throw new Error(
+            "Release disappeared after creating destination credit documents.",
+          );
+        }
+
+        detail =
+          await readReleaseMetadataDetail(
+            mediaRoot,
+            release,
+          );
+      }
+
+      const executionTargets: Array<
+        PerformerCopyTargetPlan & {
+          createdDocument: boolean;
+          receipt?: Awaited<
+            ReturnType<
+              typeof saveScalarMetadataChanges
+            >
+          >;
+          error?: string;
+        }
+      > = [];
+
+      for (const initialPlan of destinationPlans) {
+        if (initialPlan.status === "blocked") {
+          executionTargets.push({
+            ...publicPlans.find(
+              (plan) =>
+                plan.trackId ===
+                  initialPlan.trackId,
+            )!,
+            createdDocument: false,
+            error: initialPlan.reason,
+          });
+          continue;
+        }
+
+        const targetDocument =
+          detail.documents.find(
+            (document) =>
+              document.trackId ===
+                initialPlan.trackId &&
+              document.filename ===
+                "track-credits.toml",
+          );
+
+        if (!targetDocument) {
+          executionTargets.push({
+            ...publicPlans.find(
+              (plan) =>
+                plan.trackId ===
+                  initialPlan.trackId,
+            )!,
+            status: "blocked",
+            createdDocument:
+              !initialPlan.documentExists,
+            error:
+              "Destination track-credits.toml is unavailable after preflight.",
+          });
+          continue;
+        }
+
+        const latestExistingRecords =
+          readCopyablePerformerRecords(
+            targetDocument,
+          );
+        const latestPlan =
+          planPerformerCopyToTarget(
+            selectedRecords,
+            latestExistingRecords,
+            {
+              trackId:
+                initialPlan.trackId,
+              relativePath:
+                targetDocument.relativePath,
+              documentExists: true,
+            },
+          );
+
+        if (latestPlan.status === "blocked") {
+          const {
+            additions: _additions,
+            ...blockedPlan
+          } = latestPlan;
+          executionTargets.push({
+            ...blockedPlan,
+            createdDocument:
+              !initialPlan.documentExists,
+            error: latestPlan.reason,
+          });
+          continue;
+        }
+
+        if (latestPlan.addCount === 0) {
+          const {
+            additions: _additions,
+            ...skippedPlan
+          } = latestPlan;
+          executionTargets.push({
+            ...skippedPlan,
+            createdDocument:
+              !initialPlan.documentExists,
+          });
+          continue;
+        }
+
+        try {
+          const receipt =
+            await saveScalarMetadataChanges(
+              mediaRoot,
+              release,
+              targetDocument.relativePath,
+              targetDocument.sha256,
+              [],
+              false,
+              buildPerformerReplacementInputs(
+                latestExistingRecords,
+                latestPlan.additions,
+              ),
+            );
+          const {
+            additions: _additions,
+            ...savedPlan
+          } = latestPlan;
+          executionTargets.push({
+            ...savedPlan,
+            createdDocument:
+              !initialPlan.documentExists,
+            receipt,
+          });
+        } catch (error) {
+          const {
+            additions: _additions,
+            ...failedPlan
+          } = latestPlan;
+          executionTargets.push({
+            ...failedPlan,
+            status: "blocked",
+            createdDocument:
+              !initialPlan.documentExists,
+            error:
+              error instanceof Error
+                ? error.message
+                : "Unknown performer-copy error",
+          });
+        }
+      }
+
+      const failedCount =
+        executionTargets.filter(
+          (target) => Boolean(target.error),
+        ).length;
+      const writtenTargets =
+        executionTargets.filter(
+          (target) => Boolean(target.receipt),
+        );
+      const execution = {
+        status:
+          failedCount === 0
+            ? "verified"
+            : writtenTargets.length > 0
+              ? "partial"
+              : "failed",
+        targets: executionTargets,
+        addedCount:
+          writtenTargets.reduce(
+            (total, target) =>
+              total + target.addCount,
+            0,
+          ),
+        duplicateCount:
+          executionTargets.reduce(
+            (total, target) =>
+              total +
+              target.duplicateCount,
+            0,
+          ),
+        failedCount,
+      };
+
+      sendJson(
+        response,
+        failedCount > 0 ? 207 : 200,
+        {
+          releaseId,
+          sourceTrackId:
+            sourceScope === "release"
+              ? "release"
+              : sourceTrackId,
+          sourceScope,
+          sourceRelativePath:
+            sourceDocument.relativePath,
+          sourceSha256:
+            sourceDocument.sha256,
+          selectedCredits:
+            selectedRecords,
+          destinations: publicPlans,
+          summary: planSummary,
+          execution,
+        },
+      );
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown performer-credit copy error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    requestUrl.pathname ===
+      "/api/library/create-track-credits-document"
+  ) {
+    try {
+      const body =
+        await readJsonBody(request);
+
+      if (
+        typeof body !== "object" ||
+        body === null
+      ) {
+        sendJson(response, 400, {
+          error:
+            "Expected a JSON object",
+        });
+        return;
+      }
+
+      const releaseId =
+        "releaseId" in body &&
+        typeof body.releaseId ===
+          "string"
+          ? body.releaseId
+          : null;
+      const relativePath =
+        "relativePath" in body &&
+        typeof body.relativePath ===
+          "string"
+          ? body.relativePath
+          : null;
+
+      if (!releaseId || !relativePath) {
+        sendJson(response, 400, {
+          error:
+            "releaseId and relativePath are required",
+        });
+        return;
+      }
+
+      const mediaRoot =
+        await resolveMediaRoot();
+      const release =
+        await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error:
+            "Release not found",
+        });
+        return;
+      }
+
+      const track =
+        release.tracks.find(
+          (candidate) =>
+            candidate.metadataFiles.some(
+              (file) =>
+                !file.exists &&
+                file.filename ===
+                  "track-credits.toml" &&
+                file.relativePath ===
+                  relativePath,
+            ),
+        );
+
+      if (!track) {
+        sendJson(response, 409, {
+          error:
+            "Target is not a missing track-credits.toml file in the selected release",
+        });
+        return;
+      }
+
+      const result =
+        await executeMetadataCreationPlan(
+          mediaRoot,
+          {
+            releaseId,
+            scope: "track",
+            trackId: track.id,
+            items: [
+              {
+                storageRole:
+                  "track-credits",
+                filename:
+                  "track-credits.toml",
+                relativePath,
+                action: "create",
+                reason:
+                  "Create an empty technical-credit document for browser editing",
+                content:
+                  "[track]\nperformers = []\ncontributors = []\n",
+                validated: true,
+              },
+            ],
+            summary: {
+              createCount: 1,
+              blockedCount: 0,
+            },
+            warnings: [],
+          },
+        );
+
+      sendJson(response, 201, result);
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown track-credits document creation error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    requestUrl.pathname ===
+      "/api/library/create-metadata-fields"
+  ) {
+    try {
+      const body =
+        await readJsonBody(request);
+
+      if (
+        typeof body !== "object" ||
+        body === null
+      ) {
+        sendJson(response, 400, {
+          error:
+            "Expected a JSON object",
+        });
+        return;
+      }
+
+      const releaseId =
+        "releaseId" in body &&
+        typeof body.releaseId ===
+          "string"
+          ? body.releaseId
+          : null;
+
+      const relativePath =
+        "relativePath" in body &&
+        typeof body.relativePath ===
+          "string"
+          ? body.relativePath
+          : null;
+
+      const originalSha256 =
+        "originalSha256" in body &&
+        typeof body.originalSha256 ===
+          "string"
+          ? body.originalSha256
+          : null;
+
+      const changes =
+        "changes" in body &&
+        Array.isArray(body.changes)
+          ? body.changes
+          : null;
+
+      if (
+        !releaseId ||
+        !relativePath ||
+        !originalSha256 ||
+        !changes
+      ) {
+        sendJson(response, 400, {
+          error:
+            "releaseId, relativePath, originalSha256, and changes are required",
+        });
+        return;
+      }
+
+      const normalizedChanges =
+        changes.map((change) => {
+          if (
+            typeof change !==
+              "object" ||
+            change === null ||
+            !("path" in change) ||
+            typeof change.path !==
+              "string" ||
+            !("value" in change) ||
+            !(
+              typeof change.value ===
+                "string" ||
+              typeof change.value ===
+                "number" ||
+              typeof change.value ===
+                "boolean" ||
+              (
+                Array.isArray(
+                  change.value,
+                ) &&
+                change.value.every(
+                  (entry: unknown) =>
+                    typeof entry ===
+                    "string",
+                )
+              )
+            )
+          ) {
+            throw new Error(
+              "Each field requires a safe metadata path and editable initial value",
+            );
+          }
+
+          assertMetadataFieldMayBeCreated(relativePath, change.path);
+          assertCanonicalMetadataValue(change.path, change.value);
+          return { path: change.path, value: change.value };
+        });
+
+      const mediaRoot =
+        await resolveMediaRoot();
+      const release =
+        await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error:
+            "Release not found",
+        });
+        return;
+      }
+
+      const receipt =
+        await saveScalarMetadataChanges(
+          mediaRoot,
+          release,
+          relativePath,
+          originalSha256,
+          normalizedChanges,
+          true,
+        );
+
+      sendJson(
+        response,
+        200,
+        receipt,
+      );
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown metadata field creation error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    requestUrl.pathname ===
+      "/api/library/delete-metadata-fields"
+  ) {
+    try {
+      const body =
+        await readJsonBody(request);
+
+      if (
+        typeof body !== "object" ||
+        body === null
+      ) {
+        sendJson(response, 400, {
+          error:
+            "Expected a JSON object",
+        });
+        return;
+      }
+
+      const releaseId =
+        "releaseId" in body &&
+        typeof body.releaseId ===
+          "string"
+          ? body.releaseId
+          : null;
+
+      const relativePath =
+        "relativePath" in body &&
+        typeof body.relativePath ===
+          "string"
+          ? body.relativePath
+          : null;
+
+      const originalSha256 =
+        "originalSha256" in body &&
+        typeof body.originalSha256 ===
+          "string"
+          ? body.originalSha256
+          : null;
+
+      const metadataPaths =
+        "paths" in body &&
+        Array.isArray(body.paths)
+          ? body.paths
+          : null;
+
+      if (
+        !releaseId ||
+        !relativePath ||
+        !originalSha256 ||
+        !metadataPaths ||
+        metadataPaths.length === 0
+      ) {
+        sendJson(response, 400, {
+          error:
+            "releaseId, relativePath, originalSha256, and at least one path are required",
+        });
+        return;
+      }
+
+      const normalizedPaths =
+        metadataPaths.map(
+          (metadataPath) => {
+            if (
+              typeof metadataPath !==
+              "string"
+            ) {
+              throw new Error(
+                "Each removable metadata field requires a canonical path.",
+              );
+            }
+
+            assertMetadataFieldMayBeRemoved(
+              relativePath,
+              metadataPath,
+            );
+
+            return metadataPath;
+          },
+        );
+
+      const mediaRoot =
+        await resolveMediaRoot();
+      const release =
+        await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error:
+            "Release not found",
+        });
+        return;
+      }
+
+      const receipt =
+        await saveScalarMetadataChanges(
+          mediaRoot,
+          release,
+          relativePath,
+          originalSha256,
+          [],
+          false,
+          undefined,
+          undefined,
+          [],
+          "track.contributors",
+          normalizedPaths,
+        );
+
+      sendJson(
+        response,
+        200,
+        receipt,
+      );
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown metadata field removal error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    requestUrl.pathname ===
+      "/api/library/release-rename-plan"
+  ) {
+    try {
+      const body = await readJsonBody(request);
+
+      if (
+        typeof body !== "object" ||
+        body === null
+      ) {
+        sendJson(response, 400, {
+          error: "Expected a JSON object",
+        });
+        return;
+      }
+
+      const releaseId =
+        "releaseId" in body &&
+        typeof body.releaseId === "string"
+          ? body.releaseId
+          : "";
+      const targetReleaseId =
+        "targetReleaseId" in body &&
+        typeof body.targetReleaseId === "string"
+          ? body.targetReleaseId
+          : "";
+      const targetTitle =
+        "targetTitle" in body &&
+        typeof body.targetTitle === "string"
+          ? body.targetTitle
+          : "";
+
+      if (!releaseId || !targetReleaseId || !targetTitle) {
+        sendJson(response, 400, {
+          error:
+            "releaseId, targetReleaseId, and targetTitle are required",
+        });
+        return;
+      }
+
+      const mediaRoot = await resolveMediaRoot();
+      const release = await scanReleaseById(mediaRoot, releaseId);
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: `Release not found: ${releaseId}`,
+        });
+        return;
+      }
+
+      sendJson(
+        response,
+        200,
+        await buildReleaseRenamePlan(
+          mediaRoot,
+          release,
+          targetReleaseId,
+          targetTitle,
+        ),
+      );
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown release rename planning error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    requestUrl.pathname ===
+      "/api/library/apply-release-rename"
+  ) {
+    try {
+      const body = await readJsonBody(request);
+
+      if (
+        typeof body !== "object" ||
+        body === null
+      ) {
+        sendJson(response, 400, {
+          error: "Expected a JSON object",
+        });
+        return;
+      }
+
+      const releaseId =
+        "releaseId" in body &&
+        typeof body.releaseId === "string"
+          ? body.releaseId
+          : "";
+      const targetReleaseId =
+        "targetReleaseId" in body &&
+        typeof body.targetReleaseId === "string"
+          ? body.targetReleaseId
+          : "";
+      const targetTitle =
+        "targetTitle" in body &&
+        typeof body.targetTitle === "string"
+          ? body.targetTitle
+          : "";
+      const confirmation =
+        "confirmation" in body &&
+        typeof body.confirmation === "string"
+          ? body.confirmation
+          : "";
+      const planFingerprint =
+        "planFingerprint" in body &&
+        typeof body.planFingerprint === "string"
+          ? body.planFingerprint
+          : "";
+
+      if (
+        !releaseId ||
+        !targetReleaseId ||
+        !targetTitle ||
+        !confirmation ||
+        !planFingerprint
+      ) {
+        sendJson(response, 400, {
+          error:
+            "releaseId, targetReleaseId, targetTitle, confirmation, and planFingerprint are required",
+        });
+        return;
+      }
+
+      const mediaRoot = await resolveMediaRoot();
+      const release = await scanReleaseById(mediaRoot, releaseId);
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: `Release not found: ${releaseId}`,
+        });
+        return;
+      }
+
+      sendJson(
+        response,
+        200,
+        await executeReleaseRenamePlan(
+          mediaRoot,
+          release,
+          targetReleaseId,
+          targetTitle,
+          confirmation,
+          planFingerprint,
+        ),
+      );
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown release rename error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    requestUrl.pathname ===
+      "/api/library/track-directory-rename-plan"
+  ) {
+    try {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+
+      if (!releaseId) {
+        sendJson(response, 400, {
+          error: "release is required",
+        });
+        return;
+      }
+
+      const mediaRoot = await resolveMediaRoot();
+      const release = await scanReleaseById(
+        mediaRoot,
+        releaseId,
+      );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: "Release not found",
+        });
+        return;
+      }
+
+      sendJson(
+        response,
+        200,
+        await buildTrackDirectoryRenamePlan(
+          mediaRoot,
+          release,
+        ),
+      );
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown track directory planning error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    requestUrl.pathname ===
+      "/api/library/apply-track-directory-renames"
+  ) {
+    try {
+      const body = await readJsonBody(request);
+
+      if (
+        typeof body !== "object" ||
+        body === null
+      ) {
+        sendJson(response, 400, {
+          error: "Expected a JSON object",
+        });
+        return;
+      }
+
+      const releaseId =
+        "releaseId" in body &&
+        typeof body.releaseId === "string"
+          ? body.releaseId
+          : null;
+      const confirmation =
+        "confirmation" in body &&
+        typeof body.confirmation === "string"
+          ? body.confirmation
+          : null;
+      const planFingerprint =
+        "planFingerprint" in body &&
+        typeof body.planFingerprint === "string"
+          ? body.planFingerprint
+          : null;
+
+      if (
+        !releaseId ||
+        !confirmation ||
+        !planFingerprint
+      ) {
+        sendJson(response, 400, {
+          error:
+            "releaseId, confirmation, and planFingerprint are required",
+        });
+        return;
+      }
+
+      const mediaRoot = await resolveMediaRoot();
+      const release = await scanReleaseById(
+        mediaRoot,
+        releaseId,
+      );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: "Release not found",
+        });
+        return;
+      }
+
+      sendJson(
+        response,
+        200,
+        await executeTrackDirectoryRenamePlan(
+          mediaRoot,
+          release,
+          confirmation,
+          planFingerprint,
+        ),
+      );
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown track directory synchronization error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "POST" &&
+    requestUrl.pathname ===
+      "/api/library/save-scalar-metadata"
+  ) {
+    try {
+      const body = await readJsonBody(request);
+
+      if (
+        typeof body !== "object" ||
+        body === null
+      ) {
+        sendJson(response, 400, {
+          error: "Expected a JSON object",
+        });
+        return;
+      }
+
+      const releaseId =
+        "releaseId" in body &&
+        typeof body.releaseId === "string"
+          ? body.releaseId
+          : null;
+
+      const relativePath =
+        "relativePath" in body &&
+        typeof body.relativePath === "string"
+          ? body.relativePath
+          : null;
+
+      const originalSha256 =
+        "originalSha256" in body &&
+        typeof body.originalSha256 === "string"
+          ? body.originalSha256
+          : null;
+
+      const changes =
+        "changes" in body &&
+        Array.isArray(body.changes)
+          ? body.changes
+          : null;
+
+      const createChanges =
+        "createChanges" in body && Array.isArray(body.createChanges)
+          ? body.createChanges
+          : [];
+
+      const performers =
+        "performers" in body
+          ? body.performers
+          : undefined;
+
+      const performerPath =
+        "performerPath" in body &&
+        typeof body.performerPath === "string"
+          ? body.performerPath
+          : "track.performers";
+
+      const technicalContributors =
+        "technicalContributors" in body
+          ? body.technicalContributors
+          : undefined;
+
+      const managedTechnicalContributorSourceIndexes =
+        "managedTechnicalContributorSourceIndexes" in
+        body
+          ? body.managedTechnicalContributorSourceIndexes
+          : undefined;
+
+      const arrangementContributors =
+        "arrangementContributors" in body
+          ? body.arrangementContributors
+          : undefined;
+
+      const managedArrangementContributorSourceIndexes =
+        "managedArrangementContributorSourceIndexes" in
+        body
+          ? body.managedArrangementContributorSourceIndexes
+          : undefined;
+
+      const arrangementContributorPath =
+        "arrangementContributorPath" in body &&
+        typeof body.arrangementContributorPath ===
+          "string"
+          ? body.arrangementContributorPath
+          : "track.contributors";
+
+      const writingCredits =
+        "writingCredits" in body
+          ? body.writingCredits
+          : undefined;
+
+      const writingCreditBasePath =
+        "writingCreditBasePath" in body &&
+        typeof body.writingCreditBasePath === "string"
+          ? body.writingCreditBasePath
+          : "track";
+
+      const sampleRelationships =
+        "sampleRelationships" in body
+          ? body.sampleRelationships
+          : undefined;
+
+      const sampleClearances =
+        "sampleClearances" in body
+          ? body.sampleClearances
+          : undefined;
+
+      const technicalContributorPath =
+        "technicalContributorPath" in body &&
+        typeof body.technicalContributorPath ===
+          "string"
+          ? body.technicalContributorPath
+          : "track.contributors";
+
+      if (
+        !releaseId ||
+        !relativePath ||
+        !originalSha256 ||
+        !changes ||
+        !(
+          performers === undefined ||
+          Array.isArray(performers)
+        ) ||
+        ![
+          "track.performers",
+          "release.credits.performers",
+        ].includes(performerPath) ||
+        !(
+          technicalContributors ===
+            undefined ||
+          Array.isArray(
+            technicalContributors,
+          )
+        ) ||
+        !(
+          arrangementContributors ===
+            undefined ||
+          Array.isArray(
+            arrangementContributors,
+          )
+        ) ||
+        !(
+          writingCredits === undefined ||
+          Array.isArray(writingCredits)
+        ) ||
+        !(
+          sampleRelationships === undefined ||
+          Array.isArray(sampleRelationships)
+        ) ||
+        !(
+          sampleClearances === undefined ||
+          Array.isArray(sampleClearances)
+        ) ||
+        !(
+          managedTechnicalContributorSourceIndexes ===
+            undefined ||
+          (
+            Array.isArray(
+              managedTechnicalContributorSourceIndexes,
+            ) &&
+            managedTechnicalContributorSourceIndexes.every(
+              (value: unknown) =>
+                typeof value ===
+                  "number",
+            )
+          )
+        ) ||
+        !(
+          managedArrangementContributorSourceIndexes ===
+            undefined ||
+          (
+            Array.isArray(
+              managedArrangementContributorSourceIndexes,
+            ) &&
+            managedArrangementContributorSourceIndexes.every(
+              (value: unknown) =>
+                typeof value === "number",
+            )
+          )
+        ) ||
+        ![
+          "track.contributors",
+          "release.credits.contributors",
+        ].includes(technicalContributorPath) ||
+        ![
+          "track.contributors",
+          "release.credits.contributors",
+        ].includes(arrangementContributorPath) ||
+        ![
+          "track",
+          "release.credits",
+        ].includes(writingCreditBasePath)
+      ) {
+        sendJson(response, 400, {
+          error:
+            "releaseId, relativePath, originalSha256, and changes are required",
+        });
+        return;
+      }
+
+      const normalizedChanges =
+        changes.map((change) => {
+          if (
+            typeof change !== "object" ||
+            change === null ||
+            !("path" in change) ||
+            typeof change.path !== "string" ||
+            !("value" in change) ||
+            !(
+              typeof change.value === "string" ||
+              typeof change.value === "number" ||
+              typeof change.value === "boolean" ||
+              (
+                Array.isArray(change.value) &&
+                change.value.every(
+                  (entry: unknown) =>
+                    typeof entry === "string",
+                )
+              )
+            )
+          ) {
+            throw new Error(
+              "Each change requires an editable metadata path and value",
+            );
+          }
+
+          assertCanonicalMetadataValue(change.path, change.value);
+          return { path: change.path, value: change.value };
+        });
+
+      const normalizedCreateChanges = createChanges.map((change) => {
+        if (typeof change !== "object" || change === null || !("path" in change) || typeof change.path !== "string" || !("value" in change) || !(typeof change.value === "string" || typeof change.value === "number" || typeof change.value === "boolean" || (Array.isArray(change.value) && change.value.every((entry: unknown) => typeof entry === "string")))) {
+          throw new Error("Each createChanges entry requires an editable metadata path and value");
+        }
+        assertMetadataFieldMayBeCreated(relativePath, change.path);
+        assertCanonicalMetadataValue(change.path, change.value);
+        return { path: change.path, value: change.value };
+      });
+
+      const normalizedPerformers =
+        performers === undefined
+          ? undefined
+          : performers.map(
+              (
+                performer,
+                performerIndex,
+              ) => {
+                if (
+                  typeof performer !==
+                    "object" ||
+                  performer === null ||
+                  !("sourceIndex" in performer) ||
+                  !(
+                    performer.sourceIndex ===
+                      null ||
+                    typeof performer.sourceIndex ===
+                      "number"
+                  ) ||
+                  !("name" in performer) ||
+                  typeof performer.name !==
+                    "string" ||
+                  !("role" in performer) ||
+                  typeof performer.role !==
+                    "string" ||
+                  !("sortName" in performer) ||
+                  typeof performer.sortName !==
+                    "string"
+                ) {
+                  throw new Error(
+                    `Performer ${performerIndex + 1} requires sourceIndex, name, role, and sortName`,
+                  );
+                }
+
+                return {
+                  sourceIndex:
+                    performer.sourceIndex,
+                  name: performer.name,
+                  role: performer.role,
+                  sortName:
+                    performer.sortName,
+                };
+              },
+            );
+
+      const normalizedTechnicalContributors =
+        technicalContributors ===
+          undefined
+          ? undefined
+          : technicalContributors.map(
+              (
+                contributor,
+                contributorIndex,
+              ) => {
+                if (
+                  typeof contributor !==
+                    "object" ||
+                  contributor === null ||
+                  !("sourceIndex" in
+                    contributor) ||
+                  !(
+                    contributor.sourceIndex ===
+                      null ||
+                    typeof contributor.sourceIndex ===
+                      "number"
+                  ) ||
+                  !("name" in contributor) ||
+                  typeof contributor.name !==
+                    "string" ||
+                  !("role" in contributor) ||
+                  typeof contributor.role !==
+                    "string" ||
+                  !("sortName" in
+                    contributor) ||
+                  typeof contributor.sortName !==
+                    "string"
+                ) {
+                  throw new Error(
+                    `Technical contributor ${contributorIndex + 1} requires sourceIndex, name, role, and sortName`,
+                  );
+                }
+
+                return {
+                  sourceIndex:
+                    contributor.sourceIndex,
+                  name: contributor.name,
+                  role: contributor.role,
+                  sortName:
+                    contributor.sortName,
+                };
+              },
+            );
+
+      const normalizedArrangementContributors =
+        arrangementContributors === undefined
+          ? undefined
+          : arrangementContributors.map(
+              (
+                contributor,
+                contributorIndex,
+              ) => {
+                if (
+                  typeof contributor !== "object" ||
+                  contributor === null ||
+                  !("sourceIndex" in contributor) ||
+                  !(
+                    contributor.sourceIndex === null ||
+                    typeof contributor.sourceIndex === "number"
+                  ) ||
+                  !("name" in contributor) ||
+                  typeof contributor.name !== "string" ||
+                  !("role" in contributor) ||
+                  typeof contributor.role !== "string" ||
+                  !("sortName" in contributor) ||
+                  typeof contributor.sortName !== "string"
+                ) {
+                  throw new Error(
+                    `Arrangement contributor ${contributorIndex + 1} requires sourceIndex, name, role, and sortName`,
+                  );
+                }
+
+                return {
+                  sourceIndex: contributor.sourceIndex,
+                  name: contributor.name,
+                  role: contributor.role,
+                  sortName: contributor.sortName,
+                };
+              },
+            );
+
+      const normalizedWritingCredits =
+        writingCredits === undefined
+          ? undefined
+          : writingCredits.map(
+              (credit, creditIndex) => {
+                if (
+                  typeof credit !== "object" ||
+                  credit === null ||
+                  !("family" in credit) ||
+                  ![
+                    "songwriters",
+                    "composers",
+                    "lyricists",
+                  ].includes(String(credit.family)) ||
+                  !("sourceFamily" in credit) ||
+                  !(
+                    credit.sourceFamily === null ||
+                    [
+                      "songwriters",
+                      "composers",
+                      "lyricists",
+                    ].includes(String(credit.sourceFamily))
+                  ) ||
+                  !("sourceIndex" in credit) ||
+                  !(
+                    credit.sourceIndex === null ||
+                    typeof credit.sourceIndex === "number"
+                  ) ||
+                  !("name" in credit) ||
+                  typeof credit.name !== "string" ||
+                  !("role" in credit) ||
+                  typeof credit.role !== "string" ||
+                  !("sortName" in credit) ||
+                  typeof credit.sortName !== "string"
+                ) {
+                  throw new Error(
+                    `Writing credit ${creditIndex + 1} requires family, sourceFamily, sourceIndex, name, role, and sortName`,
+                  );
+                }
+
+                return {
+                  family: credit.family as
+                    | "songwriters"
+                    | "composers"
+                    | "lyricists",
+                  sourceFamily: credit.sourceFamily as
+                    | "songwriters"
+                    | "composers"
+                    | "lyricists"
+                    | null,
+                  sourceIndex: credit.sourceIndex,
+                  name: credit.name,
+                  role: credit.role,
+                  sortName: credit.sortName,
+                };
+              },
+            );
+
+      const normalizedSampleRelationships =
+        normalizeSampleRelationshipRequest(sampleRelationships);
+
+      const normalizedSampleClearances =
+        normalizeSampleClearanceRequest(sampleClearances);
+
+      const normalizedManagedTechnicalContributorSourceIndexes =
+        managedTechnicalContributorSourceIndexes ===
+          undefined
+          ? []
+          : managedTechnicalContributorSourceIndexes;
+
+      const normalizedManagedArrangementContributorSourceIndexes =
+        managedArrangementContributorSourceIndexes ===
+          undefined
+          ? []
+          : managedArrangementContributorSourceIndexes;
+
+      const mediaRoot =
+        await resolveMediaRoot();
+
+      const release =
+        await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: "Release not found",
+        });
+        return;
+      }
+
+      const receipt =
+        await saveScalarMetadataChanges(
+          mediaRoot,
+          release,
+          relativePath,
+          originalSha256,
+          normalizedChanges,
+          false,
+          normalizedPerformers,
+          normalizedTechnicalContributors,
+          normalizedManagedTechnicalContributorSourceIndexes,
+          technicalContributorPath as
+            | "track.contributors"
+            | "release.credits.contributors",
+          [],
+          normalizedCreateChanges,
+          performerPath as
+            | "track.performers"
+            | "release.credits.performers",
+          normalizedArrangementContributors,
+          normalizedManagedArrangementContributorSourceIndexes,
+          arrangementContributorPath as
+            | "track.contributors"
+            | "release.credits.contributors",
+          normalizedWritingCredits,
+          writingCreditBasePath as
+            | "track"
+            | "release.credits",
+          normalizedSampleRelationships,
+          normalizedSampleClearances,
+        );
+
+      const totals =
+        relativePath.endsWith(
+          "/release.toml",
+        )
+          ? getReleaseNumberingTotalsFromChanges(
+              normalizedChanges,
+            )
+          : {};
+
+      const synchronization =
+        await synchronizeTrackNumberingTotals(
+          mediaRoot,
+          release,
+          totals,
+        );
+
+      sendJson(response, 200, {
+        ...receipt,
+        synchronizedTrackFiles:
+          synchronization.synchronizedTrackFiles,
+        skippedTrackFiles:
+          synchronization.skippedTrackFiles,
+      });
+    } catch (error) {
+      sendJson(response, 409, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown metadata save error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    requestUrl.pathname ===
+      "/api/library/release-detail"
+  ) {
+    try {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+
+      if (!releaseId) {
+        sendJson(response, 400, {
+          error:
+            "Missing release query parameter",
+        });
+        return;
+      }
+
+      const mediaRoot =
+        await resolveMediaRoot();
+
+      const release =
+        await scanReleaseById(
+          mediaRoot,
+          releaseId,
+        );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: "Release not found",
+        });
+        return;
+      }
+
+      sendJson(
+        response,
+        200,
+        await readReleaseMetadataDetail(
+          mediaRoot,
+          release,
+        ),
+      );
+    } catch (error) {
+      sendJson(response, 500, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown release-detail error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    requestUrl.pathname ===
+      "/api/library/generation-plan"
+  ) {
+    try {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+
+      if (!releaseId) {
+        sendJson(response, 400, {
+          error:
+            "Missing release query parameter",
+        });
+        return;
+      }
+
+      const scope = parseGenerationScope(
+        requestUrl.searchParams.get("scope"),
+      );
+
+      const trackId =
+        requestUrl.searchParams.get("track") ??
+        undefined;
+
+      if (scope === "track" && !trackId) {
+        sendJson(response, 400, {
+          error:
+            "Missing track query parameter for track scope",
+        });
+        return;
+      }
+
+      const mediaRoot = await resolveMediaRoot();
+      const release = await scanReleaseById(
+        mediaRoot,
+        releaseId,
+      );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: "Release not found",
+        });
+        return;
+      }
+
+      const inferredPreview =
+        buildMetadataPreview(release);
+
+      const generatedPreview =
+        buildGeneratedTomlPreview(
+          release,
+          inferredPreview,
+        );
+
+      sendJson(
+        response,
+        200,
+        buildMetadataGenerationPlan(
+          release,
+          generatedPreview,
+          {
+            scope,
+            trackId,
+          },
+        ),
+      );
+    } catch (error) {
+      sendJson(response, 500, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown generation-plan error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    requestUrl.pathname ===
+      "/api/library/generated-preview"
+  ) {
+    try {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+
+      if (!releaseId) {
+        sendJson(response, 400, {
+          error:
+            "Missing release query parameter",
+        });
+        return;
+      }
+
+      const mediaRoot = await resolveMediaRoot();
+      const release = await scanReleaseById(
+        mediaRoot,
+        releaseId,
+      );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: "Release not found",
+        });
+        return;
+      }
+
+      const inferredPreview =
+        buildMetadataPreview(release);
+
+      sendJson(
+        response,
+        200,
+        buildGeneratedTomlPreview(
+          release,
+          inferredPreview,
+        ),
+      );
+    } catch (error) {
+      sendJson(response, 500, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown generated-preview error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    requestUrl.pathname === "/api/library/preview"
+  ) {
+    try {
+      const releaseId =
+        requestUrl.searchParams.get("release");
+
+      if (!releaseId) {
+        sendJson(response, 400, {
+          error: "Missing release query parameter",
+        });
+        return;
+      }
+
+      const mediaRoot = await resolveMediaRoot();
+      const release = await scanReleaseById(
+        mediaRoot,
+        releaseId,
+      );
+
+      if (!release) {
+        sendJson(response, 404, {
+          error: "Release not found",
+        });
+        return;
+      }
+
+      sendJson(
+        response,
+        200,
+        buildMetadataPreview(release),
+      );
+    } catch (error) {
+      sendJson(response, 500, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown preview error",
+      });
+    }
+
+    return;
+  }
+
+  if (
+    request.method === "GET" &&
+    requestUrl.pathname === "/api/library/scan"
+  ) {
+    try {
+      const mediaRoot = await resolveMediaRoot();
+      const result = await scanMediaLibrary(mediaRoot);
+
+      sendJson(response, 200, result);
+    } catch (error) {
+      sendJson(response, 500, {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Unknown scan error",
+      });
+    }
+
+    return;
+  }
+
+  return routeNotHandled;
+}

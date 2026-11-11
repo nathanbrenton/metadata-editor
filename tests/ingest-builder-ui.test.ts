@@ -4,7 +4,10 @@ import {
 } from "node:fs";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorServerSource,
+} from "./support/editor-source.js";
 
 const appSource = readEditorAppSource();
 const builderSource = readFileSync(
@@ -21,13 +24,7 @@ const serverSource = readFileSync(
   ),
   "utf8",
 );
-const apiServerSource = readFileSync(
-  new URL(
-    "../server/index.ts",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const apiServerSource = readEditorServerSource();
 
 const styleSource = readFileSync(
   new URL(

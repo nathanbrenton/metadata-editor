@@ -130,6 +130,7 @@ Source-shape tests read the combined client through
 - Node.js
 - TypeScript
 - Localhost-only HTTP API
+- `server/index.ts` is only the HTTP entry point and dispatcher. Endpoints live in `server/api/*-routes.ts` grouped by workspace (`system`, `ingest`, `library-media`, `library-metadata`, `publish`); shared request helpers live in `server/api/support.ts`. Each route module returns `routeNotHandled` when none of its endpoints match.
 - Confined media-root scanner
 - TOML parsing and generation with `smol-toml`
 - Atomic create-only writer

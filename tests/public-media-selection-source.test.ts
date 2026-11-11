@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorServerSource,
+} from "./support/editor-source.js";
 
 const planSource = readFileSync(
   new URL("../server/publish-plan.ts", import.meta.url),
@@ -20,10 +23,7 @@ const videoPrepareSource = readFileSync(
   new URL("../server/media-processing/video-prepare.ts", import.meta.url),
   "utf8",
 );
-const serverSource = readFileSync(
-  new URL("../server/index.ts", import.meta.url),
-  "utf8",
-);
+const serverSource = readEditorServerSource();
 const scannerSource = readFileSync(
   new URL("../server/scanner.ts", import.meta.url),
   "utf8",

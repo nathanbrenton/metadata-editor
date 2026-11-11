@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorServerSource,
+} from "./support/editor-source.js";
 
 const appSource = readEditorAppSource();
-const serverSource = readFileSync(
-  new URL("../server/index.ts", import.meta.url),
-  "utf8",
-);
+const serverSource = readEditorServerSource();
 const prepareSource = readFileSync(
   new URL(
     "../server/media-processing/prepare.ts",

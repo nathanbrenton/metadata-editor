@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { readEditorServerSource } from "./support/editor-source.js";
+
 const codecSource = readFileSync(
   new URL(
     "../../packages/media-player/src/waveform-binary.ts",
@@ -33,10 +35,7 @@ const stagingBuildSource = readFileSync(
   new URL("../server/staging-library-build.ts", import.meta.url),
   "utf8",
 );
-const serverSource = readFileSync(
-  new URL("../server/index.ts", import.meta.url),
-  "utf8",
-);
+const serverSource = readEditorServerSource();
 const validatorSource = readFileSync(
   new URL("../server/library-validator.ts", import.meta.url),
   "utf8",

@@ -4,16 +4,13 @@ import {
 } from "node:fs/promises";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorServerSource,
+} from "./support/editor-source.js";
 
 const app = await readEditorAppSource();
-const server = await readFile(
-  new URL(
-    "../server/index.ts",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const server = await readEditorServerSource();
 const fleet = await readFile(
   new URL(
     "../server/publish-fleet.ts",

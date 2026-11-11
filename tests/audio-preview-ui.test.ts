@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorServerSource,
+} from "./support/editor-source.js";
 
 const appSource = await readEditorAppSource();
 const playerSource = await readFile(
@@ -13,10 +16,7 @@ const styleSource = await readFile(
   new URL("../src/styles.css", import.meta.url),
   "utf8",
 );
-const serverSource = await readFile(
-  new URL("../server/index.ts", import.meta.url),
-  "utf8",
-);
+const serverSource = await readEditorServerSource();
 
 test("renders sidebar preview controls through one persistent application player", () => {
   assert.match(
