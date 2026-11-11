@@ -3,6 +3,10 @@ import {
   randomUUID,
 } from "node:crypto";
 import {
+  readReleaseCatalogDocuments,
+  type CatalogEmbeddedDocuments,
+} from "./public-catalog-documents.js";
+import {
   filterPublicMetadata,
 } from "./public-metadata-contract.js";
 import {
@@ -105,6 +109,8 @@ type CatalogEntry = {
   artwork?: {
     href: string;
   };
+  /* Embedded release.json + track.json so players need one request. */
+  documents?: CatalogEmbeddedDocuments;
 };
 
 type PublicCatalog = {
@@ -1078,12 +1084,16 @@ async function buildCatalog(
       await readFile(releaseJson, "utf8"),
     ) as unknown;
 
-    entries.push(
-      catalogEntryFromReleaseDocument(
+    entries.push({
+      ...catalogEntryFromReleaseDocument(
         entry.name,
         parsed,
       ),
-    );
+      documents: await readReleaseCatalogDocuments(
+        path.join(releasesRoot, entry.name),
+        parsed,
+      ),
+    });
   }
 
   const stagedReleaseJson = JSON.parse(
@@ -1096,12 +1106,16 @@ async function buildCatalog(
     ),
   ) as unknown;
 
-  entries.push(
-    catalogEntryFromReleaseDocument(
+  entries.push({
+    ...catalogEntryFromReleaseDocument(
       targetReleaseId,
       stagedReleaseJson,
     ),
-  );
+    documents: await readReleaseCatalogDocuments(
+      stagedReleasePath,
+      stagedReleaseJson,
+    ),
+  });
 
   entries.sort((left, right) =>
     left.id.localeCompare(right.id, undefined, {

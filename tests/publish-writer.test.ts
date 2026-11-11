@@ -49,6 +49,9 @@ import {
 import type {
   FfmpegCapabilities,
 } from "../server/types.js";
+import {
+  findStaleCatalogDocuments,
+} from "../server/public-catalog-documents.js";
 
 const readyCapabilities: FfmpegCapabilities = {
   available: true,
@@ -863,6 +866,49 @@ test("builds a sanitized HLS public package without canonical/private files", as
     assert.equal(
       catalog.releases[0].title,
       "Writer Test",
+    );
+
+    // The catalog embeds the exact public documents so a player can render
+    // the whole catalog from one request.
+    const embedded = catalog.releases[0].documents;
+    const publishedRelease = JSON.parse(
+      await readFile(
+        path.join(publicRelease, "release.json"),
+        "utf8",
+      ),
+    ) as { tracks: Array<{ id: string; href: string }> };
+    assert.deepEqual(embedded.release, publishedRelease);
+    assert.deepEqual(
+      Object.keys(embedded.tracks),
+      publishedRelease.tracks.map((track) => track.id),
+    );
+    for (const track of publishedRelease.tracks) {
+      assert.deepEqual(
+        embedded.tracks[track.id],
+        JSON.parse(
+          await readFile(
+            path.join(publicRelease, track.href),
+            "utf8",
+          ),
+        ),
+      );
+    }
+    assert.deepEqual(
+      await findStaleCatalogDocuments(
+        fixture.publishRoot,
+        catalog,
+      ),
+      [],
+    );
+    const tamperedCatalog = structuredClone(catalog);
+    tamperedCatalog.releases[0].documents.release.metadata.title =
+      "Edited Outside Publish";
+    assert.deepEqual(
+      await findStaleCatalogDocuments(
+        fixture.publishRoot,
+        tamperedCatalog,
+      ),
+      [fixture.releaseId],
     );
 
     const currentPlan = await reviewedPlan(

@@ -336,3 +336,70 @@ test("interrupted unpublish finalizes when the public removal and staged catalog
     });
   }
 });
+
+test("unpublishing one release keeps the other catalog members intact", async () => {
+  const fixture = await createPublishedFixture();
+  const otherId = "2026-08-12_remaining-release";
+  const otherRoot = path.join(fixture.root, "releases", otherId);
+  const otherEntry = {
+    id: otherId,
+    href: `releases/${otherId}/release.json`,
+    title: "Remaining Release",
+    primaryArtist: "Test Artist",
+    artwork: {
+      href: `releases/${otherId}/artwork/front/artwork.png`,
+    },
+    documents: {
+      release: { title: "Remaining Release", tracks: [] },
+      tracks: {},
+    },
+  };
+
+  try {
+    await mkdir(otherRoot, { recursive: true });
+    await writeFile(
+      path.join(otherRoot, "release.json"),
+      '{"title":"Remaining Release","tracks":[]}\n',
+    );
+    await writeFile(
+      path.join(otherRoot, "publication-manifest.json"),
+      `${JSON.stringify({ releaseId: otherId })}\n`,
+    );
+
+    const catalogPath = path.join(fixture.root, "catalog.json");
+    const catalog = JSON.parse(
+      await readFile(catalogPath, "utf8"),
+    ) as { releases: unknown[] };
+    catalog.releases.push(otherEntry);
+    await writeFile(
+      catalogPath,
+      `${JSON.stringify(catalog, null, 2)}\n`,
+    );
+
+    const plan = await buildPublicReleaseUnpublishPlan(
+      fixture.root,
+      fixture.releaseId,
+    );
+    assert.equal(plan.status, "ready");
+
+    await unpublishPublicRelease(
+      fixture.root,
+      fixture.releaseId,
+      {
+        expectedPlanFingerprint: plan.planFingerprint,
+        planGeneratedAt: plan.generatedAt,
+        confirmation: plan.confirmation,
+      },
+    );
+
+    const rewritten = JSON.parse(
+      await readFile(catalogPath, "utf8"),
+    ) as { releases: unknown[] };
+    assert.deepEqual(rewritten.releases, [otherEntry]);
+  } finally {
+    await rm(path.dirname(fixture.root), {
+      recursive: true,
+      force: true,
+    });
+  }
+});

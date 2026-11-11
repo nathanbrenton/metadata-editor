@@ -1059,3 +1059,27 @@ purpose (Library asset locations, sample-clearance records, private sample
 notes, the editorial authoring profile). Any other key is withheld from the
 Web Package and reported by Library validation as
 `unclassified-public-metadata` until it is added to one of the two lists.
+
+## One-request public catalog
+
+Each `catalog.json` entry embeds that release's public documents:
+
+```json
+{
+  "id": "2025-08-31_killchain",
+  "href": "releases/2025-08-31_killchain/release.json",
+  "documents": {
+    "release": { "…": "the release.json document" },
+    "tracks": { "<track-id>": { "…": "that track.json document" } }
+  }
+}
+```
+
+The per-release `release.json` / `track.json` files remain authoritative and
+are still published; the embedded copies let Hiplingo render the whole catalog
+from one request and are rebuilt for every member whenever any release is
+published. The catalog schema stays `audio-player-catalog` v1 (the field is
+additive), entries written before embedding simply have no `documents`, and
+deployment verification blocks with `catalog-embedded-documents-stale` if an
+embedded copy differs from its files. Unpublish rewrites the catalog without
+altering the remaining members' entries.

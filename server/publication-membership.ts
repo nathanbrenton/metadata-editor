@@ -231,7 +231,13 @@ async function readCatalog(
         );
       }
 
+      /*
+       * Keep the whole entry. Rewriting the catalog (for example on
+       * unpublish) must not strip fields this module does not interpret,
+       * such as artwork hrefs and embedded documents of other releases.
+       */
       releases.push({
+        ...item,
         id: item.id,
         href: item.href,
         ...(typeof item.title === "string"

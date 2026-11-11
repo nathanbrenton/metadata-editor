@@ -3,6 +3,9 @@ import {
   randomUUID,
 } from "node:crypto";
 import {
+  findStaleCatalogDocuments,
+} from "./public-catalog-documents.js";
+import {
   lstat,
   mkdir,
   readFile,
@@ -785,6 +788,19 @@ export async function auditPublishedMediaDeployment(
         });
       } else {
         catalogEntries = parsedEntries;
+
+        for (const releaseId of await findStaleCatalogDocuments(
+          canonicalPublishRoot,
+          parsedCatalog,
+        )) {
+          issues.push({
+            code: "catalog-embedded-documents-stale",
+            severity: "blocked",
+            relativePath: catalogFilename,
+            message:
+              `Public catalog embeds release or track metadata for ${releaseId} that no longer matches its published files. Update that release's Web Package to rebuild the catalog.`,
+          });
+        }
       }
       const digest = await sha256File(catalogPath);
       catalogFile = {
