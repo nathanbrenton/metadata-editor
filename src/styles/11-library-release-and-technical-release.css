@@ -1,0 +1,1203 @@
+/* Media File Contract v2 release-level conformance. */
+.media-file-spec-badge {
+  width: max-content;
+  max-width: 100%;
+  cursor: help;
+  white-space: nowrap;
+}
+
+.staging-release-identity .media-file-spec-badge {
+  margin-top: 0.28rem;
+  font-size: 0.62rem;
+}
+
+.release-status-actions .media-file-spec-badge {
+  order: -1;
+}
+
+.publish-readiness-stack .media-file-spec-badge {
+  margin-left: auto;
+}
+
+
+/* Workspace header refresh commands */
+.page-header-refresh-button {
+  min-width: 8.4rem;
+  white-space: nowrap;
+}
+
+.ingest-view-header > div:first-child {
+  min-width: 0;
+}
+
+@media (max-width: 58rem) {
+  .page-header-refresh-button {
+    min-width: 0;
+  }
+}
+
+
+/* Ingest candidate health belongs to the Candidate Inspection card. */
+.ingest-candidate-health {
+  display: grid;
+  min-width: 0;
+  gap: 0.3rem;
+  border: 1px solid #46515b;
+  border-radius: 0.4rem;
+  padding: 0.55rem 0.7rem;
+  background: #171c20;
+}
+
+.ingest-candidate-health-label {
+  color: #8e99a3;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.ingest-candidate-health > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.ingest-candidate-health strong {
+  overflow: hidden;
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ingest-candidate-health-badge {
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0.14rem 0.45rem;
+  font-size: 0.66rem;
+  font-weight: 800;
+  line-height: 1.15;
+}
+
+.ingest-candidate-health.success {
+  border-color: rgba(83, 151, 103, 0.62);
+  background: rgba(36, 83, 48, 0.24);
+}
+
+.ingest-candidate-health.success .ingest-candidate-health-badge,
+.ingest-candidate-health.success strong {
+  color: #a9d9b5;
+}
+
+.ingest-candidate-health.warning {
+  border-color: rgba(190, 139, 57, 0.66);
+  background: rgba(96, 67, 26, 0.25);
+}
+
+.ingest-candidate-health.warning .ingest-candidate-health-badge,
+.ingest-candidate-health.warning strong {
+  color: #e0c082;
+}
+
+.ingest-candidate-health.error {
+  border-color: rgba(143, 77, 86, 0.72);
+  background: rgba(82, 44, 51, 0.28);
+}
+
+.ingest-candidate-health.error .ingest-candidate-health-badge,
+.ingest-candidate-health.error strong {
+  color: #f0cbd1;
+}
+
+/* Live UI reconciliation — exact render paths */
+
+/* Multiple inferred dates are evidence for review, not an amber warning. */
+.ingest-date-evidence {
+  min-width: 3.7rem;
+  justify-content: center;
+  border: 1px solid #46515b;
+  background: #222a30;
+  color: #b8c4cd;
+  white-space: nowrap;
+}
+
+/* Selected candidate is compact Staging context, below the application header. */
+.ingest-builder-header-context {
+  padding: 0.62rem 0.8rem;
+}
+
+.ingest-builder-header-context .ingest-inspection-identity {
+  min-width: 0;
+}
+
+.ingest-staging-candidate-context {
+  min-width: 0;
+}
+
+.ingest-staging-candidate-context .eyebrow {
+  margin-bottom: 0.12rem;
+  font-size: 0.61rem;
+}
+
+.ingest-staging-candidate-line {
+  display: flex;
+  min-width: 0;
+}
+
+.ingest-staging-candidate-name {
+  min-width: 0;
+  overflow: hidden;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ingest-staging-candidate-cue {
+  color: #8f9aa4;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.ingest-builder-header-context code {
+  color: #9aa5ae;
+}
+
+/* Five short guided steps remain one desktop row. */
+.ingest-guided-steps.ingest-guided-step-tabs {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: 0.34rem;
+}
+
+.ingest-guided-steps.ingest-guided-step-tabs > li {
+  min-width: 0;
+}
+
+.ingest-guided-steps.ingest-guided-step-tabs button {
+  justify-content: center;
+  min-width: 0;
+  gap: 0;
+  padding: 0.56rem 0.55rem;
+  font-size: 0.78rem;
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .ingest-guided-steps.ingest-guided-step-tabs {
+    grid-template-columns: repeat(5, minmax(7rem, 1fr)) !important;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .ingest-staging-candidate-cue {
+    flex-basis: 100%;
+  }
+}
+
+/* Workspace visual reconciliation — candidate context + Publish controls */
+
+.ingest-builder-header-context {
+  padding-block: 0.48rem;
+}
+
+.ingest-staging-candidate-line {
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 0.45rem;
+}
+
+.ingest-staging-candidate-label {
+  flex: 0 0 auto;
+  margin: 0 !important;
+  color: #8f9aa4;
+  font-size: 0.58rem !important;
+  letter-spacing: 0.08em;
+}
+
+.ingest-staging-candidate-name {
+  flex: 0 1 auto;
+  max-width: min(26rem, 38vw);
+  color: #b7c0c7;
+  font-size: 0.74rem !important;
+  font-weight: 550 !important;
+}
+
+.ingest-staging-candidate-cue {
+  flex: 0 0 auto;
+  font-size: 0.64rem;
+}
+
+.ingest-builder-header-context code {
+  margin-top: 0.12rem;
+  font-size: 0.64rem;
+}
+
+.publish-workspace-actions {
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  width: min(100%, 29rem);
+}
+
+.publish-workspace-action-row {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.publish-workspace-actions .publish-header-storage-boundary {
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  width: 100%;
+  margin-top: 0.15rem;
+  padding-top: 0.45rem;
+  gap: 0.4rem;
+}
+
+.publish-workspace-actions .publish-header-storage-boundary > .private,
+.publish-workspace-actions .publish-header-storage-boundary > .planned {
+  padding: 0.36rem 0.45rem;
+  gap: 0.08rem;
+}
+
+.publish-workspace-actions .publish-header-storage-boundary > .private span,
+.publish-workspace-actions .publish-header-storage-boundary > .planned span {
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+
+.publish-workspace-actions .publish-header-storage-boundary code {
+  font-size: 0.7rem;
+}
+
+@media (max-width: 760px) {
+  .ingest-staging-candidate-line {
+    flex-wrap: wrap;
+  }
+
+  .publish-workspace-actions {
+    width: 100%;
+  }
+
+  .publish-workspace-action-row {
+    width: 100%;
+  }
+
+  .publish-workspace-action-row button {
+    flex: 1 1 0;
+  }
+}
+
+/* Technical Media Contract v1 — compact advisory health in Library/Publish. */
+.technical-contract-badge,
+.technical-health-badge {
+  white-space: nowrap;
+}
+
+.library-release-browser-toolbar > div:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.28rem 0.55rem;
+}
+
+.library-release-browser-toolbar .technical-contract-badge {
+  margin-left: 0.15rem;
+}
+
+.publish-workspace-action-row .technical-contract-badge {
+  order: -1;
+}
+
+/* Release diagnostics + technical inspector v1 */
+.technical-release-inspector {
+  display: grid;
+  gap: 0.65rem;
+  border: 1px solid #38434c;
+  border-radius: 0.46rem;
+  padding: 0.75rem;
+  background: #171d22;
+}
+
+.technical-release-inspector > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.technical-release-inspector > header > div {
+  display: grid;
+  gap: 0.14rem;
+}
+
+.technical-release-inspector > header strong {
+  color: #e2e7eb;
+  font-size: 0.82rem;
+}
+
+.technical-release-policy,
+.technical-release-message {
+  margin: 0;
+  color: #9ca7b1;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.technical-release-message.warning {
+  color: #e7c98f;
+}
+
+.technical-release-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.technical-release-counts > span {
+  border: 1px solid #36414a;
+  border-radius: 999px;
+  padding: 0.18rem 0.4rem;
+  background: #1d242a;
+  color: #aeb8c0;
+  font-size: 0.66rem;
+  white-space: nowrap;
+}
+
+.technical-release-issues {
+  display: grid;
+  gap: 0.32rem;
+}
+
+.technical-release-issues > div {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: start;
+  gap: 0.45rem;
+  color: #c8d0d6;
+  font-size: 0.72rem;
+}
+
+.technical-release-domains {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.technical-release-domains details {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #343f48;
+  border-radius: 0.38rem;
+  background: #14191d;
+}
+
+.technical-release-domains summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.48rem 0.55rem;
+  cursor: pointer;
+  color: #d0d7dd;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.technical-release-domains summary small {
+  color: #87939d;
+  font-weight: 550;
+}
+
+.technical-release-domains dl {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  border-top: 1px solid #303941;
+}
+
+.technical-inspector-fact {
+  display: grid;
+  grid-template-columns: minmax(5rem, 0.42fr) minmax(0, 1fr);
+  gap: 0.5rem;
+  padding: 0.42rem 0.55rem;
+  border-bottom: 1px solid #2c353c;
+}
+
+.technical-inspector-fact:last-child {
+  border-bottom: 0;
+}
+
+.technical-inspector-fact dt,
+.technical-inspector-fact dd {
+  margin: 0;
+}
+
+.technical-inspector-fact dt {
+  color: #7f8b95;
+  font-size: 0.63rem;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.technical-inspector-fact dd {
+  overflow-wrap: anywhere;
+  color: #bcc6ce;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.publish-plan-modal > .technical-release-inspector {
+  margin: 0.8rem 1rem;
+}
+
+.technical-release-inspector.compact .technical-release-domains {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 980px) {
+  .technical-release-domains,
+  .technical-release-inspector.compact .technical-release-domains {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Publish recovery clarity v1 */
+.publish-plan-issues .publish-issue-number-column,
+.publish-plan-issues .publish-issue-number-cell {
+  width: 2.6rem;
+  min-width: 2.6rem;
+  max-width: 2.6rem;
+  padding-left: 0.55rem;
+  padding-right: 0.55rem;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.publish-plan-issues .publish-issue-number-cell {
+  color: var(--text-muted);
+}
+
+/* Library Tiles view */
+
+/*
+ * Tiles are square release cards. Artwork fills the card and release metadata
+ * is overlaid, so artwork-first browsing stays compact instead of turning
+ * each release into a portrait card.
+ */
+.library-release-list--tiles {
+  align-items: start;
+  gap: 0.65rem;
+}
+
+.library-release-list--tiles .library-video-disclosure,
+.library-release-list--tiles .library-release-disclosures,
+.library-release-list--tiles .admin-tools-button {
+  display: none;
+}
+
+.library-release-list--tiles .library-release-card {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+}
+
+.library-release-list--tiles .library-release-header {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+}
+
+.library-release-list--tiles .release-primary-action {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.library-release-list--tiles .release-artwork-tile,
+.library-release-list--tiles
+  .release-primary-action
+  > .release-artwork-tile {
+  position: absolute;
+  inset: 0;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: auto;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+
+/*
+ * Keep authored/fallback tile images full-card. The generic brand fallback
+ * rule later in this file intentionally uses a smaller contained logo in
+ * non-Tiles media slots, so these three declarations retain precedence here.
+ */
+.library-release-list--tiles .release-artwork-tile > img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  object-fit: cover !important;
+}
+
+.library-release-list--tiles .release-summary {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: grid;
+  width: auto;
+  gap: 0.12rem;
+  box-sizing: border-box;
+  padding: 3rem 0.72rem 0.72rem;
+  background:
+    linear-gradient(
+      to bottom,
+      rgb(0 0 0 / 0%),
+      rgb(0 0 0 / 72%) 46%,
+      rgb(0 0 0 / 92%) 100%
+    );
+  color: #f4f6f7;
+  pointer-events: none;
+}
+
+.library-release-list--tiles .release-title {
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1.08;
+  white-space: normal;
+}
+
+.library-release-list--tiles .release-artist {
+  color: #eef1f3;
+  font-size: 0.76rem;
+  white-space: normal;
+}
+
+.library-release-list--tiles .release-subtitle {
+  color: #c3cbd2;
+  font-size: 0.68rem;
+  white-space: normal;
+}
+
+/* Library Tiles rich tooltip */
+
+/* The helper node must have no effect at all in Rows or Cards. */
+.library-tile-details-tooltip {
+  display: none;
+}
+
+/*
+ * Tiles keep artwork clean at rest. The existing status block is not removed
+ * or recomputed: it is simply hidden until the tile tooltip is active.
+ */
+.library-release-list--tiles .release-status-actions {
+  position: absolute;
+  top: auto;
+  right: 1.15rem;
+  bottom: 1.05rem;
+  left: 1.15rem;
+  z-index: 7;
+  display: flex;
+  width: auto;
+  max-width: none;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    visibility 120ms ease;
+}
+
+.library-release-list--tiles .library-tile-details-tooltip {
+  position: absolute;
+  z-index: 6;
+  inset: 0.45rem;
+  display: grid;
+  box-sizing: border-box;
+  align-content: start;
+  gap: 0.22rem;
+  overflow: hidden;
+  border: 1px solid rgb(113 130 145 / 78%);
+  border-radius: 0.48rem;
+  padding: 0.78rem 0.78rem 5.8rem;
+  background: rgb(12 15 18 / 94%);
+  box-shadow:
+    0 0.7rem 1.4rem rgb(0 0 0 / 42%),
+    inset 0 1px rgb(255 255 255 / 5%);
+  color: #e8edf1;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(0.16rem);
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms ease;
+}
+
+.library-release-list--tiles
+  .library-release-card:hover
+  .library-tile-details-tooltip,
+.library-release-list--tiles
+  .library-release-card:focus-within
+  .library-tile-details-tooltip,
+.library-release-list--tiles
+  .library-release-card:hover
+  .release-status-actions,
+.library-release-list--tiles
+  .library-release-card:focus-within
+  .release-status-actions {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+}
+
+.library-release-list--tiles .library-tile-tooltip-kicker,
+.library-release-list--tiles .library-tile-tooltip-status-heading {
+  color: #9eabb5;
+  font-size: 0.62rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.library-release-list--tiles .library-tile-tooltip-title {
+  margin-bottom: 0.08rem;
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1.12;
+}
+
+.library-release-list--tiles .library-tile-details-tooltip > span:not(
+    .library-tile-tooltip-kicker,
+    .library-tile-tooltip-divider,
+    .library-tile-tooltip-status-heading
+  ) {
+  color: #d8dee3;
+  font-size: 0.74rem;
+  line-height: 1.25;
+}
+
+.library-release-list--tiles .library-tile-tooltip-divider {
+  height: 1px;
+  margin: 0.34rem 0 0.2rem;
+  background: rgb(143 158 171 / 28%);
+}
+
+.library-release-list--tiles .library-tile-details-tooltip small {
+  display: grid;
+  grid-template-columns: 3.5rem minmax(0, 1fr);
+  gap: 0.35rem;
+  min-width: 0;
+  color: #9ca8b2;
+  font-size: 0.64rem;
+  line-height: 1.25;
+}
+
+.library-release-list--tiles .library-tile-details-tooltip small > span {
+  color: #bac3ca;
+  font-weight: 700;
+}
+
+.library-release-list--tiles .library-tile-details-tooltip code {
+  overflow: hidden;
+  color: #aeb9c2;
+  font-size: 0.61rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-release-list--tiles .library-tile-tooltip-status-heading {
+  position: absolute;
+  right: 0.78rem;
+  bottom: 4.35rem;
+  left: 0.78rem;
+  padding-top: 0.48rem;
+  border-top: 1px solid rgb(143 158 171 / 28%);
+}
+
+/* Keep the existing badge colors/content; only flatten their old tile shadow. */
+.library-release-list--tiles .release-status-actions .badge {
+  box-shadow: none;
+  font-size: 0.61rem;
+}
+
+/* Library Tiles size slider */
+.library-tile-size-control {
+  display: grid;
+  grid-template-columns: auto minmax(7.5rem, 11rem) 3.45rem;
+  align-items: center;
+  gap: 0.42rem;
+  color: #98a3ad;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.library-tile-size-control > span {
+  color: #aeb8c0;
+  font-weight: 650;
+}
+
+.library-tile-size-control input[type="range"] {
+  width: 100%;
+  min-width: 7.5rem;
+  margin: 0;
+  padding: 0;
+  accent-color: #71879a;
+  cursor: ew-resize;
+}
+
+.library-tile-size-control output {
+  min-width: 3.45rem;
+  color: #cbd3da;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+@media (max-width: 52rem) {
+  .library-tile-size-control {
+    grid-template-columns: auto minmax(6rem, 1fr) 3.45rem;
+    width: 100%;
+  }
+}
+
+/* Publish operations & recovery */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+.publish-batch-select-column,
+.publish-batch-select-cell {
+  padding-inline: 0.55rem;
+  text-align: center;
+}
+
+.publish-batch-select-cell input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+.publish-batch-prepare-button {
+  border-color: #526879;
+  background: #263641;
+  color: #e5edf3;
+  font-weight: 750;
+}
+
+.publish-interrupted-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.8rem;
+  margin-bottom: 0.9rem;
+  border: 1px solid #7d5148;
+  border-radius: 0.45rem;
+  padding: 0.75rem 0.9rem;
+  background: #2b1e1b;
+}
+
+.publish-interrupted-alert > div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.publish-interrupted-alert strong {
+  color: #f1c3b8;
+}
+
+.publish-interrupted-alert span {
+  color: #c9aaa3;
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.publish-operation-history {
+  margin-top: 0.9rem;
+  border: 1px solid #39444d;
+  border-radius: 0.45rem;
+  background: #15191d;
+}
+
+.publish-operation-history > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.72rem 0.85rem;
+  color: #d7dde2;
+  font-size: 0.78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.publish-operation-history > summary > span:last-child {
+  color: #909ca6;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.publish-operation-history-content {
+  overflow-x: auto;
+  border-top: 1px solid #343d45;
+}
+
+.publish-operation-history-content table {
+  width: 100%;
+  min-width: 64rem;
+  border-collapse: collapse;
+  font-size: 0.72rem;
+}
+
+.publish-operation-history-content th,
+.publish-operation-history-content td {
+  border-right: 1px solid #303840;
+  border-bottom: 1px solid #303840;
+  padding: 0.62rem 0.7rem;
+  vertical-align: top;
+  text-align: left;
+}
+
+.publish-operation-history-content th:last-child,
+.publish-operation-history-content td:last-child {
+  border-right: 0;
+}
+
+.publish-operation-history-content tbody tr:last-child th,
+.publish-operation-history-content tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.publish-operation-history-content th[scope="row"] strong,
+.publish-operation-history-content th[scope="row"] code {
+  display: block;
+}
+
+.publish-operation-history-content th[scope="row"] code {
+  max-width: 19rem;
+  margin-top: 0.2rem;
+  overflow: hidden;
+  color: #8f9aa4;
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publish-operation-history-content > p {
+  margin: 0;
+  padding: 0.8rem;
+  color: #909ca6;
+  font-size: 0.74rem;
+}
+
+.publish-operation-recovery-cell {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.publish-operation-recovery-cell small {
+  color: #aeb8c0;
+  line-height: 1.35;
+}
+
+.publish-operation-recovery-cell button {
+  justify-self: start;
+}
+
+/* App shell branding + compact header v1 */
+.page-header-branding {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.page-header-brand {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.48rem;
+  margin: 0;
+  border: 0;
+  padding: 0.15rem 0.2rem 0.15rem 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.page-header-brand:hover {
+  background: transparent;
+}
+
+.hiplingo-logo {
+  display: block;
+  width: 2.35rem;
+  height: 2.35rem;
+  flex: 0 0 auto;
+  object-fit: contain;
+  object-position: center;
+  background: transparent;
+}
+
+.page-header-brand:hover .hiplingo-logo,
+.page-header-brand:focus-visible .hiplingo-logo {
+  filter: brightness(1.12);
+}
+
+.library-video-editor-wide-field {
+  grid-column: 1 / -1;
+}
+
+.library-video-editor-wide-field textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+}
+
+.library-video-editor-fields textarea {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #414b55;
+  border-radius: 0.3rem;
+  padding: 0.45rem 0.55rem;
+  background: #0f1418;
+  color: #e4e9ed;
+  font: inherit;
+  font-size: 0.78rem;
+  text-transform: none;
+}
+
+.metadata-detail-home-button {
+  align-self: center;
+}
+
+/* Local Public Package fleet and deployment snapshot */
+.publish-deployment-overview {
+  display: grid;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+  border: 1px solid #37424c;
+  border-radius: 0.55rem;
+  padding: 0.85rem 0.95rem;
+  background: #11171c;
+}
+
+.publish-deployment-overview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.publish-deployment-overview-header h3 {
+  margin: 0.08rem 0 0.16rem;
+  font-size: 1rem;
+}
+
+.publish-deployment-overview-header p {
+  margin: 0;
+  color: #aab5bd;
+  font-size: 0.78rem;
+}
+
+.publish-deployment-kicker {
+  color: #7f929f;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.publish-deployment-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.publish-fleet-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.publish-fleet-summary-grid > div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+  border: 1px solid #303a43;
+  border-radius: 0.42rem;
+  padding: 0.5rem 0.58rem;
+  background: #0d1216;
+}
+
+.publish-fleet-summary-grid span {
+  color: #8f9ca6;
+  font-size: 0.68rem;
+}
+
+.publish-fleet-summary-grid strong {
+  font-size: 1.05rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.publish-deployment-integrity-line {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem 1.1rem;
+  flex-wrap: wrap;
+  color: #aab5bd;
+  font-size: 0.74rem;
+}
+
+.publish-deployment-integrity-line strong {
+  color: #d9e1e6;
+}
+
+.publish-library-freshness-gate {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, auto)) minmax(18rem, 1fr);
+  align-items: center;
+  gap: 0.55rem 1rem;
+  border: 1px solid #34414a;
+  border-radius: 0.42rem;
+  padding: 0.55rem 0.65rem;
+  background: #0d1317;
+}
+
+.publish-library-freshness-gate.warning {
+  border-color: #725f35;
+  background: #19160f;
+}
+
+.publish-library-freshness-gate > div {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.publish-library-freshness-gate span {
+  color: #8f9ca6;
+  font-size: 0.65rem;
+}
+
+.publish-library-freshness-gate strong {
+  color: #d9e1e6;
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.publish-library-freshness-gate.warning strong {
+  color: #e2c679;
+}
+
+.publish-library-freshness-gate p {
+  margin: 0;
+  color: #9fabb3;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
+.publish-library-freshness-gate.warning p {
+  color: #c9b98f;
+}
+
+.publish-deployment-issues {
+  border-top: 1px solid #303a43;
+  padding-top: 0.65rem;
+}
+
+.publish-deployment-issues summary {
+  cursor: pointer;
+  color: #c6d0d7;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.publish-deployment-issues ol {
+  display: grid;
+  gap: 0.42rem;
+  margin: 0.6rem 0 0;
+  padding-left: 1.25rem;
+}
+
+.publish-deployment-issues li {
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 0.35fr) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.45rem;
+  color: #b7c1c8;
+  font-size: 0.72rem;
+}
+
+.publish-deployment-issues code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.publish-deployment-loading {
+  margin: 0;
+  color: #8f9ca6;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 1100px) {
+  .publish-fleet-summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .publish-deployment-overview-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .publish-deployment-actions {
+    justify-content: flex-start;
+  }
+}

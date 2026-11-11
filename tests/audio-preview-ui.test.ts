@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   readEditorAppSource,
   readEditorServerSource,
+  readEditorStyles,
 } from "./support/editor-source.js";
 
 const appSource = await readEditorAppSource();
@@ -12,10 +13,7 @@ const playerSource = await readFile(
   new URL("../src/PersistentLibraryPlayer.tsx", import.meta.url),
   "utf8",
 );
-const styleSource = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styleSource = await readEditorStyles();
 const serverSource = await readEditorServerSource();
 
 test("renders sidebar preview controls through one persistent application player", () => {

@@ -108,3 +108,27 @@ export function readEditorServerSource(): string {
     )
     .join("\n");
 }
+
+/*
+ * src/styles.css is an ordered list of @imports (see src/styles/). Tests
+ * that assert on the editor's CSS read the parts inlined in cascade order.
+ */
+export function readEditorStyles(): string {
+  const entry = readFileSync(
+    path.join(sourceRoot, "styles.css"),
+    "utf8",
+  );
+  const parts = [...entry.matchAll(/^@import "(.+)";$/gm)].map(
+    (match) => match[1],
+  );
+
+  if (parts.length === 0) {
+    return entry;
+  }
+
+  return parts
+    .map((part) =>
+      readFileSync(path.join(sourceRoot, part), "utf8"),
+    )
+    .join("");
+}

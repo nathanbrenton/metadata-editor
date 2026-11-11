@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorStyles,
+} from "./support/editor-source.js";
 
 const appSource = await readEditorAppSource();
-const styleSource = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styleSource = await readEditorStyles();
 const helpContentSource = await readFile(
   new URL("../src/workflow-help-content.ts", import.meta.url),
   "utf8",

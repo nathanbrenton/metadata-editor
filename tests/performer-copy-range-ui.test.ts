@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorStyles,
+} from "./support/editor-source.js";
 
 const appSource = readEditorAppSource();
-const styleSource = readFileSync(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styleSource = readEditorStyles();
 
 test("offers an inclusive track-range selector in the performer-copy dialog", () => {
   assert.match(appSource, /Inclusive track range/);

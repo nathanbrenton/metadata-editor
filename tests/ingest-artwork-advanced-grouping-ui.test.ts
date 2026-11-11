@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const styleSource = readFileSync(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+import { readEditorStyles } from "./support/editor-source.js";
+
+const styleSource = readEditorStyles();
 const helpSource = readFileSync(
   new URL("../src/workflow-help-content.ts", import.meta.url),
   "utf8",

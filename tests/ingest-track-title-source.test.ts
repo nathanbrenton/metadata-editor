@@ -13,6 +13,8 @@ import {
   titleFromFilenameField,
 } from "../src/ingest-track-title-source.js";
 
+import { readEditorStyles } from "./support/editor-source.js";
+
 function audioFile(
   relativePath: string,
   filename: string,
@@ -38,10 +40,7 @@ const builderSource = await readFile(
   "utf8",
 );
 
-const styleSource = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styleSource = await readEditorStyles();
 
 const helpSource = await readFile(
   new URL("../src/workflow-help-content.ts", import.meta.url),

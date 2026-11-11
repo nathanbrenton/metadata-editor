@@ -1,0 +1,1249 @@
+/* Provenance chips describe the effective value source without adding a table column. */
+.metadata-value-provenance {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.metadata-provenance-chip {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  max-width: 100%;
+  border: 1px solid #3b4650;
+  border-radius: 999px;
+  padding: 0.08rem 0.38rem;
+  background: #192027;
+  color: #9eabb6;
+  font-size: 0.59rem;
+  font-weight: 800;
+  letter-spacing: 0.045em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  cursor: help;
+}
+
+.metadata-provenance-chip.is-stored {
+  border-color: #343d45;
+  background: #171c20;
+  color: #7f8b95;
+  opacity: 0.62;
+  transition: opacity 120ms ease;
+}
+
+.metadata-table-row:hover
+.metadata-provenance-chip.is-stored {
+  opacity: 1;
+}
+
+.metadata-provenance-chip.is-inherited {
+  border-color: #567086;
+  border-style: dashed;
+  background: #19242d;
+  color: #a8c0d4;
+}
+
+.metadata-provenance-chip.is-generated {
+  border-color: #59664b;
+  background: #20271b;
+  color: #bccb9e;
+}
+
+/* Shared prose provenance styling remains for longer guidance and edit-mode notes. */
+.metadata-value:has(.metadata-provenance-note),
+.metadata-value:has(.metadata-value-provenance) {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.metadata-provenance-note {
+  color: #7f9aaf;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.015em;
+  line-height: 1.3;
+}
+
+.metadata-editor-field
+.metadata-provenance-note {
+  align-self: flex-start;
+}
+
+
+.missing-metadata-fields {
+  border-bottom: 1px solid #3a424b;
+  padding: 1rem;
+  background: #171c21;
+}
+
+.missing-metadata-fields header h3 {
+  margin: 0.15rem 0 0.35rem;
+}
+
+.missing-metadata-fields header p {
+  margin: 0;
+  color: #98a2ad;
+}
+
+.missing-metadata-field-list {
+  display: grid;
+  grid-template-columns:
+    repeat(
+      auto-fit,
+      minmax(16rem, 1fr)
+    );
+  gap: 0.65rem;
+  margin-top: 0.9rem;
+}
+
+.missing-metadata-field-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  border: 1px solid #39434d;
+  border-radius: 0.4rem;
+  padding: 0.75rem;
+  background: #12171b;
+  cursor: pointer;
+}
+
+.missing-metadata-field-option input {
+  margin-top: 0.2rem;
+}
+
+.missing-metadata-field-option span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.missing-metadata-field-option small {
+  color: #8f99a4;
+  line-height: 1.4;
+}
+
+.missing-metadata-field-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.85rem;
+}
+
+/* Rotate the Related tags triangle when its disclosure is open. */
+.metadata-related-tags > summary
+.metadata-section-triangle {
+  transform: rotate(0deg);
+  transition: transform 120ms ease;
+}
+
+.metadata-related-tags[open] > summary
+.metadata-section-triangle {
+  transform: rotate(90deg);
+}
+
+
+.performer-record-editor {
+  background: #15191d;
+}
+
+.performer-record-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid #303840;
+  padding: 0.7rem 0.9rem;
+}
+
+.credit-pair-help-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.3rem;
+  color: #d7dde3;
+}
+
+.performer-record-toolbar p,
+.performer-empty-state p {
+  margin: 0;
+  color: #929ca6;
+  font-size: 0.78rem;
+}
+
+.performer-record-toolbar
+.performer-validation-message {
+  margin-top: 0.25rem;
+  color: #d6b36a;
+}
+
+.performer-record-row.is-incomplete {
+  background: rgb(117 78 20 / 12%);
+}
+
+.performer-record-row
+input[aria-invalid="true"] {
+  border-color: #8a642d;
+}
+
+.performer-add-button,
+.performer-remove-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.performer-add-button > span:first-child,
+.performer-remove-button > span {
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.performer-remove-button {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+}
+
+.performer-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.performer-record-column-headings,
+.performer-record-row {
+  display: grid;
+  grid-template-columns:
+    minmax(12rem, 1fr)
+    minmax(12rem, 1fr)
+    auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.performer-record-column-headings {
+  border-bottom: 1px solid #303840;
+  padding: 0.6rem 0.9rem;
+  color: #98a2ad;
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.performer-record-column-headings > div {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.performer-record-row {
+  border-bottom: 1px solid #30373e;
+  padding: 0.65rem 0.9rem;
+}
+
+.performer-record-row:last-child {
+  border-bottom: 0;
+}
+
+.performer-record-row label,
+.performer-record-row input {
+  min-width: 0;
+  width: 100%;
+}
+
+.performer-record-row > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.performer-related-tags {
+  margin-top: 0;
+}
+
+.performer-sort-name-list {
+  display: grid;
+}
+
+.performer-sort-name-list > header,
+.performer-sort-name-list > label {
+  display: grid;
+  grid-template-columns:
+    minmax(12rem, 0.75fr)
+    minmax(14rem, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid #30373e;
+  padding: 0.65rem 0.9rem;
+}
+
+.performer-sort-name-list > header {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.performer-sort-name-list > label:last-child {
+  border-bottom: 0;
+}
+
+.performer-sort-name-list input {
+  width: 100%;
+}
+
+@media (max-width: 52rem) {
+  .performer-record-toolbar,
+  .performer-empty-state {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .performer-record-column-headings {
+    display: none;
+  }
+
+  .performer-record-row {
+    grid-template-columns: 1fr;
+  }
+
+  .performer-remove-button {
+    width: 100%;
+  }
+
+  .performer-sort-name-list > label {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Read-only credit summaries collapse repeated names into role lists. */
+.performer-record-column-headings.is-read-only,
+.performer-record-row.is-read-only {
+  grid-template-columns:
+    minmax(12rem, 0.8fr)
+    minmax(14rem, 1.2fr);
+}
+
+.performer-record-row.is-grouped-display > span:last-child {
+  color: #cbd2d9;
+  line-height: 1.45;
+}
+
+/* Technical credits read as role → credited name; performer rows stay name → role. */
+.technical-credit-record-editor
+.performer-record-column-headings.is-read-only,
+.technical-credit-record-editor
+.performer-record-row.is-read-only {
+  grid-template-columns:
+    minmax(14rem, 1.2fr)
+    minmax(12rem, 0.8fr);
+}
+
+.technical-credit-record-editor
+.performer-record-row.is-grouped-display
+> span:first-child {
+  color: #cbd2d9;
+  line-height: 1.45;
+}
+
+.technical-credit-record-editor
+.performer-record-row.is-grouped-display
+> span:last-child {
+  color: inherit;
+}
+
+
+/* Compact technical-credit pairs around a central role-to-name axis. */
+@media (min-width: 52.0625rem) {
+  .technical-credit-record-editor
+  .performer-record-column-headings.is-read-only,
+  .technical-credit-record-editor
+  .performer-record-row.is-read-only {
+    grid-template-columns:
+      minmax(12rem, 22rem)
+      minmax(12rem, 22rem);
+    justify-content: center;
+    column-gap: 0.9rem;
+  }
+
+  /* Roles align toward their associated credited names. */
+  .technical-credit-record-editor
+  .performer-record-column-headings.is-read-only
+  > :first-child,
+  .technical-credit-record-editor
+  .performer-record-row.is-read-only
+  > :first-child {
+    text-align: right;
+  }
+
+  .technical-credit-record-editor
+  .performer-record-column-headings.is-read-only
+  > :last-child,
+  .technical-credit-record-editor
+  .performer-record-row.is-read-only
+  > :last-child {
+    text-align: left;
+  }
+
+  .inherited-technical-credit-row {
+    grid-template-columns:
+      minmax(12rem, 22rem)
+      minmax(12rem, 22rem)
+      auto;
+    justify-content: center;
+  }
+
+  .inherited-technical-credit-row > :first-child {
+    text-align: right;
+  }
+
+  .inherited-technical-credit-row > :nth-child(2) {
+    text-align: left;
+  }
+
+  .missing-track-inherited-credit-list > div {
+    grid-template-columns:
+      minmax(12rem, 22rem)
+      minmax(12rem, 22rem);
+    justify-content: center;
+  }
+
+  .missing-track-inherited-credit-list > div > :first-child {
+    text-align: right;
+  }
+
+  .missing-track-inherited-credit-list > div > :nth-child(2) {
+    text-align: left;
+  }
+}
+
+.grouped-engineering-credit-list {
+  background: #15191d;
+}
+
+/* First-time onboarding for track-level recording/mixing/mastering credits. */
+.technical-credit-file-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid #34414c;
+  border-radius: 0.45rem;
+  background: #151b20;
+  margin: 0 0 1rem;
+  padding: 1rem;
+}
+
+.technical-credit-file-empty-state strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.technical-credit-file-empty-state p,
+.technical-credit-file-empty-state small {
+  margin: 0;
+  color: #9aa5af;
+}
+
+.technical-credit-record-editor {
+  border-top: 1px solid #303840;
+}
+
+@media (max-width: 52rem) {
+  .technical-credit-file-empty-state {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* Standard vocabulary selectors retain an explicit free-text escape hatch. */
+.controlled-vocabulary-input {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.4rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.controlled-vocabulary-input.is-custom {
+  grid-template-columns:
+    minmax(10rem, 0.75fr)
+    minmax(12rem, 1.25fr);
+}
+
+.controlled-vocabulary-input select,
+.controlled-vocabulary-input input {
+  min-width: 0;
+  width: 100%;
+}
+
+.performer-record-row
+.controlled-vocabulary-input {
+  align-self: stretch;
+}
+
+.performer-record-row
+.controlled-vocabulary-input select,
+.performer-record-row
+.controlled-vocabulary-input input {
+  min-height: 2.25rem;
+}
+
+@media (max-width: 64rem) {
+  .controlled-vocabulary-input.is-custom {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Release-level technical credits remain visible as inherited track defaults. */
+.technical-credit-inherited-note {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.technical-credit-record-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+.technical-credit-use-release-button {
+  min-height: 2.25rem;
+  padding-inline: 0.65rem;
+  white-space: nowrap;
+}
+
+.inherited-technical-credit-list {
+  border-top: 1px solid #303840;
+  background: #12171b;
+}
+
+.inherited-technical-credit-list > header {
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid #303840;
+}
+
+.inherited-technical-credit-list > header p {
+  margin: 0.25rem 0 0;
+  color: #929ca6;
+  font-size: 0.78rem;
+}
+
+.inherited-technical-credit-row {
+  display: grid;
+  grid-template-columns:
+    minmax(14rem, 1.2fr)
+    minmax(12rem, 0.8fr)
+    auto;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid #30373e;
+  padding: 0.65rem 0.9rem;
+}
+
+.inherited-technical-credit-row:last-child {
+  border-bottom: 0;
+}
+
+.missing-track-inherited-credit-list {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+
+.missing-track-inherited-credit-list > div {
+  display: grid;
+  grid-template-columns:
+    minmax(14rem, 1.2fr)
+    minmax(12rem, 0.8fr);
+  gap: 0.2rem 0.75rem;
+  border-top: 1px solid #303840;
+  padding-top: 0.55rem;
+}
+
+.missing-track-inherited-credit-list small {
+  grid-column: 2;
+  color: #7f9aaf;
+}
+
+@media (max-width: 52rem) {
+  .technical-credit-record-editor
+  .performer-record-column-headings.is-read-only,
+  .technical-credit-record-editor
+  .performer-record-row.is-read-only,
+  .technical-credit-record-actions,
+  .inherited-technical-credit-row,
+  .missing-track-inherited-credit-list > div {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .technical-credit-record-actions {
+    flex-direction: column;
+  }
+
+  .technical-credit-use-release-button,
+  .technical-credit-record-actions .performer-remove-button {
+    width: 100%;
+  }
+
+  .missing-track-inherited-credit-list small {
+    grid-column: auto;
+  }
+}
+/* Keep compatibility details available without overwhelming field help. */
+.metadata-tag-disclosure {
+  overflow: hidden;
+  border-top: 1px solid #343a41;
+  padding-top: 0;
+}
+
+.metadata-tag-disclosure > summary {
+  display: grid;
+  grid-template-columns:
+    auto
+    minmax(0, 1fr)
+    auto;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.85rem 0;
+  color: #b9c2cb;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+
+.metadata-tag-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.metadata-tag-disclosure > summary::before {
+  content: "▸";
+  color: #8f9aa5;
+  transition: transform 120ms ease;
+}
+
+.metadata-tag-disclosure[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.metadata-tag-disclosure > summary:hover,
+.metadata-tag-disclosure > summary:focus-visible {
+  color: #eef2f5;
+}
+
+.metadata-tag-disclosure > summary small {
+  color: #7f8a95;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.metadata-tag-disclosure-content {
+  padding: 0 0 0.85rem 1.1rem;
+}
+
+/* Copyright names remain editable while canonical notice wording stays fixed. */
+.guided-copyright-input {
+  display: grid;
+  grid-template-columns:
+    auto
+    auto
+    minmax(12rem, 1fr)
+    auto
+    auto;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.guided-copyright-input.is-custom {
+  grid-template-columns:
+    minmax(12rem, 1fr)
+    auto;
+}
+
+.guided-copyright-fragment,
+.guided-copyright-reservation {
+  min-height: 2.15rem;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #59636d;
+  border-radius: 0.25rem;
+  padding: 0.45rem 0.65rem;
+  color: #d8dde2;
+  background: #252a2f;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.guided-copyright-punctuation {
+  color: #edf1f4;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.guided-copyright-input:not(.is-custom)
+> .guided-rights-mode-button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.guided-copyright-input
+.guided-rights-preview,
+.guided-copyright-input
+.guided-rights-note {
+  grid-column: 1 / -1;
+}
+
+/* Copyright symbols are generated from the canonical field semantics. */
+.guided-rights-input {
+  display: grid;
+  grid-template-columns:
+    2.5rem
+    minmax(5.5rem, 7rem)
+    minmax(12rem, 1fr)
+    auto;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.guided-rights-input.is-custom {
+  grid-template-columns:
+    minmax(12rem, 1fr)
+    auto;
+}
+
+.guided-rights-symbol {
+  display: grid;
+  min-height: 2.15rem;
+  place-items: center;
+  border: 1px solid #59636d;
+  border-radius: 0.25rem;
+  color: #edf1f4;
+  background: #252a2f;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.guided-rights-mode-button {
+  min-height: 2.15rem;
+  border: 1px solid #59636d;
+  border-radius: 0.25rem;
+  padding: 0.45rem 0.65rem;
+  color: #c4cbd2;
+  background: #252a2f;
+  white-space: nowrap;
+}
+
+.guided-rights-mode-button:hover,
+.guided-rights-mode-button:focus-visible {
+  border-color: #8291a0;
+  color: #fff;
+  background: #323940;
+}
+
+.guided-rights-preview,
+.guided-rights-note {
+  grid-column: 1 / -1;
+  color: #7f8a95;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 52rem) {
+  .guided-copyright-input,
+  .guided-copyright-input.is-custom {
+    grid-template-columns:
+      auto
+      auto
+      minmax(0, 1fr)
+      auto;
+  }
+
+  .guided-copyright-reservation,
+  .guided-copyright-input.is-custom > input,
+  .guided-copyright-input
+  .guided-rights-mode-button,
+  .guided-copyright-input
+  .guided-rights-preview,
+  .guided-copyright-input
+  .guided-rights-note {
+    grid-column: 1 / -1;
+  }
+
+  .guided-rights-input,
+  .guided-rights-input.is-custom {
+    grid-template-columns:
+      2.5rem
+      minmax(0, 1fr);
+  }
+
+  .guided-rights-input
+  > input[aria-label="Rights holder name"],
+  .guided-rights-input.is-custom > input,
+  .guided-rights-mode-button,
+  .guided-rights-preview,
+  .guided-rights-note {
+    grid-column: 1 / -1;
+  }
+
+  .metadata-tag-disclosure > summary {
+    grid-template-columns:
+      auto
+      minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .metadata-tag-disclosure > summary small {
+    grid-column: 2;
+  }
+
+  .metadata-tag-disclosure-content {
+    padding-left: 0;
+  }
+}
+
+/* Optional registered fields can be removed from their canonical TOML file. */
+.metadata-field-remove-control {
+  display: grid;
+  width: 1.15rem;
+  height: 1.15rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #76545a;
+  border-radius: 50%;
+  padding: 0;
+  color: #d8aeb4;
+  background: transparent;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.metadata-field-remove-control:hover,
+.metadata-field-remove-control:focus-visible {
+  border-color: #d79aa3;
+  color: #fff;
+  background: #5a292f;
+}
+
+.metadata-field-remove-control:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.metadata-field-removal-confirmation {
+  display: grid;
+  gap: 1rem;
+}
+
+.metadata-field-removal-confirmation > p {
+  margin: 0;
+}
+
+.metadata-field-removal-confirmation > p code {
+  margin-inline: 0.35rem;
+}
+
+.metadata-field-removal-confirmation dl {
+  display: grid;
+  gap: 0.65rem;
+  margin: 0;
+}
+
+.metadata-field-removal-confirmation dl > div {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.35fr) 1fr;
+  gap: 0.75rem;
+}
+
+.metadata-field-removal-confirmation dt {
+  color: #9ca7b1;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.metadata-field-removal-confirmation dd {
+  margin: 0;
+}
+
+.metadata-field-removal-warning {
+  border-left: 0.2rem solid #b66b45;
+  padding-left: 0.8rem;
+  color: #d7c0b3;
+}
+
+.metadata-field-removal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.65rem;
+  border-top: 1px solid #343b42;
+  padding-top: 1rem;
+}
+
+.danger-button {
+  border-color: #8f4d56;
+  color: #fff;
+  background: #672f37;
+}
+
+.danger-button:hover,
+.danger-button:focus-visible {
+  border-color: #d3808c;
+  background: #7d3943;
+}
+
+@media (max-width: 40rem) {
+  .metadata-field-removal-confirmation dl > div {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}
+
+/* Missing local paths can still display release defaults without writing them. */
+.metadata-inherited-override-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.metadata-inherited-override-field .metadata-value {
+  min-width: 0;
+}
+
+.metadata-inherited-override-button {
+  flex: 0 0 auto;
+  padding: 0.42rem 0.65rem;
+  font-size: 0.72rem;
+}
+
+@media (max-width: 52rem) {
+  .metadata-inherited-override-field {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .metadata-inherited-override-button {
+    align-self: flex-start;
+  }
+}
+
+/* Keep core track analysis fields visible before optional TOML paths exist. */
+.metadata-default-missing-value {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+}
+
+.metadata-default-missing-value.has-derived-value {
+  flex-wrap: wrap;
+  gap: 0.85rem;
+}
+
+/* Keep generated values and their provenance visually distinct. */
+.metadata-value:has(.metadata-derived-note),
+.metadata-derived-default-value {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.18rem;
+}
+
+.metadata-derived-default-value {
+  min-width: 7rem;
+}
+
+.metadata-default-missing-value.has-derived-value
+.metadata-default-field-add-button {
+  flex: 0 0 auto;
+}
+
+.metadata-default-missing-placeholder {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.metadata-default-field-add-button {
+  min-height: 2.25rem;
+}
+
+
+@media (max-width: 42rem) {
+  .metadata-default-missing-value.has-derived-value {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .metadata-default-missing-value.has-derived-value
+  .metadata-default-field-add-button {
+    align-self: flex-start;
+  }
+}
+
+/* Keep canonical units visible without storing them inside numeric TOML values. */
+.metadata-number-with-unit {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+}
+.metadata-value-unit {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+/* Keep artist sort-name inheritance and reset controls visually grouped. */
+.metadata-inheritance-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.metadata-use-release-value-button {
+  flex: 0 0 auto;
+  padding: 0.38rem 0.6rem;
+  font-size: 0.7rem;
+}
+
+@media (max-width: 40rem) {
+  .metadata-inheritance-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+/* Visual artwork gallery for release and track metadata views. */
+.metadata-artwork-gallery-panel {
+  min-width: 0;
+  border: 1px solid #3a444e;
+  border-radius: 0.35rem;
+  background: #15191d;
+  overflow: hidden;
+}
+
+.metadata-artwork-gallery-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.25rem;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid #3a444e;
+  background: #20262c;
+}
+
+.metadata-artwork-gallery-header h2 {
+  margin: 0.15rem 0 0.35rem;
+  font-size: 1.15rem;
+}
+
+.metadata-artwork-gallery-header p {
+  max-width: 52rem;
+  margin: 0;
+  color: #aab5c0;
+}
+
+.metadata-artwork-gallery-eyebrow {
+  color: #8f9ba7;
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.metadata-artwork-gallery-count {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid #46525e;
+  border-radius: 999px;
+  color: #c7d0d9;
+  background: #171c21;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.metadata-artwork-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(100%, 15rem), 1fr)
+  );
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.metadata-artwork-card {
+  min-width: 0;
+  border: 1px solid #3b4651;
+  border-radius: 0.35rem;
+  background: #181d22;
+  overflow: hidden;
+}
+
+.metadata-artwork-card.is-inherited {
+  border-color: #4c6278;
+}
+
+.metadata-artwork-preview {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1 / 1;
+  min-height: 12rem;
+  padding: 0.65rem;
+  background:
+    linear-gradient(135deg, #111417, #232a31);
+  color: inherit;
+  text-decoration: none;
+}
+
+.metadata-artwork-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: 24rem;
+  object-fit: contain;
+  border-radius: 0.2rem;
+}
+
+.metadata-artwork-preview-placeholder {
+  display: grid;
+  gap: 0.4rem;
+  justify-items: center;
+  text-align: center;
+  color: #9ba7b3;
+}
+
+.metadata-artwork-preview-placeholder strong {
+  font-size: 1.6rem;
+  letter-spacing: 0.08em;
+}
+
+.metadata-artwork-card-body {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.9rem;
+  border-top: 1px solid #343e48;
+}
+
+.metadata-artwork-card-body > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.metadata-artwork-card-body > header > div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.metadata-artwork-role {
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+.metadata-artwork-format {
+  padding: 0.22rem 0.42rem;
+  border-radius: 0.25rem;
+  background: #29333d;
+  color: #b8c4cf;
+  font-size: 0.68rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+
+.metadata-artwork-filename {
+  overflow-wrap: anywhere;
+}
+
+.metadata-artwork-facts {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.metadata-artwork-facts > div {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  gap: 0.5rem;
+}
+
+.metadata-artwork-facts dt {
+  color: #84919e;
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.metadata-artwork-facts dd {
+  min-width: 0;
+  margin: 0;
+  color: #c7d0d9;
+  overflow-wrap: anywhere;
+}
+
+.metadata-artwork-path {
+  display: block;
+  min-width: 0;
+  max-height: 4.5rem;
+  overflow: auto;
+  padding: 0.55rem;
+  border-radius: 0.25rem;
+  background: #101316;
+  color: #9da9b5;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.metadata-artwork-open-link {
+  justify-self: start;
+  color: #a9c6df;
+  font-weight: 700;
+}
+
+.metadata-artwork-gallery-empty {
+  padding: 1.25rem;
+  color: #aab5c0;
+}
+
+.metadata-artwork-gallery-empty strong {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: #d5dbe1;
+}
+
+.metadata-artwork-gallery-empty p {
+  margin: 0;
+}
+
+@media (max-width: 46rem) {
+  .metadata-artwork-gallery-header {
+    flex-direction: column;
+  }
+
+  .metadata-artwork-gallery-grid {
+    grid-template-columns: 1fr;
+  }
+}

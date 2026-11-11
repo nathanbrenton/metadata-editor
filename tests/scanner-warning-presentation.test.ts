@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorStyles,
+} from "./support/editor-source.js";
 
 const appSource = await readEditorAppSource();
 const panelSource = await readFile(
   new URL("../src/ScannerWarningPanel.tsx", import.meta.url),
   "utf8",
 );
-const styleSource = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styleSource = await readEditorStyles();
 
 test("lazy-loads scanner warnings with an amber count and guidance", () => {
   assert.match(appSource, /LazyScannerWarningPanel/);

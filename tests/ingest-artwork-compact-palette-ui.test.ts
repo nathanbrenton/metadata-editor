@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { readEditorStyles } from "./support/editor-source.js";
+
 const builderSource = readFileSync(
   new URL(
     "../src/IngestReleaseBuilder.tsx",
@@ -10,13 +12,7 @@ const builderSource = readFileSync(
   "utf8",
 );
 
-const styleSource = readFileSync(
-  new URL(
-    "../src/styles.css",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const styleSource = readEditorStyles();
 
 test(
   "keeps the available-artwork palette thumbnail-only and compact",

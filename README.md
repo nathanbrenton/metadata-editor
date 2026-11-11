@@ -125,6 +125,10 @@ client lives in `src/app/`:
 Source-shape tests read the combined client through
 `tests/support/editor-source.ts` rather than a single file.
 
+`src/styles.css` is an ordered list of `@import`s for the parts in
+`src/styles/`; import order is cascade order, and the built CSS is
+byte-identical to the former single file.
+
 ### Backend
 
 - Node.js

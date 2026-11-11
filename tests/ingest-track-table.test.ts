@@ -9,15 +9,14 @@ import {
   synchronizeBulkSourceDate,
 } from "../src/ingest-track-table.js";
 
+import { readEditorStyles } from "./support/editor-source.js";
+
 const builderSource = await readFile(
   new URL("../src/IngestReleaseBuilder.tsx", import.meta.url),
   "utf8",
 );
 
-const styleSource = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styleSource = await readEditorStyles();
 
 test("shows ingest source paths relative to the selected candidate folder", () => {
   assert.equal(

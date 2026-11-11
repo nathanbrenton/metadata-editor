@@ -1,0 +1,1226 @@
+/* Build keeps the final release review visible while implementation detail stays collapsible. */
+.ingest-build-plan-launcher {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.25rem;
+  border: 1px solid #526a7b;
+  border-radius: 0.45rem;
+  padding: 1rem;
+  background: #182129;
+}
+
+.ingest-build-plan-launcher-copy {
+  min-width: 0;
+}
+
+.ingest-build-plan-launcher-copy h3,
+.ingest-build-plan-launcher-copy p {
+  margin: 0;
+}
+
+.ingest-build-plan-launcher-copy h3 {
+  margin-top: 0.18rem;
+  color: #eef3f6;
+  font-size: 1rem;
+}
+
+.ingest-build-plan-launcher-copy p {
+  max-width: 62rem;
+  margin-top: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.ingest-build-plan-launcher-actions {
+  display: grid;
+  flex: 0 0 auto;
+  justify-items: end;
+  gap: 0.55rem;
+}
+
+.ingest-build-plan-launcher-actions > button {
+  min-width: 12rem;
+}
+
+.ingest-build-plan-launcher-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.45rem 0.7rem;
+  color: #aebbc4;
+  font-size: 0.72rem;
+}
+
+.ingest-review-release-card {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+  border: 1px solid var(--document-border-light);
+  border-radius: 0.45rem;
+  padding: 1rem;
+  background: #171c20;
+}
+
+.ingest-review-release-artwork {
+  display: grid;
+  width: 8.5rem;
+  height: 8.5rem;
+  place-items: stretch;
+  border: 1px solid #48535d;
+  border-radius: 0.4rem;
+  overflow: hidden;
+  background: #101417;
+}
+
+.ingest-review-release-artwork .ingest-artwork-preview-stack--thumbnail-only,
+.ingest-review-release-artwork .ingest-artwork-preview-unavailable--thumbnail-only,
+.ingest-review-release-artwork .ingest-artwork-thumbnail,
+.ingest-review-track-artwork .ingest-artwork-preview-stack--thumbnail-only,
+.ingest-review-track-artwork .ingest-artwork-preview-unavailable--thumbnail-only,
+.ingest-review-track-artwork .ingest-artwork-thumbnail {
+  width: 100%;
+  height: 100%;
+}
+
+.ingest-review-release-artwork .ingest-artwork-thumbnail,
+.ingest-review-track-artwork .ingest-artwork-thumbnail {
+  object-fit: contain;
+}
+
+.ingest-review-artwork-empty {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  background: #101417;
+  color: #71808c;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.ingest-review-artwork-empty.missing {
+  background: #2b191c;
+  color: #ef9b9b;
+}
+
+.ingest-review-release-identity {
+  display: grid;
+  min-width: 0;
+  align-content: space-between;
+  gap: 0.9rem;
+}
+
+.ingest-review-release-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ingest-review-release-heading h3,
+.ingest-review-release-heading p {
+  margin: 0;
+}
+
+.ingest-review-release-heading h3 {
+  margin-top: 0.15rem;
+  color: #f0f3f5;
+  font-size: 1.45rem;
+  line-height: 1.15;
+}
+
+.ingest-review-release-heading p {
+  margin-top: 0.28rem;
+  color: #b7c1ca;
+  font-weight: 650;
+}
+
+.ingest-review-eyebrow {
+  color: #87939e;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ingest-review-release-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.8rem;
+  color: #aab5be;
+  font-size: 0.76rem;
+}
+
+.ingest-review-release-facts span + span::before {
+  margin-right: 0.8rem;
+  color: #596570;
+  content: "•";
+}
+
+.ingest-review-destination {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: baseline;
+  gap: 0.65rem;
+  border-top: 1px solid #30383f;
+  padding-top: 0.7rem;
+}
+
+.ingest-review-destination > span {
+  color: #87939e;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.ingest-review-destination code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ingest-review-track-panel,
+.ingest-review-video-panel,
+.ingest-review-preflight {
+  border: 1px solid var(--document-border-light);
+  border-radius: 0.45rem;
+  overflow: hidden;
+  background: #15191d;
+}
+
+.ingest-review-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0.9rem;
+  border-bottom: 1px solid var(--document-border);
+  background: var(--surface-subtle);
+}
+
+.ingest-review-section-header h4,
+.ingest-review-section-header p {
+  margin: 0;
+}
+
+.ingest-review-section-header p {
+  margin-top: 0.22rem;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
+
+.ingest-review-track-table {
+  min-width: 76rem;
+}
+
+.ingest-review-video-table {
+  min-width: 68rem;
+}
+
+.ingest-review-video-table th[scope="row"] small {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+
+.ingest-review-track-art-column {
+  width: 5.5rem;
+  min-width: 5.5rem;
+  text-align: center;
+}
+
+.ingest-review-track-artwork-cell {
+  width: 5.5rem;
+  min-width: 5.5rem;
+  text-align: center;
+  vertical-align: middle !important;
+}
+
+.ingest-review-track-artwork {
+  display: grid;
+  width: 3.75rem;
+  height: 3.75rem;
+  margin-inline: auto;
+  place-items: stretch;
+  border: 1px solid #46515b;
+  border-radius: 0.3rem;
+  overflow: hidden;
+  background: #101417;
+}
+
+.ingest-review-track-artwork-cell > small {
+  display: block;
+  margin-top: 0.22rem;
+  color: #88949e;
+  font-size: 0.62rem;
+  white-space: nowrap;
+}
+
+.ingest-review-track-number {
+  width: 3rem;
+  min-width: 3rem;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.ingest-review-track-title-cell {
+  min-width: 15rem;
+}
+
+.ingest-review-track-title-cell > strong,
+.ingest-review-track-title-cell > span,
+.ingest-review-track-title-cell > small {
+  display: block;
+}
+
+.ingest-review-track-title-cell > strong {
+  color: #edf1f4;
+  font-size: 0.82rem;
+}
+
+.ingest-review-track-title-cell > span {
+  margin-top: 0.16rem;
+  color: #bbc6ce;
+  font-size: 0.72rem;
+}
+
+.ingest-review-track-title-cell > small {
+  margin-top: 0.2rem;
+  color: #87949f;
+  font-weight: 500;
+}
+
+.ingest-review-track-source-cell > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ingest-review-track-source-cell code {
+  display: block;
+  min-width: 0;
+  max-width: 26rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.badge.ingest-review-status-pending {
+  border-color: #7e704d;
+  background: #39311f;
+  color: #e0d19d;
+}
+
+.ingest-review-empty-state {
+  margin: 0;
+  padding: 1rem;
+}
+
+.ingest-review-preflight-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.ingest-review-preflight-grid > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  column-gap: 0.55rem;
+  row-gap: 0.15rem;
+  align-content: start;
+  border-right: 1px solid var(--document-border);
+  padding: 0.75rem;
+}
+
+.ingest-review-preflight-grid > div:last-child {
+  border-right: 0;
+}
+
+.ingest-review-preflight-grid strong {
+  align-self: center;
+  color: #e5ebef;
+  font-size: 0.76rem;
+}
+
+.ingest-review-preflight-grid small {
+  grid-column: 2;
+  color: #8f9ba5;
+  line-height: 1.35;
+}
+
+.ingest-review-preflight-icon {
+  display: inline-grid;
+  grid-row: 1 / span 2;
+  width: 1.45rem;
+  height: 1.45rem;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 0.8rem;
+  font-weight: 900;
+}
+
+.ingest-review-preflight-icon.ready {
+  background: #173820;
+  color: #92d6a2;
+}
+
+.ingest-review-preflight-icon.blocked {
+  background: #472020;
+  color: #ef9b9b;
+}
+
+.ingest-review-preflight-icon.neutral {
+  background: #232a30;
+  color: #9aa8b3;
+}
+
+.ingest-review-details-stack {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.ingest-review-details {
+  border: 1px solid var(--document-border-light);
+  border-radius: 0.4rem;
+  overflow: hidden;
+  background: #15191d;
+}
+
+.ingest-review-details > summary {
+  display: flex;
+  min-height: 2.8rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.65rem 0.8rem;
+  background: #1b2025;
+  color: #d8e0e6;
+  font-weight: 750;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.ingest-review-details[open] > summary {
+  border-bottom: 1px solid var(--document-border);
+}
+
+.ingest-review-details-body {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+.ingest-review-details-body > .ingest-artwork-summary-panel {
+  margin: 0;
+}
+
+@media (max-width: 1080px) {
+  .ingest-review-preflight-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ingest-review-preflight-grid > div {
+    border-right: 1px solid var(--document-border);
+    border-bottom: 1px solid var(--document-border);
+  }
+
+  .ingest-review-preflight-grid > div:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .ingest-review-preflight-grid > div:last-child {
+    border-bottom: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .ingest-build-plan-launcher {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ingest-build-plan-launcher-actions {
+    justify-items: stretch;
+  }
+
+  .ingest-build-plan-launcher-status {
+    justify-content: flex-start;
+  }
+
+  .ingest-review-release-card {
+    grid-template-columns: 1fr;
+  }
+
+  .ingest-review-release-artwork {
+    width: 7rem;
+    height: 7rem;
+  }
+
+  .ingest-review-release-heading,
+  .ingest-review-section-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ingest-review-preflight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ingest-review-preflight-grid > div,
+  .ingest-review-preflight-grid > div:nth-child(2n) {
+    border-right: 0;
+    border-bottom: 1px solid var(--document-border);
+  }
+}
+
+/* Existing-release Review shows the final resulting track set, including
+   canonical Library tracks that remain unchanged in this candidate. */
+.ingest-review-track-row--preserved {
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.ingest-review-track-row--preserved > * {
+  opacity: 0.78;
+}
+
+.ingest-review-track-provenance {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+}
+
+.ingest-review-track-existing-art {
+  display: grid;
+  width: 3.1rem;
+  height: 3.1rem;
+  place-items: center;
+  border: 1px dashed var(--document-border);
+  border-radius: 0.35rem;
+  font-size: 0.65rem;
+  font-weight: 750;
+  line-height: 1;
+}
+
+.ingest-review-track-preserved-source {
+  font-size: 0.78rem;
+}
+
+.ingest-build-review > button {
+  justify-self: start;
+}
+
+.ingest-build-execution-row {
+  display: flex;
+  align-items: center;
+  justify-self: start;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.ingest-build-progress-status {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.ingest-build-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  border: 1px solid var(--document-border-light);
+  border-radius: 0.35rem;
+  overflow: hidden;
+}
+
+.ingest-build-summary > div {
+  min-width: 0;
+  border-right: 1px solid var(--document-border);
+  padding: 0.65rem 0.75rem;
+  background: #171c20;
+}
+
+.ingest-build-summary > div:last-child {
+  border-right: 0;
+}
+
+.ingest-build-summary dt {
+  color: #87939e;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.ingest-build-summary dd {
+  margin: 0.25rem 0 0;
+  color: #eef1f4;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.ingest-build-plan-table {
+  min-width: 78rem;
+}
+
+/* Keep the action label intact while icon-only columns stay narrow. */
+.ingest-build-plan-table tr > :first-child {
+  min-width: 6.5rem;
+  overflow-wrap: normal;
+  white-space: nowrap;
+  word-break: normal;
+}
+
+.ingest-build-plan-source-cell > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ingest-build-plan-source-cell code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ingest-plan-kind-column,
+.ingest-plan-kind-cell,
+.ingest-plan-status-column,
+.ingest-plan-status-cell {
+  width: 3.75rem;
+  min-width: 3.75rem;
+  padding-inline: 0.4rem;
+  text-align: center;
+}
+
+.ingest-plan-kind-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  color: #b9c6d0;
+}
+
+.ingest-plan-kind-icon.audio,
+.ingest-plan-kind-icon.waveform {
+  color: #9fc0d8;
+}
+
+.ingest-plan-kind-icon.directory {
+  color: #d0b77c;
+}
+
+.ingest-plan-kind-icon.toml,
+.ingest-plan-kind-icon.receipt {
+  color: #b8c5cf;
+}
+
+.ingest-plan-kind-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.ingest-plan-status-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.ingest-plan-status-icon.ready {
+  background: #173820;
+  color: #92d6a2;
+}
+
+.ingest-plan-status-icon.blocked {
+  background: #472020;
+  color: #ef9b9b;
+}
+
+.ingest-build-confirmation {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  border: 1px solid #5b6d7d;
+  border-radius: 0.35rem;
+  padding: 0.8rem;
+  background: #182129;
+  color: #cfdae2;
+}
+
+.ingest-build-confirmation input {
+  margin-top: 0.15rem;
+}
+
+.ingest-hash {
+  display: inline-block;
+  max-width: 18rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.badge.success {
+  border-color: #5f8069;
+  background: #263f2d;
+  color: #d6eadb;
+}
+
+.badge.error {
+  border-color: #8f4d56;
+  background: #522c33;
+  color: #f0cbd1;
+}
+
+@media (max-width: 980px) {
+  .ingest-release-fields.compact {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ingest-build-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ingest-build-summary > div:nth-child(3n) {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .ingest-builder-header,
+  .ingest-inspection-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ingest-guided-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ingest-release-fields,
+  .ingest-release-fields.compact {
+    grid-template-columns: 1fr;
+  }
+
+  .ingest-build-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ingest-build-summary > div,
+  .ingest-build-summary > div:nth-child(3n) {
+    border-right: 1px solid var(--document-border);
+  }
+
+  .ingest-build-summary > div:nth-child(2n) {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 460px) {
+  .ingest-guided-steps,
+  .ingest-build-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .ingest-build-summary > div,
+  .ingest-build-summary > div:nth-child(2n),
+  .ingest-build-summary > div:nth-child(3n) {
+    border-right: 0;
+    border-bottom: 1px solid var(--document-border);
+  }
+
+  .ingest-build-summary > div:last-child {
+    border-bottom: 0;
+  }
+}
+
+/* Durable ingest drafts and merge-based source rescanning. */
+.ingest-builder-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.ingest-draft-status {
+  display: grid;
+  justify-items: end;
+  gap: 0.2rem;
+}
+
+.ingest-draft-status small {
+  color: #8995a1;
+  font-size: 0.68rem;
+}
+
+.ingest-source-review-control {
+  display: grid;
+  gap: 0.35rem;
+  min-width: 7.5rem;
+}
+
+.ingest-source-review-control > span:last-child {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #b6c0c9;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.ingest-source-review-control input {
+  width: auto;
+}
+
+.ingest-source-missing-row > th,
+.ingest-source-missing-row > td {
+  background: #2a2022;
+}
+
+.ingest-source-missing-row:hover > th,
+.ingest-source-missing-row:hover > td {
+  background: #322528 !important;
+}
+
+.ingest-asset-workflow {
+  display: grid;
+  gap: 1rem;
+}
+
+.ingest-loose-attachments {
+  display: grid;
+  gap: 0.75rem;
+  border-top: 1px solid var(--document-border);
+  padding-top: 1rem;
+}
+
+.ingest-loose-attachments > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.ingest-loose-attachments h4,
+.ingest-loose-attachments p {
+  margin: 0;
+}
+
+.ingest-loose-attachments header p {
+  margin-top: 0.2rem;
+  max-width: 54rem;
+  color: #929da7;
+  font-size: 0.78rem;
+}
+
+@media (max-width: 720px) {
+  .ingest-builder-header-actions,
+  .ingest-loose-attachments > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ingest-draft-status {
+    justify-items: start;
+  }
+}
+
+/* Local ingest artwork previews and actionable review decisions. */
+.ingest-builder-asset-table {
+  min-width: 72rem;
+}
+
+.ingest-artwork-preview-cell {
+  width: 7rem;
+  min-width: 7rem;
+  text-align: center;
+  vertical-align: middle !important;
+}
+
+.ingest-artwork-preview-stack {
+  display: inline-grid;
+  justify-items: center;
+  gap: 0.3rem;
+}
+
+.ingest-artwork-preview-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.75rem;
+  height: 5.75rem;
+  border: 1px solid #48535d;
+  border-radius: 0.3rem;
+  overflow: hidden;
+  background: #101417;
+}
+
+.ingest-artwork-preview-link:hover,
+.ingest-artwork-preview-link:focus-visible {
+  border-color: #8ba6bc;
+  outline: 2px solid rgba(139, 166, 188, 0.35);
+  outline-offset: 2px;
+}
+
+.ingest-artwork-thumbnail {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.ingest-artwork-preview-mode {
+  color: #9aa7b3;
+  font-size: 0.62rem;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.ingest-artwork-preview-unavailable {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3.5rem;
+  color: #818d98;
+  font-size: 0.7rem;
+  text-align: center;
+  text-transform: capitalize;
+}
+
+.ingest-source-focused-row > th,
+.ingest-source-focused-row > td {
+  background: #22303a !important;
+  box-shadow:
+    inset 0 1px 0 #66839a,
+    inset 0 -1px 0 #66839a;
+}
+
+.ingest-source-review-panel {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0;
+  overflow: hidden;
+}
+
+.ingest-source-review-panel > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 1rem 0;
+}
+
+.ingest-source-review-panel h4,
+.ingest-source-review-panel p {
+  margin: 0;
+}
+
+.ingest-source-review-panel p {
+  margin-top: 0.25rem;
+  color: #c2b3a2;
+}
+
+.ingest-source-review-table {
+  min-width: 58rem;
+}
+
+.ingest-source-decision-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  min-width: 26rem;
+}
+
+.ingest-source-decision-actions button {
+  min-height: 2rem;
+}
+
+@media (max-width: 720px) {
+  .ingest-source-review-panel > header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+/* Ingest artwork assignment workflow */
+.ingest-inline-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+}
+
+.ingest-artwork-assignment-editor {
+  display: grid;
+  gap: 0.65rem;
+  min-width: 22rem;
+}
+
+.ingest-artwork-assignment-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.8fr) minmax(10rem, 1fr);
+  gap: 0.55rem 0.7rem;
+  margin: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.4rem;
+  background: var(--surface-subtle);
+}
+
+.ingest-artwork-assignment-row legend {
+  grid-column: 1 / -1;
+  padding: 0 0.25rem;
+  font-weight: 700;
+}
+
+.ingest-artwork-assignment-row label {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.ingest-artwork-assignment-row label > span,
+.ingest-artwork-track-picker > strong {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ingest-artwork-track-picker {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.35rem;
+}
+
+.ingest-artwork-track-picker label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.ingest-artwork-assignment-empty {
+  color: var(--text-muted);
+}
+
+.ingest-artwork-summary-panel {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 0.45rem;
+  overflow: hidden;
+}
+
+.ingest-artwork-summary-panel > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  background: var(--surface-subtle);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.ingest-artwork-summary-panel h4,
+.ingest-artwork-summary-panel p {
+  margin: 0;
+}
+
+.ingest-artwork-summary-panel p {
+  margin-top: 0.25rem;
+  color: var(--text-muted);
+}
+
+.ingest-artwork-assignment-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.ingest-artwork-scope-badge {
+  text-transform: none;
+  white-space: normal;
+}
+
+@media (max-width: 760px) {
+  .ingest-artwork-assignment-row {
+    grid-template-columns: 1fr;
+  }
+
+  .ingest-artwork-assignment-row legend,
+  .ingest-artwork-track-picker {
+    grid-column: 1;
+  }
+
+  .ingest-artwork-summary-panel > header {
+    flex-direction: column;
+  }
+}
+
+/*
+ * Missing draft assets use a compact icon action. The full
+ * explanation remains available through the button tooltip
+ * and accessible label.
+ */
+.ingest-remove-draft-button {
+  display: inline-flex;
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Help dialogs lead with practical values and hide implementation details. */
+.metadata-field-value-guidance,
+.metadata-field-about,
+.metadata-help-technical-disclosure {
+  min-width: 0;
+}
+
+.metadata-field-guidance-examples {
+  margin-top: 0.9rem;
+  border-top: 1px solid #343a41;
+  padding-top: 0.75rem;
+}
+
+.metadata-field-guidance-examples h5,
+.metadata-field-pair-example strong {
+  color: #aeb8c2;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.metadata-field-pair-example {
+  margin-top: 0.7rem !important;
+  border-top: 1px solid #303840;
+  padding-top: 0.65rem;
+}
+
+.metadata-field-pair-example code {
+  color: #eef2f5;
+}
+
+.metadata-help-technical-disclosure {
+  grid-column: 1 / -1;
+  margin: 0;
+  border: 1px solid #353d45;
+  border-radius: 0.45rem;
+  padding: 0 0.8rem;
+  background: #131619;
+}
+
+.metadata-help-technical-disclosure > summary {
+  padding: 0.8rem 0;
+}
+
+.metadata-help-technical-content {
+  padding-right: 0;
+  padding-bottom: 0.9rem;
+}
+
+.metadata-help-technical-content > .metadata-field-facts {
+  margin-top: 0;
+}
+
+/* Release performer inheritance keeps the baseline visible and actionable. */
+.performer-inheritance-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  border: 1px solid #415466;
+  border-radius: 0.4rem;
+  padding: 0.8rem 0.9rem;
+  background: #17212a;
+}
+
+.performer-inheritance-banner p {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+}
+
+.performer-record-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+@media (max-width: 760px) {
+  .performer-inheritance-banner {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .performer-record-toolbar-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+/* Release workflow documentation remains usable as both a compact menu aid and a full page. */
+.workflow-menu-card {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.workflow-menu-card > * {
+  margin: 0;
+}
+
+.workflow-menu-path {
+  color: #cbd3da;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.footer-links {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  text-align: right;
+}
+
+.footer-link-button {
+  border: 0;
+  padding: 0;
+  color: #cbd3da;
+  background: transparent;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+.footer-link-button:hover,
+.footer-link-button:focus-visible {
+  color: #fff;
+  background: transparent;
+}

@@ -7,6 +7,8 @@ import {
   getReleaseAboutSuggestions,
 } from "../src/release-about-generator.js";
 
+import { readEditorStyles } from "./support/editor-source.js";
+
 const generatorSource = await readFile(
   new URL(
     "../src/ReleaseAboutGenerator.tsx",
@@ -15,10 +17,7 @@ const generatorSource = await readFile(
   "utf8",
 );
 
-const styles = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styles = await readEditorStyles();
 
 test("template fields expose relevant values selected in the Release Profile", () => {
   const profile = {

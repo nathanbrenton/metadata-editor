@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const styles = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+import { readEditorStyles } from "./support/editor-source.js";
+
+const styles = await readEditorStyles();
 
 test("weights workflow navigation by expected interaction frequency", () => {
   assert.match(

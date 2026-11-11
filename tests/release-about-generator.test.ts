@@ -12,17 +12,17 @@ import {
   releaseProfileCategories,
 } from "../src/release-about-generator.js";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorStyles,
+} from "./support/editor-source.js";
 
 const appSource = await readEditorAppSource();
 const generatorComponentSource = await readFile(
   new URL("../src/ReleaseAboutGenerator.tsx", import.meta.url),
   "utf8",
 );
-const styles = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styles = await readEditorStyles();
 
 test("ships the full 16-template release-about library", () => {
   assert.equal(releaseAboutTemplates.length, 16);

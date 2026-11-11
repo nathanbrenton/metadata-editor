@@ -2,13 +2,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { readEditorAppSourceWithSharedTypes } from "./support/editor-source.js";
+import {
+  readEditorAppSourceWithSharedTypes,
+  readEditorStyles,
+} from "./support/editor-source.js";
 
 const appSource = await readEditorAppSourceWithSharedTypes();
-const styles = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styles = await readEditorStyles();
 
 test("release technical summary carries inventory needed by the UI inspector", () => {
   assert.match(appSource, /type MediaTechnicalInventory = \{/);

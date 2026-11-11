@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   readEditorAppSource,
   readEditorServerSource,
+  readEditorStyles,
 } from "./support/editor-source.js";
 
 const appSource = await readEditorAppSource();
@@ -13,10 +14,7 @@ const assetSource = await readFile(
   new URL("../server/artist-assets.ts", import.meta.url),
   "utf8",
 );
-const styleSource = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styleSource = await readEditorStyles();
 
 test("Library Artist detail assigns ingest-drop photos without reusing release artwork", () => {
   assert.match(appSource, /Primary Artist Photo/);

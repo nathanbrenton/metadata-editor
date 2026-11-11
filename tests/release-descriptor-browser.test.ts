@@ -18,6 +18,8 @@ import {
   searchReleaseDescriptors,
 } from "../src/release-descriptor-ontology.js";
 
+import { readEditorStyles } from "./support/editor-source.js";
+
 const generatorSource = await readFile(
   new URL("../src/ReleaseAboutGenerator.tsx", import.meta.url),
   "utf8",
@@ -26,10 +28,7 @@ const browserSource = await readFile(
   new URL("../src/EditorialDescriptorBrowser.tsx", import.meta.url),
   "utf8",
 );
-const styles = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styles = await readEditorStyles();
 
 test("Release Profile cards open the shared Editorial Descriptor Browser instead of flat descriptor selects", () => {
   assert.match(

@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { readEditorStyles } from "./support/editor-source.js";
+
 const builderSource = await readFile(
   new URL(
     "../src/IngestReleaseBuilder.tsx",
@@ -10,13 +12,7 @@ const builderSource = await readFile(
   "utf8",
 );
 
-const styleSource = await readFile(
-  new URL(
-    "../src/styles.css",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const styleSource = await readEditorStyles();
 
 test(
   "keeps the staging release directory ID synchronized until overridden",

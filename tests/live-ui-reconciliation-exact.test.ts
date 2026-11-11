@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorStyles,
+} from "./support/editor-source.js";
 
 const appSource = await readEditorAppSource();
 const builderSource = await readFile(
   new URL("../src/IngestReleaseBuilder.tsx", import.meta.url),
   "utf8",
 );
-const styles = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styles = await readEditorStyles();
 
 test("Ingest inferred-date evidence is neutral and explicit", () => {
   assert.match(appSource, /className="badge ingest-date-evidence"/);

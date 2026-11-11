@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorStyles,
+} from "./support/editor-source.js";
 
 const appSource = await readEditorAppSource();
 const previewSource = await readFile(
   new URL("../src/HiplingoPreviewPanel.tsx", import.meta.url),
   "utf8",
 );
-const styleSource = await readFile(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styleSource = await readEditorStyles();
 
 test("Library release overview can open the real Hiplingo renderer in-place", () => {
   assert.match(appSource, /HiplingoPreviewPanel/);

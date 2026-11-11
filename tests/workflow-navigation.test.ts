@@ -2,17 +2,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorStyles,
+} from "./support/editor-source.js";
 
 const appSource = readEditorAppSource();
 const navigationSource = readFileSync(
   new URL("../src/WorkflowNavigation.tsx", import.meta.url),
   "utf8",
 );
-const styleSource = readFileSync(
-  new URL("../src/styles.css", import.meta.url),
-  "utf8",
-);
+const styleSource = readEditorStyles();
 
 test("defines the five primary workflow tabs in lifecycle order", () => {
   const orderedIds = Array.from(

@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   readEditorAppSource,
   readEditorServerSource,
+  readEditorStyles,
 } from "./support/editor-source.js";
 
 const appSource = readEditorAppSource();
@@ -26,13 +27,7 @@ const serverSource = readFileSync(
 );
 const apiServerSource = readEditorServerSource();
 
-const styleSource = readFileSync(
-  new URL(
-    "../src/styles.css",
-    import.meta.url,
-  ),
-  "utf8",
-);
+const styleSource = readEditorStyles();
 
 test(
   "offers guided and quick-review staging workflows from candidate inspection",

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import {
+  readEditorAppSource,
+  readEditorStyles,
+} from "./support/editor-source.js";
 
 test("shows configured media roots as workflow-tab hover details", async () => {
   const source = await readFile(
@@ -40,10 +43,7 @@ test("keeps publication storage details available without a default boundary dia
 
 
 test("does not reserve a second workflow row for media paths", async () => {
-  const styles = await readFile(
-    new URL("../src/styles.css", import.meta.url),
-    "utf8",
-  );
+  const styles = await readEditorStyles();
 
   assert.doesNotMatch(styles, /\.workflow-location-strip/);
   assert.doesNotMatch(styles, /\.workflow-location-scroll/);
