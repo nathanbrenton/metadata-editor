@@ -8,6 +8,7 @@ import {
   languageCodeOptions,
   musicalKeyOptions,
   performanceRoleOptions,
+  provenanceOriginOptions,
   releaseStatusOptions,
   releaseTypeOptions,
   releaseVersionOptions,
@@ -1231,6 +1232,120 @@ export const metadataFieldRegistry:
         ],
         help:
           "Mark true only when the track contains explicit content under the release's distribution policy.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.provenance.origin",
+      canonicalName: "release.provenance.origin",
+      label: "Provenance (Human / AI)",
+      description:
+        "Public creative-provenance tag shown as a Human, Some AI, or AI bubble on Hiplingo.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.provenance.origin",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      editor: {
+        control: "select-or-custom",
+        options: [...provenanceOriginOptions],
+        customPlaceholder:
+          "Unrecognized values show no public bubble",
+      },
+      presentation: {
+        group: "Release & Track Identity",
+        order: 82,
+        commonValues: [...provenanceOriginOptions],
+        examples: [
+          "human",
+          "ai-assisted",
+          "ai-generated-text-prompt",
+        ],
+        help:
+          "Choose how this release's audio was made. Tracks without their own value use this as their default, and the public release bubble summarizes its tracks: all Human shows Human, all AI shows AI, anything else with AI involvement shows Some AI. Leave blank to show no bubble.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "release.provenance.note",
+      canonicalName: "release.provenance.note",
+      label: "Provenance Note",
+      description:
+        "Optional short public sentence explaining the provenance tag, such as which parts used AI.",
+      scope: "release",
+      storageFileRole: "release",
+      tomlPath: "release.provenance.note",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Release & Track Identity",
+        order: 83,
+        examples: [
+          "AI-generated backing vocals; all instruments performed live.",
+        ],
+        help:
+          "Public. Shown with the provenance bubble. Keep it to one factual sentence; a track that sets its own Provenance uses its own note.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.provenance.origin",
+      canonicalName: "track.provenance.origin",
+      label: "Provenance (Human / AI)",
+      description:
+        "Public creative-provenance tag shown as a Human, Some AI, or AI bubble on Hiplingo.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.provenance.origin",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: true,
+      editor: {
+        control: "select-or-custom",
+        options: [...provenanceOriginOptions],
+        customPlaceholder:
+          "Unrecognized values show no public bubble",
+      },
+      presentation: {
+        group: "Release & Track Identity",
+        order: 82,
+        commonValues: [...provenanceOriginOptions],
+        examples: [
+          "human",
+          "ai-assisted",
+          "ai-generated-text-prompt",
+        ],
+        help:
+          "Choose how this track's audio was made. Leave blank to use the release value. human = no AI-generated audio; ai-assisted = some AI-generated or AI-altered audio (Some AI); ai-generated* = audio generated entirely by AI.",
+      },
+      displayPolicy: "auto",
+    },
+    {
+      id: "track.provenance.note",
+      canonicalName: "track.provenance.note",
+      label: "Provenance Note",
+      description:
+        "Optional short public sentence explaining the provenance tag, such as which parts used AI.",
+      scope: "track",
+      storageFileRole: "track",
+      tomlPath: "track.provenance.note",
+      valueType: "string",
+      required: false,
+      repeatable: false,
+      inherited: false,
+      presentation: {
+        group: "Release & Track Identity",
+        order: 83,
+        examples: [
+          "AI-generated backing vocals; all instruments performed live.",
+        ],
+        help:
+          "Public. Shown with the provenance bubble. Keep it to one factual sentence; used only when this track sets its own Provenance.",
       },
       displayPolicy: "auto",
     },

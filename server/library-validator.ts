@@ -13,6 +13,10 @@ import {
 import path from "node:path";
 
 import { parse } from "smol-toml";
+import {
+  PROVENANCE_ORIGIN_VALUES,
+  isProvenanceOrigin,
+} from "@hiplingo/media-player/provenance";
 
 import {
   detectFfmpegCapabilities,
@@ -587,6 +591,59 @@ function validateRequiredFields(
         );
       }
     }
+  }
+
+  return issues;
+}
+
+/*
+ * Provenance is a public disclosure. A value outside the shared vocabulary
+ * would silently publish no bubble, so surface it for review.
+ */
+function validateProvenance(
+  release: ReleaseScanResult,
+  documents: ReleaseDocuments,
+): LibraryValidationIssue[] {
+  const issues: LibraryValidationIssue[] = [];
+  const check = (
+    document: { parsed: unknown; relativePath: string } | undefined,
+    tomlPath: string,
+  ) => {
+    if (!document) {
+      return;
+    }
+
+    const value = readPath(document.parsed, tomlPath);
+
+    if (
+      value === undefined ||
+      (typeof value === "string" && !value.trim()) ||
+      isProvenanceOrigin(value)
+    ) {
+      return;
+    }
+
+    issues.push(
+      issue(
+        "unrecognized-provenance-origin",
+        "warning",
+        document.relativePath,
+        `${tomlPath} is ${JSON.stringify(value)}, which is not a recognized provenance value. Hiplingo will show no provenance bubble for it.`,
+        `Use one of: ${PROVENANCE_ORIGIN_VALUES.join(", ")}.`,
+      ),
+    );
+  };
+
+  check(
+    documents.release.get("release.toml"),
+    "release.provenance.origin",
+  );
+
+  for (const track of release.tracks) {
+    check(
+      documents.tracks.get(track.id)?.get("track.toml"),
+      "track.provenance.origin",
+    );
   }
 
   return issues;
@@ -1509,6 +1566,7 @@ async function validateRelease(
     ...validateRequiredDocuments(release),
     ...validateRequiredFields(release, parsed.documents),
     ...validateReferencesAndIdentity(release, parsed.documents),
+    ...validateProvenance(release, parsed.documents),
     ...validateNumbering(release, parsed.documents),
     ...validateUnexpectedFiles(release, entries),
     ...(await validateAssets(mediaRoot, release, parsed.documents)),

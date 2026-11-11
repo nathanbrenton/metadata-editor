@@ -353,3 +353,57 @@ test("warns when track artwork points back to release-level artwork", async () =
     });
   }
 });
+
+test("warns about an unrecognized provenance origin and accepts shared values", async () => {
+  const fixture = await createReleaseFixture();
+  const releaseTomlPath = path.join(
+    fixture.releasePath,
+    "release.toml",
+  );
+  const trackTomlPath = path.join(
+    fixture.releasePath,
+    "tracks",
+    "artist_01_first-track",
+    "track.toml",
+  );
+
+  try {
+    await writeFile(
+      releaseTomlPath,
+      `${await readFile(releaseTomlPath, "utf8")}\n[release.provenance]\norigin = "human"\n`,
+    );
+    await writeFile(
+      trackTomlPath,
+      `${await readFile(trackTomlPath, "utf8")}\n[track.provenance]\norigin = "mostly robots"\n`,
+    );
+
+    const report = await validateMediaLibrary(
+      fixture.mediaRoot,
+      {
+        releaseId: fixture.releaseId,
+        ffmpegCapabilities: readyCapabilities,
+      },
+    );
+    const provenanceIssues =
+      report.releases[0]?.issues.filter(
+        (item) =>
+          item.code === "unrecognized-provenance-origin",
+      ) ?? [];
+
+    assert.equal(provenanceIssues.length, 1);
+    assert.equal(provenanceIssues[0]?.severity, "warning");
+    assert.match(
+      provenanceIssues[0]?.relativePath ?? "",
+      /artist_01_first-track\/track\.toml$/,
+    );
+    assert.match(
+      provenanceIssues[0]?.suggestion ?? "",
+      /ai-generated-audio-prompt/,
+    );
+  } finally {
+    await rm(fixture.temporaryRoot, {
+      recursive: true,
+      force: true,
+    });
+  }
+});

@@ -1,6 +1,9 @@
 import { hiplingoLogoUrl } from "@hiplingo/brand";
 import {
   ListenerMetadataViewer,
+  ProvenanceBadge,
+  resolveReleaseProvenance,
+  resolveTrackProvenance,
   type ListenerMetadataRelease,
   type ListenerMetadataTrack,
   type MetadataVerbosity,
@@ -35,6 +38,7 @@ import {
 } from "./library-metadata-preview.js";
 import "@hiplingo/media-player/compact-now-playing-bar.css";
 import "@hiplingo/media-player/listener-metadata-viewer.css";
+import "@hiplingo/media-player/provenance-badge.css";
 import "./listener-metadata-viewer-host.css";
 
 import {
@@ -12222,6 +12226,28 @@ function LibraryReleaseOverview({
   const releaseDateLabel = release.releaseDate
     ? release.releaseDate.slice(0, 10)
     : formatReleaseDate(release.id);
+  /*
+   * Provenance bubbles use the same shared resolver as Hiplingo, so the
+   * Library shows exactly what the public site will show after publishing.
+   */
+  const releaseProvenanceMetadata =
+    detail.documents.find(
+      (document) =>
+        document.scope === "release" &&
+        document.filename === "release.toml",
+    )?.parsed.release;
+  const trackProvenanceMetadata = (trackId: string) =>
+    detail.documents.find(
+      (document) =>
+        document.trackId === trackId &&
+        document.filename === "track.toml",
+    )?.parsed.track;
+  const releaseProvenance = resolveReleaseProvenance(
+    releaseProvenanceMetadata,
+    release.tracks.map((track) =>
+      trackProvenanceMetadata(track.id),
+    ),
+  );
 
   const playableTracks = release.tracks.filter(
     trackHasAudioPreview,
@@ -12356,6 +12382,19 @@ function LibraryReleaseOverview({
             )}
           </div>
 
+          <div className="library-release-overview-provenance">
+            {releaseProvenance ? (
+              <ProvenanceBadge
+                provenance={releaseProvenance}
+                variant="full"
+              />
+            ) : (
+              <small className="library-provenance-untagged">
+                Provenance not tagged — no Human / AI bubble will be published.
+              </small>
+            )}
+          </div>
+
           {releaseDescription ? (
             <p className="library-release-overview-description">
               {releaseDescription}
@@ -12394,6 +12433,10 @@ function LibraryReleaseOverview({
                   document.trackId === track.id,
               );
 
+            const trackProvenance = resolveTrackProvenance(
+              trackProvenanceMetadata(track.id),
+              releaseProvenanceMetadata,
+            );
             const title = readTrackDisplayTitle(
               track.id,
               trackDocuments,
@@ -12528,6 +12571,14 @@ function LibraryReleaseOverview({
                       : "Playback unavailable"}
                   </small>
                 </span>
+
+                {trackProvenance ? (
+                  <ProvenanceBadge provenance={trackProvenance} />
+                ) : (
+                  <small className="library-provenance-untagged">
+                    Not tagged
+                  </small>
+                )}
               </li>
             );
           })}

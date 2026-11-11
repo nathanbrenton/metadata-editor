@@ -1,4 +1,7 @@
 import {
+  PROVENANCE_ORIGIN_VALUES,
+} from "@hiplingo/media-player/provenance";
+import {
   recommendedTrackVersionOptions,
 } from "../shared/track-title.js";
 
@@ -41,6 +44,14 @@ export const releaseStatusOptions = [
   "withdrawn",
   "archived",
 ] as const;
+
+/*
+ * Creative provenance (Human / Some AI / AI) is a closed public vocabulary
+ * owned by @hiplingo/media-player so the editor and the public site can
+ * never disagree about what a stored origin means.
+ */
+export const provenanceOriginOptions: readonly string[] =
+  PROVENANCE_ORIGIN_VALUES;
 
 export const releaseVersionOptions = [
   "Original Release",

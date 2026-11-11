@@ -63,6 +63,10 @@ export const trackReleaseInheritancePaths =
       "release.explicit",
     ],
     [
+      "track.provenance.origin",
+      "release.provenance.origin",
+    ],
+    [
       "track.rights.copyright",
       "release.rights.copyright",
     ],

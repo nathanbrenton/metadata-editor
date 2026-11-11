@@ -16517,6 +16517,18 @@ main:has(.persistent-library-player) {
   font-size: 0.75rem;
 }
 
+.library-release-overview-provenance {
+  display: flex;
+  align-items: center;
+  min-height: 1.5rem;
+}
+
+.library-provenance-untagged {
+  color: #7f8b95;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
 .library-release-overview-description {
   max-width: 74ch;
   margin: 0;
@@ -16556,7 +16568,8 @@ main:has(.persistent-library-player) {
   grid-template-columns:
     2rem
     3.25rem
-    minmax(0, 1fr);
+    minmax(0, 1fr)
+    auto;
   align-items: center;
   gap: 0.7rem;
   padding: 0.55rem 0.75rem;

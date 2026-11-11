@@ -1000,3 +1000,35 @@ This comparison does not read `media-library` from Hiplingo and does not deploy,
 publish, or mutate production. If production later adopts restrictive frame
 headers, the Published pane may need an explicit same-renderer remote-data mode;
 that is separate from the private Working preview bridge.
+
+## Creative provenance (Human / Some AI / AI)
+
+Releases and tracks can carry a public provenance tag that Hiplingo shows as a
+bubble:
+
+```toml
+[release.provenance]
+origin = "human"
+
+[track.provenance]
+origin = "ai-assisted"
+note = "AI-generated backing vocals; everything else performed live."
+```
+
+- `origin` values and their public tier are defined once in
+  `../packages/media-player/src/provenance.ts`. `human` → **Human**;
+  `ai-assisted` → **Some AI**; `ai-generated`, `ai-generated-text-prompt`,
+  `ai-generated-audio-prompt` → **AI**. Add a new value by appending one entry
+  there; the editor dropdown, validator, and site pick it up.
+- The release value is the default for its tracks. In a track's Overview the
+  inherited value is shown with **Create track override**.
+- The release bubble summarizes its tracks: all Human → Human, all AI → AI,
+  any other AI involvement → Some AI. If a track is untagged, the release never
+  claims Human or AI.
+- Blank or unrecognized values publish no bubble. `validate:library` reports
+  `unrecognized-provenance-origin` as a warning.
+- Add the fields from the release or track **Overview → Edit metadata → Add
+  metadata fields**. The Library release view shows the resulting bubbles (or
+  "Not tagged") using the same resolver as the public site. The fields are
+  public and flow into `release.json` / `track.json` under
+  `metadata.provenance` on the next **Update Web Package**.
