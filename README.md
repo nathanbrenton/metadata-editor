@@ -40,7 +40,7 @@ Implemented capabilities:
 - Credit track-level samples, interpolations, musical quotations, and lyrical quotations with structured source data and liner-note wording
 - Track private sample-clearance status, master-use and publishing approval, agreement references, territories, and expiration dates
 
-Scalar edits are currently browser-local only. Persisting edits to existing TOML files is planned but not yet implemented.
+Scalar edits are drafted in the browser and persisted to the existing TOML file through a concurrency-checked, backup-preserving save (`/api/library/save-scalar-metadata`).
 
 ## Workspace Layout
 
@@ -662,9 +662,7 @@ Each document provides:
 - blank-value indication
 - expandable raw TOML
 
-Supported browser-local draft editing currently includes strings, numbers, and booleans. Arrays and objects remain read-only.
-
-No scalar edit save endpoint exists yet.
+Draft editing supports strings, numbers, booleans, and string arrays. Objects are edited through their individual fields, and credit, sample, and clearance records through their dedicated record editors. Drafts are saved through `/api/library/save-scalar-metadata`.
 
 ## TOML Rules
 
