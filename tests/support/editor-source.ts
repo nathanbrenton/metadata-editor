@@ -61,3 +61,29 @@ export function readEditorAppSource(): string {
     )
     .join("\n");
 }
+
+/*
+ * The client re-uses API types owned by server/ and shared/ modules
+ * (see src/app/types.ts). Tests that assert on the shape of those types
+ * read the client together with the modules it imports them from.
+ */
+export function readEditorAppSourceWithSharedTypes(): string {
+  const typesSource = readFileSync(
+    path.join(sourceRoot, "app/types.ts"),
+    "utf8",
+  );
+  const sharedTypeFiles = [
+    ...typesSource.matchAll(
+      /from "(\.\.\/\.\.\/(?:server|shared)\/[^"]+)\.js"/g,
+    ),
+  ].map((match) =>
+    path.resolve(sourceRoot, "app", `${match[1]}.ts`),
+  );
+
+  return [
+    readEditorAppSource(),
+    ...[...new Set(sharedTypeFiles)].map((file) =>
+      readFileSync(file, "utf8"),
+    ),
+  ].join("\n");
+}

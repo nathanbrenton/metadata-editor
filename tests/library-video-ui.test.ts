@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { readEditorAppSource } from "./support/editor-source.js";
+import { readEditorAppSourceWithSharedTypes } from "./support/editor-source.js";
 
-const appSource = readEditorAppSource();
+const appSource = readEditorAppSourceWithSharedTypes();
 const styleSource = readFileSync(
   new URL("../src/styles.css", import.meta.url),
   "utf8",
