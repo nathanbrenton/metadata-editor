@@ -52,6 +52,9 @@ import type {
 import {
   findStaleCatalogDocuments,
 } from "../server/public-catalog-documents.js";
+import {
+  publicMetadataContractVersion,
+} from "../server/public-metadata-contract.js";
 
 const readyCapabilities: FfmpegCapabilities = {
   available: true,
@@ -639,6 +642,12 @@ test("builds a sanitized HLS public package without canonical/private files", as
 
     assert.notEqual(plan.status, "blocked");
     assert.equal(plan.publication.state, "not-published");
+    // The projection revision is fingerprinted, so changing what is public
+    // offers every published release an update.
+    assert.equal(
+      plan.contract.metadataContractVersion,
+      publicMetadataContractVersion,
+    );
     assert.equal(
       plan.publication.currentContentFingerprint.length,
       64,

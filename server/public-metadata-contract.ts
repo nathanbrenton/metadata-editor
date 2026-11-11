@@ -11,6 +11,19 @@
  * purpose, add it to the private list so validation stays quiet.
  */
 
+/*
+ * Revision of the public projection (these lists plus the documents embedded
+ * in catalog.json). It is part of every release's publication fingerprint:
+ * bump it whenever a change here alters what an already-published release
+ * would contain, so each release is offered "Update Web Package" instead of
+ * being reported as up to date.
+ *
+ *   1  deny-list sanitizers
+ *   2  allow-list; track artwork paths and release.editorial withheld;
+ *      catalog.json embeds release and track documents
+ */
+export const publicMetadataContractVersion = 2;
+
 const personCredit = ["name", "role", "sort_name"] as const;
 
 function each(

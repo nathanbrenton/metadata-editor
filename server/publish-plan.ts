@@ -2,6 +2,9 @@ import {
   createHash,
 } from "node:crypto";
 import {
+  publicMetadataContractVersion,
+} from "./public-metadata-contract.js";
+import {
   lstat,
   readFile,
 } from "node:fs/promises";
@@ -117,6 +120,8 @@ export type PublishPlan = {
     name: "audio-player-public-package";
     version: 6;
     catalogSchemaVersion: 1;
+    /* See publicMetadataContractVersion. */
+    metadataContractVersion: number;
     mediaBaseUrl: "/media";
     trackResources: {
       stream: {
@@ -1437,6 +1442,7 @@ export async function buildPublishPlan(
     name: "audio-player-public-package",
     version: 6,
     catalogSchemaVersion: 1,
+    metadataContractVersion: publicMetadataContractVersion,
     mediaBaseUrl: "/media",
     trackResources: {
       stream: {

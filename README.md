@@ -1064,6 +1064,11 @@ notes, the editorial authoring profile). Any other key is withheld from the
 Web Package and reported by Library validation as
 `unclassified-public-metadata` until it is added to one of the two lists.
 
+`publicMetadataContractVersion` in the same file is part of each release's
+publication fingerprint. Bump it when a change to the lists alters what an
+already-published release would contain; every published release then shows
+**Update Web Package** instead of "up to date".
+
 ## One-request public catalog
 
 Each `catalog.json` entry embeds that release's public documents:
