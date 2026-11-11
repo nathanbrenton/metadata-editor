@@ -2,11 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { readEditorAppSource } from "./support/editor-source.js";
+
 test("offers a dry-run-first guarded release identity and directory rename", async () => {
-  const source = await readFile(
-    new URL("../src/App.tsx", import.meta.url),
-    "utf8",
-  );
+  const source = await readEditorAppSource();
 
   assert.match(source, /Review release rename/);
   assert.match(source, /Preview release rename plan/);

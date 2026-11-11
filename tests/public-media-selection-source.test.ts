@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { readEditorAppSource } from "./support/editor-source.js";
+
 const planSource = readFileSync(
   new URL("../server/publish-plan.ts", import.meta.url),
   "utf8",
@@ -26,10 +28,7 @@ const scannerSource = readFileSync(
   new URL("../server/scanner.ts", import.meta.url),
   "utf8",
 );
-const appSource = readFileSync(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+const appSource = readEditorAppSource();
 const deploymentSource = readFileSync(
   new URL("../server/published-media-deployment.ts", import.meta.url),
   "utf8",

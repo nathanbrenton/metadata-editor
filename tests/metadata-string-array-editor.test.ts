@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const appSource = readFileSync(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+import { readEditorAppSource } from "./support/editor-source.js";
+
+const appSource = readEditorAppSource();
 
 test("preserves spaces and trailing newlines while editing string-array metadata", () => {
   const editorFunctionMatch = appSource.match(

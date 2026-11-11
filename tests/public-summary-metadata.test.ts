@@ -6,10 +6,9 @@ import {
   findMetadataField,
 } from "../server/metadata-registry.js";
 
-const appSource = await readFile(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+import { readEditorAppSource } from "./support/editor-source.js";
+
+const appSource = await readEditorAppSource();
 const publisherSource = await readFile(
   new URL("../server/publish-writer.ts", import.meta.url),
   "utf8",

@@ -107,6 +107,24 @@ The backend binds only to localhost during development. The public audio player 
 - Staging Build generation/refresh of canonical Library waveform peaks, plus read-only private playback-MP3/waveform planning and reviewed playback-MP3/HLS (with legacy waveform maintenance fallback) from Publish
 - In-memory multiband waveform generation for native PCM WAV sources, with FFmpeg decode-to-PCM support for other canonical audio formats
 
+#### Frontend source layout
+
+`src/App.tsx` holds only the application shell (`App`). The rest of the
+client lives in `src/app/`:
+
+- `types.ts` — API/response types shared across workspaces
+- `foundation.tsx` — lazy boundaries, constants, and small shared helpers
+- `StagingWorkspace.tsx`, `PublishWorkspace.tsx`, `ingest-views.tsx`,
+  `library-views.tsx`, `ReleaseCard.tsx` — one module per workspace surface
+- `ReleaseMetadataDetailView.tsx`, `MetadataDocumentTable.tsx`,
+  `metadata-value-cells.tsx`, `credit-record-editors.tsx`,
+  `metadata-field-guidance.tsx`, `metadata-records.tsx` — the metadata editor
+- `MetadataCompatibilityView.tsx`, `technical-audit.tsx`,
+  `library-panels.tsx`, `release-display.tsx` — supporting views and helpers
+
+Source-shape tests read the combined client through
+`tests/support/editor-source.ts` rather than a single file.
+
 ### Backend
 
 - Node.js

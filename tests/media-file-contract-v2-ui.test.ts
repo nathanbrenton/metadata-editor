@@ -7,10 +7,9 @@ import {
   preferredAudioMasterExtensions,
 } from "../shared/media-file-spec.js";
 
-const appSource = await readFile(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+import { readEditorAppSource } from "./support/editor-source.js";
+
+const appSource = await readEditorAppSource();
 const helpSource = await readFile(
   new URL("../src/workflow-help-content.ts", import.meta.url),
   "utf8",

@@ -11,6 +11,8 @@ import type {
   IngestFileInspection,
 } from "../shared/ingest-types.js";
 
+import { readEditorAppSource } from "./support/editor-source.js";
+
 function audioFile(filename: string): IngestFileInspection {
   return {
     relativePath: `candidate/${filename}`,
@@ -134,10 +136,7 @@ test("preserves an explicitly customized staging directory ID", () => {
   assert.equal(updated.releaseId, "manual-release-directory");
 });
 
-const appSource = await readFile(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+const appSource = await readEditorAppSource();
 const builderSource = await readFile(
   new URL("../src/IngestReleaseBuilder.tsx", import.meta.url),
   "utf8",

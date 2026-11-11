@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const appSource = readFileSync(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+import { readEditorAppSource } from "./support/editor-source.js";
+
+const appSource = readEditorAppSource();
 
 test("Library tile sizing offers finer increments and starts near the middle", () => {
   assert.match(

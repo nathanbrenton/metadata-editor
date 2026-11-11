@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { readEditorAppSource } from "./support/editor-source.js";
+
 const builderSource = readFileSync(
   new URL("../src/IngestReleaseBuilder.tsx", import.meta.url),
   "utf8",
@@ -18,10 +20,7 @@ const helpSource = readFileSync(
   new URL("../src/workflow-help-content.ts", import.meta.url),
   "utf8",
 );
-const appSource = readFileSync(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+const appSource = readEditorAppSource();
 
 test("Artwork & files exposes current Library artwork and one explicit replacement confirmation", () => {
   assert.match(builderSource, /existingArtwork=\{targetStatus\?\.existingArtwork \?\? \[\]\}/);

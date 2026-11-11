@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
+import { readEditorAppSource } from "./support/editor-source.js";
+
 test("shows configured media roots as workflow-tab hover details", async () => {
   const source = await readFile(
     new URL("../src/WorkflowNavigation.tsx", import.meta.url),
@@ -18,10 +20,7 @@ test("shows configured media roots as workflow-tab hover details", async () => {
 });
 
 test("keeps publication storage details available without a default boundary diagram", async () => {
-  const source = await readFile(
-    new URL("../src/App.tsx", import.meta.url),
-    "utf8",
-  );
+  const source = await readEditorAppSource();
 
   assert.match(
     source,

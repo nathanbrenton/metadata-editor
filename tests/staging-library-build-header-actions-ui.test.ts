@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { readEditorAppSource } from "./support/editor-source.js";
+
 const workspaceSource = readFileSync(
   new URL(
     "../src/StagingLibraryBuildWorkspace.tsx",
@@ -53,10 +55,7 @@ test("existing-release Staging exposes explicit metadata editing and Library bro
     new URL("../src/StagingLibraryBuildWorkspace.tsx", import.meta.url),
     "utf8",
   );
-  const appSource = readFileSync(
-    new URL("../src/App.tsx", import.meta.url),
-    "utf8",
-  );
+  const appSource = readEditorAppSource();
 
   assert.match(workspaceSource, /onEditMetadata: \(\) => void/);
   assert.match(workspaceSource, />\s*Edit metadata\s*</);

@@ -7,10 +7,9 @@ import {
   productionTypeCommonValues,
 } from "../src/metadata-help-common-values.js";
 
-const appSource = await readFile(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+import { readEditorAppSource } from "./support/editor-source.js";
+
+const appSource = await readEditorAppSource();
 
 test(
   "offers practical production-type guidance without network lookup",

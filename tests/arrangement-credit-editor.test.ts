@@ -8,10 +8,9 @@ import {
   isArrangementContributorRole,
 } from "../server/metadata-vocabularies.js";
 
-const appSource = readFileSync(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+import { readEditorAppSource } from "./support/editor-source.js";
+
+const appSource = readEditorAppSource();
 
 const expectedRoles = [
   "arranger",

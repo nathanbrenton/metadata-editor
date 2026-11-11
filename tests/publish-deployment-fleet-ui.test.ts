@@ -8,15 +8,14 @@ import {
   fileURLToPath,
 } from "node:url";
 
+import { readEditorAppSource } from "./support/editor-source.js";
+
 const root = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
 
-const appSource = await readFile(
-  path.join(root, "src/App.tsx"),
-  "utf8",
-);
+const appSource = await readEditorAppSource();
 const serverSource = await readFile(
   path.join(root, "server/index.ts"),
   "utf8",

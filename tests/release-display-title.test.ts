@@ -6,10 +6,9 @@ import {
   resolveReleaseDisplayTitle,
 } from "../src/release-display-title.js";
 
-const appSource = await readFile(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+import { readEditorAppSource } from "./support/editor-source.js";
+
+const appSource = await readEditorAppSource();
 
 test("preserves the exact casing of an authored release title", () => {
   assert.equal(

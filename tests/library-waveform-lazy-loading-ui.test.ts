@@ -4,18 +4,14 @@ import {
 } from "node:fs/promises";
 import test from "node:test";
 
-const appSource = await readFile(
-  new URL(
-    "../src/App.tsx",
-    import.meta.url,
-  ),
-  "utf8",
-);
+import { readEditorAppSource } from "./support/editor-source.js";
+
+const appSource = await readEditorAppSource();
 
 test("defers the optional Library Waveform browser out of the initial application chunk", () => {
   assert.doesNotMatch(
     appSource,
-    /import \{[\s\S]*LibraryWaveformView,[\s\S]*from "\.\/LibraryWaveformView\.js"/,
+    /import \{[\s\S]*LibraryWaveformView,[\s\S]*from "\.\.\/LibraryWaveformView\.js"/,
   );
   assert.match(
     appSource,
@@ -23,7 +19,7 @@ test("defers the optional Library Waveform browser out of the initial applicatio
   );
   assert.match(
     appSource,
-    /await import\(\s*\"\.\/LibraryWaveformView\.js\"\s*\)/,
+    /await import\(\s*\"\.\.\/LibraryWaveformView\.js\"\s*\)/,
   );
   assert.doesNotMatch(
     appSource,
@@ -31,7 +27,7 @@ test("defers the optional Library Waveform browser out of the initial applicatio
   );
   assert.match(
     appSource,
-    /const LibraryWaveformView = lazy\(async \(\) => \{[\s\S]*import\([\s\S]*"\.\/LibraryWaveformView\.js"/,
+    /const LibraryWaveformView = lazy\(async \(\) => \{[\s\S]*import\([\s\S]*"\.\.\/LibraryWaveformView\.js"/,
   );
   assert.match(
     appSource,

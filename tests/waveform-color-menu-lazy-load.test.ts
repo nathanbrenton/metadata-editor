@@ -2,15 +2,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const app = readFileSync(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+import { readEditorAppSource } from "./support/editor-source.js";
+
+const app = readEditorAppSource();
 
 test("waveform color menu is deferred behind a lazy boundary", () => {
   assert.doesNotMatch(
     app,
-    /import \{ WaveformColorMenuCard \} from "\.\/WaveformColorMenuCard\.js";/,
+    /import \{ WaveformColorMenuCard \} from "\.\.\/WaveformColorMenuCard\.js";/,
   );
 
   assert.match(
@@ -20,7 +19,7 @@ test("waveform color menu is deferred behind a lazy boundary", () => {
 
   assert.match(
     app,
-    /await import\(\s*"\.\/WaveformColorMenuCard\.js"\s*\)/,
+    /await import\(\s*"\.\.\/WaveformColorMenuCard\.js"\s*\)/,
   );
 
   assert.equal(

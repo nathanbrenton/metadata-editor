@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const appSource = await readFile(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+import { readEditorAppSource } from "./support/editor-source.js";
+
+const appSource = await readEditorAppSource();
 const styles = await readFile(
   new URL("../src/styles.css", import.meta.url),
   "utf8",
@@ -40,7 +39,7 @@ test("Staging keeps Choose ingest candidate inside the explicit Ingest candidate
 test("Publish keeps technical storage roots out of the default Step 4 header", () => {
   const publish = appSource.slice(
     appSource.indexOf("function PublishWorkspace"),
-    appSource.indexOf("type LibraryReleaseViewMode"),
+    appSource.indexOf("\ntype LibraryReleaseViewMode"),
   );
 
   assert.match(

@@ -12,10 +12,9 @@ import {
   releaseProfileCategories,
 } from "../src/release-about-generator.js";
 
-const appSource = await readFile(
-  new URL("../src/App.tsx", import.meta.url),
-  "utf8",
-);
+import { readEditorAppSource } from "./support/editor-source.js";
+
+const appSource = await readEditorAppSource();
 const generatorComponentSource = await readFile(
   new URL("../src/ReleaseAboutGenerator.tsx", import.meta.url),
   "utf8",
@@ -268,7 +267,7 @@ test("Release About Generator is lazy-loaded out of the primary App chunk", () =
   );
   assert.match(
     appSource,
-    /import\(\s*"\.\/ReleaseAboutGenerator\.js"\s*\)/,
+    /import\(\s*"\.\.\/ReleaseAboutGenerator\.js"\s*\)/,
   );
   assert.match(
     appSource,
